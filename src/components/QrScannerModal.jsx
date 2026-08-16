@@ -1,0 +1,283 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, TextInput, Modal, StyleSheet } from 'react-native';
+import { X, QrCode, Camera, Check, Building } from 'lucide-react';
+import { Html5QrcodeScanner } from 'html5-qrcode';
+import { decryptRestaurantId } from '../services/api';
+
+export default function QrScannerModal({ visible, onClose, onSelectScanResult, activeRestaurantId }) {
+  const [manualText, setManualText] = useState('');
+
+  const parseQrText = (decodedText) => {
+    let restId = activeRestaurantId || 1;
+    let tableId = 1;
+
+    try {
+      if (decodedText.startsWith('{')) {
+        const obj = JSON.parse(decodedText);
+        if (obj.restaurantId) restId = Number(obj.restaurantId);
+        if (obj.tableId) tableId = Number(obj.tableId);
+        return { restId, tableId };
+      }
+    } catch (e) {}
+
+    const restMatch = decodedText.match(/restaurantId=(\d+)/i);
+    const encMatch = decodedText.match(/encRestId=([^&]+)/i);
+    const tableMatch = decodedText.match(/tableId=(\d+)/i);
+
+    if (restMatch) {
+      restId = Number(restMatch[1]);
+    } else if (encMatch) {
+      restId = decryptRestaurantId(decodeURIComponent(encMatch[1]));
+    }
+
+    if (tableMatch) tableId = Number(tableMatch[1]);
+
+    if (!tableMatch && !isNaN(Number(decodedText))) {
+      tableId = Number(decodedText);
+    }
+
+    return { restId, tableId };
+  };
+
+  useEffect(() => {
+    if (visible) {
+      const scanner = new Html5QrcodeScanner(
+        'qr-reader',
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        /* verbose= */ false
+      );
+
+      scanner.render(
+        (decodedText) => {
+          scanner.clear();
+          const parsed = parseQrText(decodedText);
+          onSelectScanResult(parsed.restId, parsed.tableId);
+          onClose();
+        },
+        (error) => {
+          // ignore scan frame errors
+        }
+      );
+
+      return () => {
+        try {
+          scanner.clear();
+        } catch (e) {}
+      };
+    }
+  }, [visible]);
+
+  if (!visible) return null;
+
+  const handleManualSubmit = () => {
+    if (!manualText.trim()) return;
+    const parsed = parseQrText(manualText);
+    onSelectScanResult(parsed.restId, parsed.tableId);
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.overlay}>
+        <View style={styles.modalBox}>
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.titleRow}>
+              <QrCode size={20} color="#10b981" />
+              <Text style={styles.title}>Scan Restaurant Table QR</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+              <X size={20} color="#94a3b8" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Camera Scanner Container */}
+          <View style={styles.scannerWrapper}>
+            <div id="qr-reader" style={{ width: '100%', borderRadius: 12, overflow: 'hidden' }} />
+          </View>
+
+          {/* Demo QR Simulation Pills for Multiple Outlets */}
+          <View style={styles.quickSelectSection}>
+            <Text style={styles.sectionLabel}>Test QR Scans for Outlets:</Text>
+            
+            {/* Restaurant 1 Demo Pills */}
+            <View style={styles.outletBlock}>
+              <Text style={styles.outletName}>🍷 Menza Fine Dining (Outlet #1)</Text>
+              <View style={styles.tablesPillRow}>
+                {[1, 2, 3, 4].map((tNum) => (
+                  <TouchableOpacity
+                    key={`r1_t${tNum}`}
+                    style={styles.tablePillRest1}
+                    onPress={() => {
+                      onSelectScanResult(1, tNum);
+                      onClose();
+                    }}
+                  >
+                    <Text style={styles.tablePillTextRest1}>Table #{tNum}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Restaurant 2 Demo Pills */}
+            <View style={styles.outletBlock}>
+              <Text style={styles.outletName}>☕ Menza Express Cafe (Outlet #2)</Text>
+              <View style={styles.tablesPillRow}>
+                {[101, 102, 103, 104].map((tNum) => (
+                  <TouchableOpacity
+                    key={`r2_t${tNum}`}
+                    style={styles.tablePillRest2}
+                    onPress={() => {
+                      onSelectScanResult(2, tNum);
+                      onClose();
+                    }}
+                  >
+                    <Text style={styles.tablePillTextRest2}>Cafe Table #{tNum}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+
+          {/* Manual Input Fallback */}
+          <View style={styles.manualSection}>
+            <TextInput
+              style={styles.manualInput}
+              placeholder="Paste QR URL or ?restaurantId=2&tableId=3"
+              placeholderTextColor="#64748b"
+              value={manualText}
+              onChangeText={setManualText}
+            />
+            <TouchableOpacity style={styles.manualSubmitBtn} onPress={handleManualSubmit}>
+              <Check size={16} color="#0f172a" />
+              <Text style={styles.manualSubmitBtnText}>Open Menu</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalBox: {
+    width: '100%',
+    maxWidth: 480,
+    backgroundColor: '#0f172a',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    gap: 16,
+    maxHeight: '90%',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  title: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  closeBtn: {
+    padding: 4,
+  },
+  scannerWrapper: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 10,
+    alignItems: 'center',
+  },
+  quickSelectSection: {
+    gap: 10,
+  },
+  sectionLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  outletBlock: {
+    gap: 6,
+    backgroundColor: '#1e293b',
+    padding: 10,
+    borderRadius: 10,
+  },
+  outletName: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tablesPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tablePillRest1: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  tablePillTextRest1: {
+    color: '#10b981',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  tablePillRest2: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  tablePillTextRest2: {
+    color: '#f59e0b',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  manualSection: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  manualInput: {
+    flex: 1,
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 42,
+    color: '#ffffff',
+    fontSize: 12,
+  },
+  manualSubmitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#10b981',
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  manualSubmitBtnText: {
+    color: '#0f172a',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+});
