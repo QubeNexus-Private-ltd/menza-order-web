@@ -15,12 +15,13 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [tables, setTables] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [cartItems, setCartItems] = useState([]);
+  const [cart, setCart] = useState({ items: [], totalAmount: 0, cgstAmount: 0, sgstAmount: 0, subTotal: 0, hasUnavailableItems: false });
   const [activeTable, setActiveTable] = useState(null);
   const [activeOrder, setActiveOrder] = useState(null);
   const [staffUser, setStaffUser] = useState(null);
   const [restaurants, setRestaurants] = useState([]);
   const [selectedRestaurant, setSelectedRestaurant] = useState(null);
+  const [orderTypes, setOrderTypes] = useState([]);
 
   // Modals visibility
   const [cartModalOpen, setCartModalOpen] = useState(false);
@@ -40,16 +41,41 @@ export default function App() {
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const urlTableId = searchParams.get('tableId');
-    const encRestId = searchParams.get('encRestId');
-    const urlRestId = searchParams.get('restaurantId') || 1;
+    const encRestId = searchParams.get('encRestId') || searchParams.get('r') || searchParams.get('enc');
+    const legacyRestId = searchParams.get('restaurantId');
 
     const initializeMenu = async () => {
+      // Fetch dynamic order types from OrderTypeMaster API
+      api.getOrderTypes().then((types) => {
+        if (Array.isArray(types) && types.length > 0) {
+          setOrderTypes(types);
+        }
+      });
+
       let targetEncryptedId = encRestId;
-      if (!targetEncryptedId) {
-        const encResult = await api.getEncryptedRestaurantIdFromApi(Number(urlRestId));
+      if (!targetEncryptedId && legacyRestId) {
+        // Scrub plain numeric ID and resolve to encrypted token
+        const encResult = await api.getEncryptedRestaurantIdFromApi(Number(legacyRestId));
         targetEncryptedId = encResult.encryptedRestaurantId;
       }
+      if (!targetEncryptedId) {
+        // Default to encrypted ID for restaurant #1
+        targetEncryptedId = 'uqQTzsGyDJy4_TBVeYXCfg';
+      }
+
       const targetTableNum = urlTableId ? Number(urlTableId) : null;
+
+      // Always synchronize browser address bar to ONLY expose encrypted ID
+      try {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.set('encRestId', targetEncryptedId);
+        if (targetTableNum) cleanUrl.searchParams.set('tableId', targetTableNum);
+        cleanUrl.searchParams.delete('restaurantId');
+        cleanUrl.searchParams.delete('r');
+        cleanUrl.searchParams.delete('enc');
+        window.history.replaceState({}, '', cleanUrl);
+      } catch (e) {}
+
       loadMenuViaEncryptedEndpoint(targetEncryptedId, targetTableNum);
     };
 
@@ -90,12 +116,13 @@ export default function App() {
       const rObj = (restaurants || []).find((r) => r.id === numericRestId) || {
         id: numericRestId,
         name: catData.restaurantName || `Restaurant #${numericRestId}`,
+        encryptedRestaurantId: encryptedRestId
       };
       setSelectedRestaurant(rObj);
 
       // Fetch Cart & Orders
       const cartData = await api.getCart();
-      setCartItems(cartData.items || []);
+      setCart(cartData || { items: [], totalAmount: 0, cgstAmount: 0, sgstAmount: 0, subTotal: 0, hasUnavailableItems: false });
 
       const allOrd = await api.getAllOrders();
       setOrders(allOrd || []);
@@ -109,21 +136,30 @@ export default function App() {
   };
 
   // Triggered whenever customer scans a restaurant QR code or selects a table
-  const handleSelectScanResult = async (restaurantId, tableId) => {
-    const encResult = await api.getEncryptedRestaurantIdFromApi(restaurantId);
-    const encId = encResult.encryptedRestaurantId;
-    if (catalog && catalog.restaurantId !== restaurantId) {
-      // Clear previous cart when switching to a different restaurant location
-      await api.clearCart();
-      setCartItems([]);
+  const handleSelectScanResult = async (restaurantIdentifier, tableId) => {
+    let encId = restaurantIdentifier;
+    // If a numeric ID or number string was passed, resolve to authoritative encrypted ID
+    if (typeof restaurantIdentifier === 'number' || (typeof restaurantIdentifier === 'string' && !isNaN(Number(restaurantIdentifier)))) {
+      const encResult = await api.getEncryptedRestaurantIdFromApi(Number(restaurantIdentifier));
+      encId = encResult.encryptedRestaurantId;
     }
 
-    // Sync URL in the browser address bar
+    const numericRestId = api.decryptRestaurantId(encId);
+
+    if (catalog && catalog.restaurantId !== numericRestId) {
+      // Clear previous cart when switching to a different restaurant location
+      await api.clearCart();
+      setCart({ items: [], totalAmount: 0, cgstAmount: 0, sgstAmount: 0, subTotal: 0, hasUnavailableItems: false });
+    }
+
+    // Sync URL in the browser address bar: STRICTLY ONLY encrypted ID!
     try {
       const url = new URL(window.location.href);
-      url.searchParams.set('restaurantId', restaurantId);
+      url.searchParams.set('encRestId', encId);
       if (tableId) url.searchParams.set('tableId', tableId);
-      url.searchParams.delete('encRestId');
+      url.searchParams.delete('restaurantId');
+      url.searchParams.delete('r');
+      url.searchParams.delete('enc');
       window.history.pushState({}, '', url);
     } catch (e) {}
 
@@ -138,23 +174,35 @@ export default function App() {
   };
 
   // --- CART ACTIONS ---
-  const handleAddToCart = async (itemId, quantity = 1) => {
+  const handleAddToCart = async (itemId, quantity = 1, options = {}) => {
     const restId = catalog ? catalog.restaurantId : 1;
-    await api.addToCart(restId, itemId, quantity);
+    const itemObj = (items || []).find((i) => i.itemId === itemId);
+    await api.addToCart(restId, itemId, quantity, { ...options, item: itemObj });
     const updatedCart = await api.getCart();
-    setCartItems(updatedCart.items || []);
-    showToast('Added dish to cart');
+    setCart(updatedCart || { items: [], totalAmount: 0, cgstAmount: 0, sgstAmount: 0, subTotal: 0, hasUnavailableItems: false });
+    showToast(`🛒 Added ${itemObj ? itemObj.itemName : 'dish'} to basket`);
   };
 
-  const handleUpdateCartQuantity = async (itemId, quantity) => {
-    await api.updateCartQuantity(itemId, quantity);
+  const handleUpdateCartQuantity = async (itemId, quantity, options = {}) => {
+    if (quantity <= 0) {
+      await api.removeFromCart(itemId);
+    } else {
+      await api.updateCartQuantity(itemId, quantity, options);
+    }
     const updatedCart = await api.getCart();
-    setCartItems(updatedCart.items || []);
+    setCart(updatedCart || { items: [], totalAmount: 0, cgstAmount: 0, sgstAmount: 0, subTotal: 0, hasUnavailableItems: false });
+  };
+
+  const handleRemoveFromCart = async (itemId) => {
+    await api.removeFromCart(itemId);
+    const updatedCart = await api.getCart();
+    setCart(updatedCart || { items: [], totalAmount: 0, cgstAmount: 0, sgstAmount: 0, subTotal: 0, hasUnavailableItems: false });
+    showToast('Item removed from cart');
   };
 
   const handleClearCart = async () => {
     await api.clearCart();
-    setCartItems([]);
+    setCart({ items: [], totalAmount: 0, cgstAmount: 0, sgstAmount: 0, subTotal: 0, hasUnavailableItems: false });
     showToast('Cart cleared');
   };
 
@@ -162,7 +210,7 @@ export default function App() {
   const handlePlaceOrder = async (orderPayload) => {
     setLoading(true);
     try {
-      const restId = catalog ? catalog.restaurantId : 1;
+      const restId = (cart && cart.restaurantId) || (catalog ? catalog.restaurantId : 1);
       const result = await api.placeOrder({
         ...orderPayload,
         restaurantId: restId,
@@ -171,7 +219,8 @@ export default function App() {
       if (result && result.orderId) {
         const placed = await api.getOrder(result.orderId);
         setActiveOrder(placed);
-        setCartItems([]);
+        await api.clearCart();
+        setCart({ items: [], totalAmount: 0, cgstAmount: 0, sgstAmount: 0, subTotal: 0, hasUnavailableItems: false });
         setCartModalOpen(false);
         setOrderTrackerOpen(true);
         showToast(`Order #${result.orderId} placed successfully!`);
@@ -185,6 +234,17 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Open Cart: triggers API getCart to retrieve all fresh cart items
+  const handleOpenCart = async () => {
+    try {
+      const freshCart = await api.getCart();
+      if (freshCart) {
+        setCart(freshCart);
+      }
+    } catch (e) {}
+    setCartModalOpen(true);
   };
 
   // --- QUICK TABLE ACTIONS ---
@@ -281,8 +341,8 @@ export default function App() {
         setMode={setMode}
         activeTable={activeTable}
         openScanner={() => setScannerOpen(true)}
-        cartCount={cartItems.reduce((acc, i) => acc + i.quantity, 0)}
-        openCart={() => setCartModalOpen(true)}
+        cartCount={(cart?.items || []).reduce((acc, i) => acc + i.quantity, 0)}
+        openCart={handleOpenCart}
         openOrderTracker={() => setOrderTrackerOpen(true)}
         activeOrder={activeOrder}
         onCallWaiter={handleCallWaiter}
@@ -301,7 +361,8 @@ export default function App() {
           items={items}
           activeTable={activeTable}
           openScanner={() => setScannerOpen(true)}
-          cartItems={cartItems}
+          cartItems={cart?.items || []}
+          openCart={handleOpenCart}
           onAddToCart={handleAddToCart}
           onUpdateCartQuantity={handleUpdateCartQuantity}
           onCallWaiter={handleCallWaiter}
@@ -313,9 +374,22 @@ export default function App() {
           staffUser={staffUser}
           restaurants={restaurants}
           selectedRestaurant={selectedRestaurant}
-          onSelectRestaurant={(rest) => {
+          catalog={catalog}
+          onSelectRestaurant={async (rest) => {
             setSelectedRestaurant(rest);
-            const encId = api.encryptRestaurantId(rest.id);
+            let encId = rest.encryptedRestaurantId;
+            if (!encId) {
+              const encRes = await api.getEncryptedRestaurantIdFromApi(rest.id);
+              encId = encRes.encryptedRestaurantId;
+            }
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.set('encRestId', encId);
+              url.searchParams.delete('restaurantId');
+              url.searchParams.delete('r');
+              url.searchParams.delete('enc');
+              window.history.pushState({}, '', url);
+            } catch (e) {}
             loadMenuViaEncryptedEndpoint(encId);
           }}
           onGenerateOtp={api.generateOtp}
@@ -330,6 +404,7 @@ export default function App() {
           onAddItemToOrder={handleAddItemsToOrder}
           onRefreshData={handleRefreshData}
           onOpenQrGenerator={() => {}}
+          orderTypes={orderTypes}
         />
       )}
 
@@ -337,12 +412,16 @@ export default function App() {
       <CartModal
         visible={cartModalOpen}
         onClose={() => setCartModalOpen(false)}
-        cartItems={cartItems}
+        cart={cart}
+        cartItems={cart?.items || []}
         onUpdateCartQuantity={handleUpdateCartQuantity}
+        onRemoveFromCart={handleRemoveFromCart}
         onClearCart={handleClearCart}
         onPlaceOrder={handlePlaceOrder}
+        onRefreshCart={handleOpenCart}
         activeTable={activeTable}
         catalog={catalog}
+        orderTypes={orderTypes}
         loading={loading}
       />
 
@@ -358,6 +437,7 @@ export default function App() {
         visible={scannerOpen}
         onClose={() => setScannerOpen(false)}
         onSelectScanResult={handleSelectScanResult}
+        activeEncryptedId={catalog ? catalog.encryptedRestaurantId : 'uqQTzsGyDJy4_TBVeYXCfg'}
         activeRestaurantId={catalog ? catalog.restaurantId : 1}
       />
     </View>

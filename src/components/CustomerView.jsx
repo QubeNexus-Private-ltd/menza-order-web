@@ -9,7 +9,7 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { Search, Plus, Minus, Bell, FileText, QrCode, Sparkles, Check, Building, MapPin, Lock } from 'lucide-react';
+import { Search, Plus, Minus, Bell, FileText, QrCode, Sparkles, Check, Building, MapPin, Lock, ShoppingBag, ArrowRight } from 'lucide-react';
 
 export default function CustomerView({
   catalog,
@@ -17,7 +17,8 @@ export default function CustomerView({
   items,
   activeTable,
   openScanner,
-  cartItems,
+  cartItems = [],
+  openCart,
   onAddToCart,
   onUpdateCartQuantity,
   onCallWaiter,
@@ -31,6 +32,9 @@ export default function CustomerView({
   const restaurantName = catalog ? catalog.restaurantName || `Restaurant #${catalog.restaurantId}` : 'Menza Fine Dining';
   const restaurantAddress = catalog ? catalog.restaurantAddress || '' : '';
   const encryptedId = catalog ? catalog.encryptedRestaurantId || '' : '';
+
+  const totalCartCount = (cartItems || []).reduce((acc, i) => acc + (i.quantity || 1), 0);
+  const totalCartAmount = (cartItems || []).reduce((acc, i) => acc + (i.unitPrice || i.amount || 0) * (i.quantity || 1), 0);
 
   // Filter items based on selected category, search query, and veg toggle
   const filteredItems = items.filter((item) => {
@@ -55,7 +59,8 @@ export default function CustomerView({
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <View style={styles.rootWrapper}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Scanned Restaurant Banner Header */}
       <View style={styles.bannerContainer}>
         <View style={styles.bannerContent}>
@@ -218,7 +223,11 @@ export default function CustomerView({
                   <View style={styles.cardFooter}>
                     <Text style={styles.itemPrice}>₹{item.price}</Text>
 
-                    {qty === 0 ? (
+                    {!item.isAvailable ? (
+                      <View style={[styles.addButton, { backgroundColor: '#334155', opacity: 0.6 }]}>
+                        <Text style={[styles.addButtonText, { color: '#94a3b8' }]}>SOLD OUT</Text>
+                      </View>
+                    ) : qty === 0 ? (
                       <TouchableOpacity
                         style={styles.addButton}
                         onPress={() => onAddToCart(item.itemId, 1)}
@@ -251,7 +260,37 @@ export default function CustomerView({
           })}
         </View>
       )}
-    </ScrollView>
+      </ScrollView>
+
+      {/* Floating Bottom Cart Basket Bar */}
+      {totalCartCount > 0 && (
+        <View style={styles.floatingCartBarContainer}>
+          <TouchableOpacity
+            style={styles.floatingCartBar}
+            onPress={openCart}
+            activeOpacity={0.88}
+          >
+            <View style={styles.floatingCartLeft}>
+              <View style={styles.floatingCartBadge}>
+                <ShoppingBag size={18} color="#0f172a" />
+                <Text style={styles.floatingCartCount}>{totalCartCount}</Text>
+              </View>
+              <View style={styles.floatingCartDetails}>
+                <Text style={styles.floatingCartItemsText}>
+                  {totalCartCount} {totalCartCount === 1 ? 'Dish' : 'Dishes'} in Basket
+                </Text>
+                <Text style={styles.floatingCartAmountText}>₹{totalCartAmount.toFixed(2)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.floatingCartRight}>
+              <Text style={styles.floatingCartActionText}>VIEW BASKET</Text>
+              <ArrowRight size={18} color="#0f172a" />
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -622,5 +661,88 @@ const styles = StyleSheet.create({
     fontSize: 14,
     minWidth: 16,
     textAlign: 'center',
+  },
+  rootWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
+  floatingCartBarContainer: {
+    position: 'absolute',
+    bottom: 24,
+    left: 20,
+    right: 20,
+    zIndex: 999,
+    alignItems: 'center',
+  },
+  floatingCartBar: {
+    width: '100%',
+    maxWidth: 540,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#10b981',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  floatingCartLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  floatingCartBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  floatingCartCount: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#ef4444',
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '800',
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ffffff',
+  },
+  floatingCartDetails: {
+    justifyContent: 'center',
+  },
+  floatingCartItemsText: {
+    color: '#0f172a',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  floatingCartAmountText: {
+    color: '#0f172a',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  floatingCartRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  floatingCartActionText: {
+    color: '#0f172a',
+    fontWeight: '800',
+    fontSize: 12,
+    letterSpacing: 0.5,
   },
 });

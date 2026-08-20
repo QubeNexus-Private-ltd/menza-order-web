@@ -1,33 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, TextInput, Modal, StyleSheet } from 'react-native';
-import { X, QrCode, Camera, Check, Building } from 'lucide-react';
+import { X, QrCode, Camera, Check, Building, Lock } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { decryptRestaurantId } from '../services/api';
+import { decryptRestaurantId, encryptRestaurantId, KNOWN_ENCRYPTED_IDS } from '../services/api';
 
-export default function QrScannerModal({ visible, onClose, onSelectScanResult, activeRestaurantId }) {
+export default function QrScannerModal({ visible, onClose, onSelectScanResult, activeEncryptedId, activeRestaurantId }) {
   const [manualText, setManualText] = useState('');
 
   const parseQrText = (decodedText) => {
-    let restId = activeRestaurantId || 1;
+    let encId = activeEncryptedId || 'uqQTzsGyDJy4_TBVeYXCfg';
     let tableId = 1;
 
     try {
       if (decodedText.startsWith('{')) {
         const obj = JSON.parse(decodedText);
-        if (obj.restaurantId) restId = Number(obj.restaurantId);
+        if (obj.encRestId || obj.encryptedRestaurantId || obj.r) {
+          encId = obj.encRestId || obj.encryptedRestaurantId || obj.r;
+        } else if (obj.restaurantId) {
+          encId = encryptRestaurantId(obj.restaurantId);
+        }
         if (obj.tableId) tableId = Number(obj.tableId);
-        return { restId, tableId };
+        return { encId, tableId };
       }
     } catch (e) {}
 
+    const encMatch = decodedText.match(/(?:encRestId|r|enc)=([^&]+)/i);
     const restMatch = decodedText.match(/restaurantId=(\d+)/i);
-    const encMatch = decodedText.match(/encRestId=([^&]+)/i);
     const tableMatch = decodedText.match(/tableId=(\d+)/i);
 
-    if (restMatch) {
-      restId = Number(restMatch[1]);
-    } else if (encMatch) {
-      restId = decryptRestaurantId(decodeURIComponent(encMatch[1]));
+    if (encMatch) {
+      encId = decodeURIComponent(encMatch[1]);
+    } else if (restMatch) {
+      encId = encryptRestaurantId(Number(restMatch[1]));
+    } else if (decodedText.startsWith('uqQT') || decodedText.startsWith('NQZ2') || decodedText.startsWith('23wy') || decodedText.startsWith('enc_')) {
+      encId = decodedText.trim();
     }
 
     if (tableMatch) tableId = Number(tableMatch[1]);
@@ -36,7 +42,7 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
       tableId = Number(decodedText);
     }
 
-    return { restId, tableId };
+    return { encId, tableId };
   };
 
   useEffect(() => {
@@ -51,7 +57,7 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
         (decodedText) => {
           scanner.clear();
           const parsed = parseQrText(decodedText);
-          onSelectScanResult(parsed.restId, parsed.tableId);
+          onSelectScanResult(parsed.encId, parsed.tableId);
           onClose();
         },
         (error) => {
@@ -72,7 +78,7 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
   const handleManualSubmit = () => {
     if (!manualText.trim()) return;
     const parsed = parseQrText(manualText);
-    onSelectScanResult(parsed.restId, parsed.tableId);
+    onSelectScanResult(parsed.encId, parsed.tableId);
     onClose();
   };
 
@@ -84,7 +90,7 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
           <View style={styles.header}>
             <View style={styles.titleRow}>
               <QrCode size={20} color="#10b981" />
-              <Text style={styles.title}>Scan Restaurant Table QR</Text>
+              <Text style={styles.title}>Scan Encrypted Restaurant QR</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <X size={20} color="#94a3b8" />
@@ -98,18 +104,18 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
 
           {/* Demo QR Simulation Pills for Multiple Outlets */}
           <View style={styles.quickSelectSection}>
-            <Text style={styles.sectionLabel}>Test QR Scans for Outlets:</Text>
+            <Text style={styles.sectionLabel}>Test Encrypted QR Scans for Outlets:</Text>
             
             {/* Restaurant 1 Demo Pills */}
             <View style={styles.outletBlock}>
-              <Text style={styles.outletName}>🍷 Menza Fine Dining (Outlet #1)</Text>
+              <Text style={styles.outletName}>🍷 Menza Fine Dining (Encrypted ID: uqQTzsGy...)</Text>
               <View style={styles.tablesPillRow}>
                 {[1, 2, 3, 4].map((tNum) => (
                   <TouchableOpacity
                     key={`r1_t${tNum}`}
                     style={styles.tablePillRest1}
                     onPress={() => {
-                      onSelectScanResult(1, tNum);
+                      onSelectScanResult(KNOWN_ENCRYPTED_IDS[1], tNum);
                       onClose();
                     }}
                   >
@@ -121,14 +127,14 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
 
             {/* Restaurant 2 Demo Pills */}
             <View style={styles.outletBlock}>
-              <Text style={styles.outletName}>☕ Menza Express Cafe (Outlet #2)</Text>
+              <Text style={styles.outletName}>☕ Menza Express Cafe (Encrypted ID: NQZ2reN9...)</Text>
               <View style={styles.tablesPillRow}>
                 {[101, 102, 103, 104].map((tNum) => (
                   <TouchableOpacity
                     key={`r2_t${tNum}`}
                     style={styles.tablePillRest2}
                     onPress={() => {
-                      onSelectScanResult(2, tNum);
+                      onSelectScanResult(KNOWN_ENCRYPTED_IDS[2], tNum);
                       onClose();
                     }}
                   >
@@ -143,7 +149,7 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
           <View style={styles.manualSection}>
             <TextInput
               style={styles.manualInput}
-              placeholder="Paste QR URL or ?restaurantId=2&tableId=3"
+              placeholder="Paste QR URL e.g. ?encRestId=uqQTzsGyDJy4_TBVeYXCfg&tableId=3"
               placeholderTextColor="#64748b"
               value={manualText}
               onChangeText={setManualText}

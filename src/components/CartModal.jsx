@@ -10,50 +10,143 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { X, Plus, Minus, ShoppingBag, ArrowRight, Check, AlertCircle, CreditCard, Banknote, ShieldCheck } from 'lucide-react';
+import {
+  X,
+  Plus,
+  Minus,
+  Trash2,
+  ShoppingBag,
+  ArrowRight,
+  AlertCircle,
+  CreditCard,
+  Banknote,
+  ShieldCheck,
+  AlertTriangle,
+  MessageSquare,
+  Sparkles,
+} from 'lucide-react';
 import * as api from '../services/api';
+
+const getOrderTypeIcon = (typeName) => {
+  const lower = (typeName || '').toLowerCase();
+  if (lower.includes('dine')) return '🍽️';
+  if (lower.includes('pickup') || lower.includes('takeaway') || lower.includes('self')) return '🛍️';
+  if (lower.includes('delivery')) return '🛵';
+  if (lower.includes('counter') || lower.includes('pos')) return '🧾';
+  return '📋';
+};
 
 export default function CartModal({
   visible,
   onClose,
-  cartItems,
+  cart,
+  cartItems = [],
   onUpdateCartQuantity,
+  onRemoveFromCart,
   onClearCart,
   onPlaceOrder,
+  onRefreshCart,
   activeTable,
   catalog,
+  orderTypes = [],
   loading,
 }) {
   const [guestName, setGuestName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [remarks, setRemarks] = useState('');
-  const [orderTypeId, setOrderTypeId] = useState(1); // 1 = Dine In, 2 = Takeaway
+  const [orderTypeId, setOrderTypeId] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState('cashfree'); // 'cashfree' | 'counter'
   const [errorMsg, setErrorMsg] = useState('');
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [fetchingCart, setFetchingCart] = useState(false);
+  const [editingNotesItemId, setEditingNotesItemId] = useState(null);
+  const [itemNoteText, setItemNoteText] = useState('');
 
-  const itemsTotal = cartItems.reduce((sum, item) => sum + item.amount * item.quantity, 0);
-  const cgst = itemsTotal * 0.025;
-  const sgst = itemsTotal * 0.025;
-  // Platform fee is NOT charged to customers (0 fee for customer)
-  const grandTotal = itemsTotal + cgst + sgst;
+  // Auto-fetch fresh cart items from API whenever modal opens
+  React.useEffect(() => {
+    if (visible && onRefreshCart) {
+      setFetchingCart(true);
+      Promise.resolve(onRefreshCart()).finally(() => setFetchingCart(false));
+    }
+  }, [visible]);
+
+  const effectiveOrderTypes = (Array.isArray(orderTypes) && orderTypes.length > 0)
+    ? orderTypes
+    : [
+        { id: 1, typeName: 'Dine-In', description: 'Dine-In order type' },
+        { id: 2, typeName: 'Self Pickup', description: 'Self Pickup / Takeaway' },
+        { id: 3, typeName: 'Delivery', description: 'Delivery order type' },
+        { id: 4, typeName: 'Counter POS Ordering', description: 'Express counter POS order processing' }
+      ];
+
+  // Extract items list
+  const activeCartItems = (cart && Array.isArray(cart.items)) ? cart.items : cartItems;
+
+  // Server-computed financial breakdown or client fallback
+  const subTotal = cart?.subTotal !== undefined && cart?.subTotal > 0
+    ? cart.subTotal
+    : activeCartItems.reduce((sum, item) => sum + (item.unitPrice || item.amount) * item.quantity, 0);
+
+  const cgst = cart?.cgstAmount !== undefined && cart?.cgstAmount > 0
+    ? cart.cgstAmount
+    : Math.round(subTotal * 0.025 * 100) / 100;
+
+  const sgst = cart?.sgstAmount !== undefined && cart?.sgstAmount > 0
+    ? cart.sgstAmount
+    : Math.round(subTotal * 0.025 * 100) / 100;
+
+  const grandTotal = cart?.totalAmount !== undefined && cart?.totalAmount > 0
+    ? cart.totalAmount
+    : (subTotal + cgst + sgst);
+
+  const hasUnavailableItems = cart?.hasUnavailableItems || activeCartItems.some((i) => !i.isAvailable);
+
+  const handleOpenNoteEditor = (item) => {
+    setEditingNotesItemId(item.itemId);
+    setItemNoteText(item.cookingInstruction || '');
+  };
+
+  const handleSaveNote = async (itemId, currentQty) => {
+    if (onUpdateCartQuantity) {
+      await onUpdateCartQuantity(itemId, currentQty, itemNoteText.trim());
+    }
+    setEditingNotesItemId(null);
+    setItemNoteText('');
+  };
 
   const handleCheckout = async () => {
     if (!guestName.trim()) {
       setErrorMsg('Please enter customer / guest name.');
       return;
     }
+    if (hasUnavailableItems) {
+      setErrorMsg('Please remove out-of-stock items from your cart before proceeding.');
+      return;
+    }
     setErrorMsg('');
 
-    const restId = catalog ? catalog.restaurantId : 1;
+    const restId = (cart && cart.restaurantId) || (catalog ? catalog.restaurantId : 1);
+    
+    // Prepare items list for backend PlaceOrderModel
+    const orderItems = activeCartItems.map((item) => ({
+      itemId: item.itemId,
+      quantity: item.quantity,
+      unitId: item.unit || 1,
+      cookingInstruction: item.cookingInstruction || null,
+    }));
+
     const orderPayload = {
-      name: guestName,
-      mobileNumber: mobileNumber,
-      remarks: remarks,
+      restaurantId: restId,
+      name: guestName.trim(),
+      mobileNumber: mobileNumber.trim(),
+      remarks: remarks.trim(),
       isHomeDelivery: false,
       orderTypeId: orderTypeId,
       tableId: activeTable ? activeTable.id : null,
-      paymentMethod: paymentMethod === 'cashfree' ? 'CASHFREE_SPLIT' : 'COUNTER_CASH'
+      tableNumber: activeTable ? String(activeTable.id) : '1',
+      items: orderItems,
+      paymentMode: paymentMethod === 'cashfree' ? 'ONLINE' : 'CASH',
+      paymentMethod: paymentMethod === 'cashfree' ? 'CASHFREE_SPLIT' : 'COUNTER_CASH',
     };
 
     if (paymentMethod === 'cashfree') {
@@ -65,7 +158,7 @@ export default function CartModal({
           customerName: guestName,
           customerPhone: mobileNumber || '9999999999',
           tableNumber: activeTable ? String(activeTable.id) : '1',
-          orderNotes: remarks
+          orderNotes: remarks,
         });
 
         if (checkoutRes && checkoutRes.paymentLink) {
@@ -73,14 +166,12 @@ export default function CartModal({
           return;
         }
 
-        // Proceed to place order with session tracking
         onPlaceOrder({
           ...orderPayload,
-          cashfreeOrderId: checkoutRes?.orderId || null
+          cashfreeOrderId: checkoutRes?.orderId || null,
         });
       } catch (err) {
         console.error('Cashfree checkout error:', err);
-        // Fallback to order placement if gateway returns offline response
         onPlaceOrder(orderPayload);
       } finally {
         setProcessingPayment(false);
@@ -102,7 +193,12 @@ export default function CartModal({
           <View style={styles.sheetHeader}>
             <View style={styles.headerTitleRow}>
               <ShoppingBag size={20} color="#10b981" />
-              <Text style={styles.headerTitle}>Your Order Basket</Text>
+              <View>
+                <Text style={styles.headerTitle}>Your Order Basket</Text>
+                {cart?.restaurantName ? (
+                  <Text style={styles.headerSubTitle}>{cart.restaurantName}</Text>
+                ) : null}
+              </View>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <X size={20} color="#94a3b8" />
@@ -110,79 +206,211 @@ export default function CartModal({
           </View>
 
           <ScrollView style={styles.bodyScroll} contentContainerStyle={styles.bodyContent}>
-            {cartItems.length === 0 ? (
+            {fetchingCart && activeCartItems.length === 0 ? (
+              <View style={styles.emptyCartBox}>
+                <ActivityIndicator size="large" color="#10b981" />
+                <Text style={styles.emptyCartTitle}>Loading Basket Items...</Text>
+                <Text style={styles.emptyCartSub}>Retrieving your cart items from the server.</Text>
+              </View>
+            ) : activeCartItems.length === 0 ? (
               <View style={styles.emptyCartBox}>
                 <ShoppingBag size={48} color="#334155" />
                 <Text style={styles.emptyCartTitle}>Your Basket is Empty</Text>
-                <Text style={styles.emptyCartSub}>Browse our menu catalog and add your favorite dishes.</Text>
+                <Text style={styles.emptyCartSub}>Browse our menu catalog and add delicious dishes.</Text>
               </View>
             ) : (
               <>
+                {/* Out of Stock Notice */}
+                {hasUnavailableItems && (
+                  <View style={styles.outOfStockBanner}>
+                    <AlertTriangle size={18} color="#f59e0b" />
+                    <Text style={styles.outOfStockBannerText}>
+                      Some items are currently unavailable. Please remove them to place your order.
+                    </Text>
+                  </View>
+                )}
+
                 {/* Cart Items List */}
                 <View style={styles.itemsSection}>
                   <View style={styles.sectionHeaderRow}>
-                    <Text style={styles.sectionTitle}>Selected Items ({cartItems.length})</Text>
+                    <Text style={styles.sectionTitle}>
+                      Selected Items ({activeCartItems.reduce((acc, i) => acc + i.quantity, 0)})
+                    </Text>
                     <TouchableOpacity onPress={onClearCart}>
                       <Text style={styles.clearText}>Clear All</Text>
                     </TouchableOpacity>
                   </View>
 
-                  {cartItems.map((item) => (
-                    <View key={item.itemId} style={styles.cartRow}>
-                      <Image
-                        source={{ uri: item.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600' }}
-                        style={styles.itemThumb}
-                      />
-                      <View style={styles.itemInfo}>
-                        <Text style={styles.itemName} numberOfLines={1}>{item.itemName}</Text>
-                        <Text style={styles.itemPriceSingle}>₹{item.amount} each</Text>
-                      </View>
+                  {activeCartItems.map((item) => {
+                    const isEditingNote = editingNotesItemId === item.itemId;
+                    const itemUnitPrice = item.unitPrice || item.amount;
+                    const itemLineTotal = item.totalAmount || (itemUnitPrice * item.quantity);
 
-                      {/* Quantity Controls */}
-                      <View style={styles.qtyBox}>
-                        <TouchableOpacity
-                          style={styles.qtyBtn}
-                          onPress={() => onUpdateCartQuantity(item.itemId, item.quantity - 1)}
-                        >
-                          <Minus size={12} color="#ffffff" />
-                        </TouchableOpacity>
-                        <Text style={styles.qtyText}>{item.quantity}</Text>
-                        <TouchableOpacity
-                          style={styles.qtyBtn}
-                          onPress={() => onUpdateCartQuantity(item.itemId, item.quantity + 1)}
-                        >
-                          <Plus size={12} color="#ffffff" />
-                        </TouchableOpacity>
-                      </View>
+                    return (
+                      <View
+                        key={item.itemId}
+                        style={[styles.cartRowWrapper, !item.isAvailable && styles.cartRowUnavailable]}
+                      >
+                        <View style={styles.cartRow}>
+                          <Image
+                            source={{
+                              uri:
+                                item.imageUrl ||
+                                'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600',
+                            }}
+                            style={styles.itemThumb}
+                          />
+                          <View style={styles.itemInfo}>
+                            <View style={styles.itemNameRow}>
+                              <Text style={styles.itemName} numberOfLines={1}>
+                                {item.itemName}
+                              </Text>
+                              {!item.isAvailable && (
+                                <View style={styles.unavailBadge}>
+                                  <Text style={styles.unavailBadgeText}>Out of Stock</Text>
+                                </View>
+                              )}
+                            </View>
 
-                      <Text style={styles.itemSubtotal}>₹{item.amount * item.quantity}</Text>
-                    </View>
-                  ))}
+                            <Text style={styles.itemPriceSingle}>₹{itemUnitPrice.toFixed(2)} each</Text>
+
+                            {/* Variant & Modifiers tags */}
+                            {item.variantName ? (
+                              <View style={styles.tagBadge}>
+                                <Text style={styles.tagBadgeText}>Size: {item.variantName}</Text>
+                              </View>
+                            ) : null}
+
+                            {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
+                              <View style={styles.modifierRow}>
+                                {item.modifiers.map((m) => (
+                                  <View key={m.modifierId} style={styles.modifierBadge}>
+                                    <Text style={styles.modifierBadgeText}>
+                                      +{m.modifierName} (₹{m.extraPrice})
+                                    </Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+
+                            {/* Cooking Instruction Display */}
+                            {item.cookingInstruction && !isEditingNote ? (
+                              <TouchableOpacity
+                                style={styles.instructionPill}
+                                onPress={() => handleOpenNoteEditor(item)}
+                              >
+                                <MessageSquare size={11} color="#10b981" />
+                                <Text style={styles.instructionText} numberOfLines={1}>
+                                  {item.cookingInstruction}
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+
+                          {/* Quantity & Delete Controls */}
+                          <View style={styles.actionsRight}>
+                            <View style={styles.qtyBox}>
+                              <TouchableOpacity
+                                style={styles.qtyBtn}
+                                onPress={() =>
+                                  item.quantity > 1
+                                    ? onUpdateCartQuantity(item.itemId, item.quantity - 1, item.cookingInstruction)
+                                    : onRemoveFromCart(item.itemId)
+                                }
+                              >
+                                <Minus size={12} color="#ffffff" />
+                              </TouchableOpacity>
+
+                              <Text style={styles.qtyText}>{item.quantity}</Text>
+
+                              <TouchableOpacity
+                                style={styles.qtyBtn}
+                                onPress={() =>
+                                  onUpdateCartQuantity(item.itemId, item.quantity + 1, item.cookingInstruction)
+                                }
+                              >
+                                <Plus size={12} color="#ffffff" />
+                              </TouchableOpacity>
+                            </View>
+
+                            <Text style={styles.itemSubtotal}>₹{itemLineTotal.toFixed(2)}</Text>
+
+                            <TouchableOpacity
+                              style={styles.trashBtn}
+                              onPress={() => onRemoveFromCart(item.itemId)}
+                            >
+                              <Trash2 size={15} color="#ef4444" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* Inline Item Note Editor */}
+                        {isEditingNote ? (
+                          <View style={styles.inlineNoteBox}>
+                            <TextInput
+                              style={styles.inlineNoteInput}
+                              placeholder="Special chef note (e.g. less spicy)..."
+                              placeholderTextColor="#64748b"
+                              value={itemNoteText}
+                              onChangeText={setItemNoteText}
+                            />
+                            <TouchableOpacity
+                              style={styles.saveNoteBtn}
+                              onPress={() => handleSaveNote(item.itemId, item.quantity)}
+                            >
+                              <Text style={styles.saveNoteBtnText}>Save</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.cancelNoteBtn}
+                              onPress={() => setEditingNotesItemId(null)}
+                            >
+                              <Text style={styles.cancelNoteBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          !item.cookingInstruction && (
+                            <TouchableOpacity
+                              style={styles.addNoteBtn}
+                              onPress={() => handleOpenNoteEditor(item)}
+                            >
+                              <MessageSquare size={11} color="#64748b" />
+                              <Text style={styles.addNoteBtnText}>+ Add special note for chef</Text>
+                            </TouchableOpacity>
+                          )
+                        )}
+                      </View>
+                    );
+                  })}
                 </View>
 
                 {/* Order Options */}
                 <View style={styles.formSection}>
                   <Text style={styles.sectionTitle}>Order Details</Text>
 
-                  {/* Dine-In / Takeaway selector */}
+                  {/* Dynamic Order Types from OrderType API */}
                   <View style={styles.orderTypeContainer}>
-                    <TouchableOpacity
-                      style={[styles.orderTypeTab, orderTypeId === 1 && styles.orderTypeTabActive]}
-                      onPress={() => setOrderTypeId(1)}
-                    >
-                      <Text style={[styles.orderTypeText, orderTypeId === 1 && styles.orderTypeTextActive]}>
-                        🍽️ Dine In {activeTable ? `(Table #${activeTable.id})` : ''}
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.orderTypeTab, orderTypeId === 2 && styles.orderTypeTabActive]}
-                      onPress={() => setOrderTypeId(2)}
-                    >
-                      <Text style={[styles.orderTypeText, orderTypeId === 2 && styles.orderTypeTextActive]}>
-                        🛍️ Takeaway / Counter
-                      </Text>
-                    </TouchableOpacity>
+                    {effectiveOrderTypes.map((type) => {
+                      const isSelected = orderTypeId === type.id;
+                      const icon = getOrderTypeIcon(type.typeName);
+                      return (
+                        <TouchableOpacity
+                          key={type.id}
+                          style={[styles.orderTypeTab, isSelected && styles.orderTypeTabActive]}
+                          onPress={() => setOrderTypeId(type.id)}
+                          activeOpacity={0.8}
+                        >
+                          <Text
+                            style={[
+                              styles.orderTypeText,
+                              isSelected && styles.orderTypeTextActive,
+                            ]}
+                          >
+                            {icon} {type.typeName}
+                            {type.id === 1 && activeTable ? ` (Table #${activeTable.id})` : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
 
                   {/* Input Fields */}
@@ -190,7 +418,7 @@ export default function CartModal({
                     <Text style={styles.inputLabel}>Customer Name *</Text>
                     <TextInput
                       style={styles.textInput}
-                      placeholder="Enter guest name"
+                      placeholder="Enter guest / diner name"
                       placeholderTextColor="#64748b"
                       value={guestName}
                       onChangeText={setGuestName}
@@ -210,10 +438,10 @@ export default function CartModal({
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Special Instructions / Notes</Text>
+                    <Text style={styles.inputLabel}>Order Remarks / Instructions</Text>
                     <TextInput
                       style={[styles.textInput, styles.multilineInput]}
-                      placeholder="Less spicy, extra cheese, cutlery needed..."
+                      placeholder="Cutlery needed, quick service, etc..."
                       placeholderTextColor="#64748b"
                       multiline
                       value={remarks}
@@ -227,26 +455,48 @@ export default function CartModal({
                   <Text style={styles.sectionTitle}>Payment Method</Text>
                   <View style={styles.paymentMethodRow}>
                     <TouchableOpacity
-                      style={[styles.paymentCard, paymentMethod === 'cashfree' && styles.paymentCardActive]}
+                      style={[
+                        styles.paymentCard,
+                        paymentMethod === 'cashfree' && styles.paymentCardActive,
+                      ]}
                       onPress={() => setPaymentMethod('cashfree')}
                     >
-                      <CreditCard size={20} color={paymentMethod === 'cashfree' ? '#10b981' : '#94a3b8'} />
+                      <CreditCard
+                        size={20}
+                        color={paymentMethod === 'cashfree' ? '#10b981' : '#94a3b8'}
+                      />
                       <View>
-                        <Text style={[styles.paymentCardTitle, paymentMethod === 'cashfree' && styles.paymentCardTitleActive]}>
-                          Cashfree Easy Split
+                        <Text
+                          style={[
+                            styles.paymentCardTitle,
+                            paymentMethod === 'cashfree' && styles.paymentCardTitleActive,
+                          ]}
+                        >
+                          Cashfree Direct Pay
                         </Text>
                         <Text style={styles.paymentCardSub}>UPI • Cards • NetBanking</Text>
                       </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={[styles.paymentCard, paymentMethod === 'counter' && styles.paymentCardActive]}
+                      style={[
+                        styles.paymentCard,
+                        paymentMethod === 'counter' && styles.paymentCardActive,
+                      ]}
                       onPress={() => setPaymentMethod('counter')}
                     >
-                      <Banknote size={20} color={paymentMethod === 'counter' ? '#10b981' : '#94a3b8'} />
+                      <Banknote
+                        size={20}
+                        color={paymentMethod === 'counter' ? '#10b981' : '#94a3b8'}
+                      />
                       <View>
-                        <Text style={[styles.paymentCardTitle, paymentMethod === 'counter' && styles.paymentCardTitleActive]}>
-                          Pay at Counter
+                        <Text
+                          style={[
+                            styles.paymentCardTitle,
+                            paymentMethod === 'counter' && styles.paymentCardTitleActive,
+                          ]}
+                        >
+                          Pay at Counter / Table
                         </Text>
                         <Text style={styles.paymentCardSub}>Cash / POS at Table</Text>
                       </View>
@@ -258,8 +508,8 @@ export default function CartModal({
                 <View style={styles.summarySection}>
                   <Text style={styles.sectionTitle}>Bill Breakdown</Text>
                   <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>Subtotal</Text>
-                    <Text style={styles.summaryValue}>₹{itemsTotal.toFixed(2)}</Text>
+                    <Text style={styles.summaryLabel}>Item Subtotal</Text>
+                    <Text style={styles.summaryValue}>₹{subTotal.toFixed(2)}</Text>
                   </View>
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryLabel}>CGST (2.5%)</Text>
@@ -294,12 +544,15 @@ export default function CartModal({
           </ScrollView>
 
           {/* Footer Submit Button */}
-          {cartItems.length > 0 && (
+          {activeCartItems.length > 0 && (
             <View style={styles.footerContainer}>
               <TouchableOpacity
-                style={styles.checkoutBtn}
+                style={[
+                  styles.checkoutBtn,
+                  (isLoadingState || hasUnavailableItems) && styles.checkoutBtnDisabled,
+                ]}
                 onPress={handleCheckout}
-                disabled={isLoadingState}
+                disabled={isLoadingState || hasUnavailableItems}
                 activeOpacity={0.85}
               >
                 {isLoadingState ? (
@@ -354,6 +607,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
+  headerSubTitle: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
   closeBtn: {
     padding: 6,
   },
@@ -381,6 +640,22 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
+  outOfStockBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    padding: 12,
+    borderRadius: 12,
+  },
+  outOfStockBannerText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
   itemsSection: {
     backgroundColor: '#1e293b',
     borderRadius: 16,
@@ -403,30 +678,153 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  cartRowWrapper: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+    gap: 6,
+  },
+  cartRowUnavailable: {
+    opacity: 0.65,
+  },
   cartRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
   },
   itemThumb: {
-    width: 44,
-    height: 44,
+    width: 46,
+    height: 46,
     borderRadius: 8,
+    backgroundColor: '#0f172a',
   },
   itemInfo: {
     flex: 1,
+    gap: 2,
+  },
+  itemNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   itemName: {
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
   },
+  unavailBadge: {
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  unavailBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '700',
+  },
   itemPriceSingle: {
     color: '#94a3b8',
     fontSize: 12,
+  },
+  tagBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 2,
+  },
+  tagBadgeText: {
+    color: '#38bdf8',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  modifierRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 2,
+  },
+  modifierBadge: {
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  modifierBadgeText: {
+    color: '#a78bfa',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  instructionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 3,
+    alignSelf: 'flex-start',
+  },
+  instructionText: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  addNoteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 2,
+    alignSelf: 'flex-start',
+  },
+  addNoteBtnText: {
+    color: '#64748b',
+    fontSize: 11,
+  },
+  inlineNoteBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  inlineNoteInput: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    height: 30,
+    color: '#ffffff',
+    fontSize: 11,
+  },
+  saveNoteBtn: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 10,
+    height: 30,
+    justifyContent: 'center',
+    borderRadius: 6,
+  },
+  saveNoteBtnText: {
+    color: '#0f172a',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cancelNoteBtn: {
+    paddingHorizontal: 6,
+    height: 30,
+    justifyContent: 'center',
+  },
+  cancelNoteBtnText: {
+    color: '#94a3b8',
+    fontSize: 11,
+  },
+  actionsRight: {
+    alignItems: 'flex-end',
+    gap: 6,
   },
   qtyBox: {
     flexDirection: 'row',
@@ -455,8 +853,9 @@ const styles = StyleSheet.create({
     color: '#10b981',
     fontWeight: '700',
     fontSize: 14,
-    minWidth: 60,
-    textAlign: 'right',
+  },
+  trashBtn: {
+    padding: 2,
   },
   formSection: {
     backgroundColor: '#1e293b',
@@ -466,15 +865,19 @@ const styles = StyleSheet.create({
   },
   orderTypeContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     backgroundColor: '#0f172a',
     borderRadius: 10,
-    padding: 4,
-    gap: 4,
+    padding: 6,
+    gap: 6,
   },
   orderTypeTab: {
     flex: 1,
+    minWidth: '46%',
     paddingVertical: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 8,
   },
   orderTypeTabActive: {
@@ -506,7 +909,6 @@ const styles = StyleSheet.create({
     height: 42,
     color: '#ffffff',
     fontSize: 14,
-    outlineStyle: 'none',
   },
   multilineInput: {
     height: 70,
@@ -625,6 +1027,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#10b981',
     paddingVertical: 14,
     borderRadius: 12,
+  },
+  checkoutBtnDisabled: {
+    backgroundColor: '#334155',
+    opacity: 0.6,
   },
   checkoutBtnText: {
     color: '#0f172a',

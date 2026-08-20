@@ -30,11 +30,13 @@ import {
   Building,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { encryptRestaurantId } from '../services/api';
 
 export default function StaffView({
   staffUser,
   restaurants,
   selectedRestaurant,
+  catalog,
   onSelectRestaurant,
   onGenerateOtp,
   onLogin,
@@ -48,6 +50,7 @@ export default function StaffView({
   onAddItemToOrder,
   onRefreshData,
   onOpenQrGenerator,
+  orderTypes = [],
 }) {
   // Login State
   const [mobile, setMobile] = useState('');
@@ -70,6 +73,7 @@ export default function StaffView({
   const [selectedStaffItems, setSelectedStaffItems] = useState([]);
   const [staffGuestName, setStaffGuestName] = useState('');
   const [staffGuestMobile, setStaffGuestMobile] = useState('');
+  const [staffOrderTypeId, setStaffOrderTypeId] = useState(1);
 
   // Handle OTP request
   const handleRequestOtp = async () => {
@@ -129,7 +133,7 @@ export default function StaffView({
       name: staffGuestName,
       mobileNumber: staffGuestMobile,
       tableId: createOrderTable ? createOrderTable.id : null,
-      orderTypeId: 1,
+      orderTypeId: staffOrderTypeId,
       items: selectedStaffItems,
       orderAmount: itemsTotal,
       cgst,
@@ -141,6 +145,7 @@ export default function StaffView({
     setSelectedStaffItems([]);
     setStaffGuestName('');
     setStaffGuestMobile('');
+    setStaffOrderTypeId(1);
   };
 
   // Render Login Form if staff is not authenticated
@@ -536,7 +541,8 @@ export default function StaffView({
             <View style={styles.qrGrid}>
               {tables.map((table) => {
                 const rId = table.rId || table.restaurantId || (selectedRestaurant ? selectedRestaurant.id : 1);
-                const qrTargetUrl = `${window.location.origin}/?restaurantId=${rId}&tableId=${table.id}`;
+                const encId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || encryptRestaurantId(rId);
+                const qrTargetUrl = `${window.location.origin}/?encRestId=${encId}&tableId=${table.id}`;
                 return (
                   <View key={table.id} style={styles.qrCard}>
                     <Text style={styles.qrTableName}>{table.tableName}</Text>
@@ -585,6 +591,28 @@ export default function StaffView({
                   value={staffGuestMobile}
                   onChangeText={setStaffGuestMobile}
                 />
+              </View>
+
+              <View style={styles.staffOrderTypeSection}>
+                <Text style={styles.posSelectItemsTitle}>Order Type:</Text>
+                <View style={styles.staffOrderTypeRow}>
+                  {(orderTypes.length > 0 ? orderTypes : [
+                    { id: 1, typeName: 'Dine-In' },
+                    { id: 2, typeName: 'Self Pickup' },
+                    { id: 3, typeName: 'Delivery' },
+                    { id: 4, typeName: 'Counter POS' }
+                  ]).map((t) => (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={[styles.staffOrderTypePill, staffOrderTypeId === t.id && styles.staffOrderTypePillActive]}
+                      onPress={() => setStaffOrderTypeId(t.id)}
+                    >
+                      <Text style={[styles.staffOrderTypeText, staffOrderTypeId === t.id && styles.staffOrderTypeTextActive]}>
+                        {t.typeName}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
               <Text style={styles.posSelectItemsTitle}>Select Menu Dishes:</Text>
@@ -1361,5 +1389,35 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     fontWeight: '800',
     fontSize: 13,
+  },
+  staffOrderTypeSection: {
+    gap: 6,
+  },
+  staffOrderTypeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 6,
+  },
+  staffOrderTypePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  staffOrderTypePillActive: {
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
+  },
+  staffOrderTypeText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  staffOrderTypeTextActive: {
+    color: '#0f172a',
+    fontWeight: '800',
   },
 });
