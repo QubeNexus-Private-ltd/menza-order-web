@@ -1301,7 +1301,7 @@ export default function App() {
 const styles = StyleSheet.create({
   appContainer: {
     flex: 1,
-    backgroundColor: '#0b0f19',
+    backgroundColor: '#FAF8F5',
     position: 'relative',
   },
 
@@ -1310,14 +1310,18 @@ const styles = StyleSheet.create({
     top: 70,
     alignSelf: 'center',
     zIndex: 9999,
-    backgroundColor: '#10b981',
+    backgroundColor: '#78350f',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 24,
+    shadowColor: '#78350f',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
 
   toastText: {
-    color: '#0f172a',
+    color: '#ffffff',
     fontWeight: '800',
     fontSize: 13,
   },
