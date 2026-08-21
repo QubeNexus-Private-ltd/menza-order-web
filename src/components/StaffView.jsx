@@ -123,7 +123,7 @@ export default function StaffView({
   };
 
   const handleStaffPlaceOrder = async () => {
-    if (!staffGuestName.trim() || selectedStaffItems.length === 0) return;
+    if (!staffGuestName.trim() || !staffGuestMobile.trim() || selectedStaffItems.length === 0) return;
     // Prepare order payload
     const itemsTotal = selectedStaffItems.reduce((acc, i) => acc + i.price * i.quantity, 0);
     const cgst = itemsTotal * 0.025;
@@ -585,7 +585,7 @@ export default function StaffView({
                 />
                 <TextInput
                   style={styles.posInput}
-                  placeholder="Guest Mobile (Optional)"
+                  placeholder="Guest Mobile *"
                   placeholderTextColor="#64748b"
                   keyboardType="phone-pad"
                   value={staffGuestMobile}

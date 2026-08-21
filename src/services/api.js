@@ -237,11 +237,14 @@ export const switchRestaurant = async (
    ORDER TYPES
 ========================================================= */
 
-export const getOrderTypes = async () => {
+export const getOrderTypes = async (restaurantId = null) => {
   try {
-    const res = await api.get(
-      '/api/OrderTypeMaster'
-    );
+    const url =
+      restaurantId && Number(restaurantId) > 0
+        ? `/api/OrderTypeMaster/restaurant/${restaurantId}/active`
+        : '/api/OrderTypeMaster';
+
+    const res = await api.get(url);
 
     if (
       Array.isArray(res.data) &&
@@ -252,9 +255,20 @@ export const getOrderTypes = async () => {
       );
     }
   } catch (error) {
-    console.log(
-      'OrderType API unavailable, using fallback.'
-    );
+    try {
+      const fallbackRes = await api.get('/api/Order/Types');
+      if (
+        fallbackRes.data &&
+        Array.isArray(fallbackRes.data) &&
+        fallbackRes.data.length > 0
+      ) {
+        return fallbackRes.data.filter((t) => t.isActive !== false);
+      }
+    } catch {
+      console.log(
+        'OrderType API unavailable, using fallback.'
+      );
+    }
   }
 
   return [
@@ -282,8 +296,23 @@ export const getOrderTypes = async () => {
 };
 
 /* =========================================================
-   IMAGE URL
+   IMAGE URL & DEFAULTS
 ========================================================= */
+
+export const IMAGE_NOT_AVAILABLE =
+  "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'><rect width='400' height='300' fill='%230f172a'/><rect x='2' y='2' width='396' height='296' rx='8' fill='none' stroke='%23334155' stroke-width='1.5'/><g transform='translate(200, 115)' text-anchor='middle'><rect x='-30' y='-30' width='60' height='60' rx='14' fill='%231e293b' stroke='%23334155' stroke-width='1.5'/><path d='M-14 -6 L-14 12 L14 12 L14 -6 Z' fill='none' stroke='%2364748b' stroke-width='2' stroke-linejoin='round'/><circle cx='-6' cy='-1' r='2.5' fill='%2364748b'/><path d='M-14 8 L-7 1 L0 7 L6 2 L14 8' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/><line x1='-18' y1='-18' x2='18' y2='18' stroke='%23ef4444' stroke-width='2.5' stroke-linecap='round'/><text y='56' fill='%2394a3b8' font-family='sans-serif' font-size='13' font-weight='600'>Image Not Available</text></g></svg>";
+
+export const DEFAULT_ITEM_IMAGE = IMAGE_NOT_AVAILABLE;
+
+export const DEFAULT_VEG_IMAGE =
+  'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=600';
+
+export const DEFAULT_NON_VEG_IMAGE =
+  'https://images.unsplash.com/photo-1544025162-d76694265947?w=600';
+
+export const getDefaultItemImage = () => {
+  return IMAGE_NOT_AVAILABLE;
+};
 
 const AZURE_BLOB_BASE =
   'https://sarestaurantdev.blob.core.windows.net/screstdev/';
@@ -318,6 +347,77 @@ export const getOriginalImageUrl = (url) => {
   }
 
   return `${AZURE_BLOB_BASE}${cleanPath}`;
+};
+
+export const getItemImageUrl = (imageUrl, isVeg = true) => {
+  const original = getOriginalImageUrl(imageUrl);
+  if (original) return original;
+  return getDefaultItemImage(isVeg);
+};
+
+/* =========================================================
+   UNIT DESCRIPTION HELPER
+========================================================= */
+
+export const getUnitDescription = (item) => {
+  if (!item) return 'Piece';
+
+  // 1. Direct text fields from API
+  const direct =
+    item.unitName ||
+    item.unitDescription ||
+    item.unitTypeName ||
+    item.unitTitle ||
+    item.unitOfMeasure ||
+    item.uom ||
+    item.unit_name ||
+    item.unit?.name ||
+    item.unit?.unitName ||
+    item.unit?.description ||
+    item.unit?.title;
+
+  if (direct && typeof direct === 'string' && isNaN(Number(direct.trim()))) {
+    return direct.trim();
+  }
+
+  // 2. Unit property itself if it's already a descriptive string
+  if (typeof item.unit === 'string' && item.unit.trim() !== '' && isNaN(Number(item.unit.trim()))) {
+    return item.unit.trim();
+  }
+
+  // 3. Map common numeric unit IDs to human-readable descriptions
+  const rawId =
+    item.unit !== undefined && item.unit !== null
+      ? item.unit
+      : (item.unitId || item.unitTypeId);
+  const numId = Number(rawId);
+
+  if (!isNaN(numId) && numId > 0) {
+    switch (numId) {
+      case 1:
+        return 'Piece';
+      case 2:
+        return 'Plate';
+      case 3:
+        return 'Portion';
+      case 4:
+        return 'Serving';
+      case 5:
+        return 'Bowl';
+      case 6:
+        return 'Glass';
+      case 7:
+        return 'Cup';
+      case 8:
+        return 'Pack';
+      case 9:
+        return 'Bottle';
+      default:
+        return 'Piece';
+    }
+  }
+
+  return 'Piece';
 };
 
 /* =========================================================
@@ -570,12 +670,13 @@ const normalizeCatalogData = (
             ? item.isAvailable
             : true,
 
-        imageUrl: getOriginalImageUrl(
+        imageUrl: getItemImageUrl(
           item.imageUrl ||
             item.ImageURL ||
             item.image ||
             item.photoUrl ||
-            item.img
+            item.img,
+          item.isVeg !== undefined ? item.isVeg : true
         ),
 
         restaurantId:
@@ -608,6 +709,26 @@ const normalizeCatalogData = (
       undefined
         ? data.isSubscriptionActive
         : true,
+
+    isTableOrderingEnabled:
+      data.isTableOrderingEnabled !==
+      undefined
+        ? data.isTableOrderingEnabled
+        : true,
+
+    isTableBookingEnabled:
+      data.isTableBookingEnabled !==
+      undefined
+        ? data.isTableBookingEnabled
+        : true,
+
+    tables:
+      Array.isArray(data.tables) &&
+      data.tables.length > 0
+        ? data.tables
+        : Array.isArray(data.availableTables)
+        ? data.availableTables
+        : [],
 
     categories:
       Array.isArray(data.categories) &&
@@ -655,6 +776,35 @@ export const getMenuCatalogByEncryptedId =
       encryptedRestaurantId ||
       encryptRestaurantId(1)
     ).trim();
+
+    try {
+      const pubRes = await api.get(
+        `/api/public/store/menu?r=${encodeURIComponent(
+          cleanEncId
+        )}`
+      );
+      if (
+        pubRes?.data &&
+        (pubRes.data.restaurantId ||
+          pubRes.data.items)
+      ) {
+        const decryptedRestId =
+          pubRes.data.restaurantId ||
+          decryptRestaurantId(
+            cleanEncId
+          );
+        return normalizeCatalogData(
+          pubRes.data,
+          decryptedRestId,
+          cleanEncId
+        );
+      }
+    } catch (e) {
+      console.log(
+        'Public store menu fallback to MenuCatalog:',
+        e?.message
+      );
+    }
 
     const res = await api.get(
       `/api/MenuCatalog/encrypted/${encodeURIComponent(
@@ -834,19 +984,20 @@ const recalculateCart = (cart) => {
     Math.round(subTotal * 100) /
     100;
 
+  const cgstPercentage =
+    cart.cgstPercentage !== undefined ? Number(cart.cgstPercentage) : 2.5;
+  const sgstPercentage =
+    cart.sgstPercentage !== undefined ? Number(cart.sgstPercentage) : 2.5;
+
   const cgstAmount =
-    Math.round(
-      roundedSubTotal *
-        0.025 *
-        100
-    ) / 100;
+    cart.cgstAmount !== undefined
+      ? Number(cart.cgstAmount)
+      : Math.round(roundedSubTotal * (cgstPercentage / 100) * 100) / 100;
 
   const sgstAmount =
-    Math.round(
-      roundedSubTotal *
-        0.025 *
-        100
-    ) / 100;
+    cart.sgstAmount !== undefined
+      ? Number(cart.sgstAmount)
+      : Math.round(roundedSubTotal * (sgstPercentage / 100) * 100) / 100;
 
   const taxAmount =
     Math.round(
@@ -869,6 +1020,9 @@ const recalculateCart = (cart) => {
     subTotal: roundedSubTotal,
     taxableAmount:
       roundedSubTotal,
+    cgstPercentage,
+    sgstPercentage,
+    gstNumber: cart.gstNumber || null,
     cgstAmount,
     sgstAmount,
     taxAmount,
@@ -922,8 +1076,9 @@ export const getCart = async () => {
               '',
 
             imageUrl:
-              getOriginalImageUrl(
-                item.imageUrl
+              getItemImageUrl(
+                item.imageUrl,
+                item.isVeg !== undefined ? item.isVeg : true
               ),
 
             quantity:
@@ -993,14 +1148,29 @@ export const getCart = async () => {
 
             unit:
               item.unit || 1,
+
+            unitName:
+              item.unitName ||
+              getUnitDescription(item),
           })
         );
+
+      const availableOrderTypes =
+        Array.isArray(res.data.availableOrderTypes) && res.data.availableOrderTypes.length > 0
+          ? res.data.availableOrderTypes
+          : localCart.availableOrderTypes || [];
 
       const updated =
         recalculateCart({
           ...localCart,
           ...res.data,
           items: serverItems,
+          gstNumber: res.data.gstNumber ?? localCart.gstNumber ?? null,
+          cgstPercentage: res.data.cgstPercentage ?? localCart.cgstPercentage ?? 2.5,
+          sgstPercentage: res.data.sgstPercentage ?? localCart.sgstPercentage ?? 2.5,
+          cgstAmount: res.data.cgstAmount,
+          sgstAmount: res.data.sgstAmount,
+          availableOrderTypes,
         });
 
       saveLocalCart(updated);
@@ -1060,12 +1230,37 @@ export const addToCart = async (
     options.itemName ||
     `Dish #${itemId}`;
 
+  const isItemVeg =
+    itemInfo.isVeg !== undefined
+      ? itemInfo.isVeg
+      : options.isVeg !== undefined
+      ? options.isVeg
+      : true;
+
   const imageUrl =
-    getOriginalImageUrl(
+    getItemImageUrl(
       itemInfo.imageUrl ||
         options.imageUrl ||
-        ''
+        '',
+      isItemVeg
     );
+
+  const unitName =
+    itemInfo.unitName ||
+    itemInfo.unitDescription ||
+    options.unitName ||
+    options.unitDescription ||
+    getUnitDescription(itemInfo || options);
+
+  const unitId = Number(
+    itemInfo.unit ||
+      itemInfo.unitId ||
+      options.unit ||
+      options.unitId ||
+      1
+  );
+
+  const finalQuantity = Number(quantity || 1);
 
   if (existingIndex >= 0) {
     const oldItem =
@@ -1082,6 +1277,8 @@ export const addToCart = async (
     ] = {
       ...oldItem,
       quantity: newQty,
+      unitName: oldItem.unitName || unitName,
+      unitDescription: oldItem.unitDescription || unitName,
       totalAmount:
         Number(
           oldItem.unitPrice ||
@@ -1104,7 +1301,17 @@ export const addToCart = async (
       imageUrl,
 
       quantity:
-        Number(quantity),
+        finalQuantity,
+
+      unitName,
+
+      unitDescription:
+        unitName,
+
+      unit:
+        unitId,
+
+      unitId,
 
       unitPrice,
 
@@ -1113,18 +1320,45 @@ export const addToCart = async (
 
       totalAmount:
         unitPrice *
-        Number(quantity),
+        finalQuantity,
+
+      variantId:
+        options.variantId ||
+        itemInfo.variantId ||
+        null,
+
+      variantName:
+        options.variantName ||
+        itemInfo.variantName ||
+        null,
+
+      variantPrice:
+        Number(
+          options.variantPrice ||
+            itemInfo.variantPrice ||
+            0
+        ),
+
+      modifiers:
+        Array.isArray(
+          options.modifiers ||
+            itemInfo.modifiers
+        )
+          ? options.modifiers ||
+            itemInfo.modifiers
+          : [],
 
       cookingInstruction:
         options.cookingInstruction ||
         '',
 
+      isVeg:
+        isItemVeg,
+
       isAvailable: true,
 
       restaurantId:
         Number(restaurantId) || 1,
-
-      unit: 1,
     });
   }
 
@@ -1158,7 +1392,14 @@ export const addToCart = async (
           Number(itemId),
 
         quantity:
-          Number(quantity),
+          finalQuantity,
+
+        unitName,
+
+        unitId,
+
+        unit:
+          unitId,
 
         variantId:
           options.variantId ||
@@ -1591,6 +1832,30 @@ const normalizeOrder = (
           calculatedTotal
       ),
 
+    gstNumber:
+      order.gstNumber ||
+      null,
+
+    cgstPercentage:
+      order.cgstPercentage !== undefined
+        ? Number(order.cgstPercentage)
+        : 2.5,
+
+    sgstPercentage:
+      order.sgstPercentage !== undefined
+        ? Number(order.sgstPercentage)
+        : 2.5,
+
+    paymentOrderId:
+      order.paymentOrderId ||
+      order.cashfreeOrderId ||
+      null,
+
+    cashfreeOrderId:
+      order.cashfreeOrderId ||
+      order.paymentOrderId ||
+      null,
+
     deviceId:
       order.deviceId ||
       getDeviceId(),
@@ -1698,9 +1963,81 @@ export const placeOrder =
           100
       ) / 100;
 
+    const backendItems = normalizedItems.map((item) => ({
+      itemId: Number(item.itemId),
+      quantity: Number(item.quantity || 1),
+      unitId: Number(item.unit || item.unitId || 1),
+      cookingInstruction: item.cookingInstruction || null,
+    }));
+
+    const returnUrl =
+      orderPayload.returnUrl ||
+      (typeof window !== 'undefined'
+        ? `${window.location.origin}${window.location.pathname}?order_id={order_id}&restaurantId=${
+            Number(orderPayload.restaurantId) || 1
+          }${orderPayload.tableId ? `&tableId=${orderPayload.tableId}` : ''}`
+        : null);
+
+    const publicPlaceOrderPayload = {
+      restaurantId: Number(orderPayload.restaurantId) || 1,
+      encryptedRestaurantId: orderPayload.encryptedRestaurantId || '',
+      tableId: orderPayload.tableId ? Number(orderPayload.tableId) : null,
+      tableNumber: orderPayload.tableNumber
+        ? String(orderPayload.tableNumber)
+        : orderPayload.tableId
+        ? String(orderPayload.tableId)
+        : null,
+      customerName: orderPayload.name || 'Guest Diner',
+      customerPhone: orderPayload.mobileNumber || '',
+      orderTypeId: Number(orderPayload.orderTypeId || 1),
+      paymentMode:
+        orderPayload.paymentMode ||
+        (orderPayload.paymentMethod === 'cashfree' ? 'ONLINE' : 'CASH'),
+      remarks: orderPayload.remarks || '',
+      source: orderPayload.source || 'QR_DINEIN',
+      returnUrl,
+      items: backendItems,
+    };
+
+    let serverOrderId = null;
+    let paymentSessionId = null;
+    let paymentLink = null;
+
+    try {
+      // Primary: Route customer orders to PublicDineInController (/api/public/store/order/place)
+      const serverRes = await api.post(
+        '/api/public/store/order/place',
+        publicPlaceOrderPayload
+      );
+      if (serverRes?.data && (serverRes.data.orderId || serverRes.data.id)) {
+        serverOrderId = Number(serverRes.data.orderId || serverRes.data.id);
+        paymentSessionId = serverRes.data.paymentSessionId || null;
+        paymentLink = serverRes.data.paymentLink || null;
+      }
+    } catch (publicErr) {
+      console.warn(
+        'PublicDineInController /api/public/store/order/place fallback:',
+        publicErr?.message
+      );
+      try {
+        const fallbackRes = await api.post('/api/Order/PlaceOrder', {
+          ...publicPlaceOrderPayload,
+          name: publicPlaceOrderPayload.customerName,
+          mobileNumber: publicPlaceOrderPayload.customerPhone,
+        });
+        if (fallbackRes?.data && (fallbackRes.data.orderId || fallbackRes.data.id)) {
+          serverOrderId = Number(fallbackRes.data.orderId || fallbackRes.data.id);
+        }
+      } catch (fallbackErr) {
+        console.warn('Fallback /api/Order/PlaceOrder error:', fallbackErr?.message);
+      }
+    }
+
+    const assignedId = serverOrderId || nextId;
+
     const newOrder =
       normalizeOrder({
-        id: nextId,
+        id: assignedId,
 
         restaurantId:
           Number(
@@ -1777,6 +2114,30 @@ export const placeOrder =
               grandTotal
           ),
 
+        gstNumber:
+          orderPayload.gstNumber ||
+          null,
+
+        cgstPercentage:
+          orderPayload.cgstPercentage !== undefined
+            ? Number(orderPayload.cgstPercentage)
+            : 2.5,
+
+        sgstPercentage:
+          orderPayload.sgstPercentage !== undefined
+            ? Number(orderPayload.sgstPercentage)
+            : 2.5,
+
+        cashfreeOrderId:
+          orderPayload.cashfreeOrderId ||
+          orderPayload.paymentOrderId ||
+          null,
+
+        paymentOrderId:
+          orderPayload.paymentOrderId ||
+          orderPayload.cashfreeOrderId ||
+          null,
+
         createdAt:
           new Date().toISOString(),
 
@@ -1828,6 +2189,10 @@ export const placeOrder =
       order:
         newOrder,
 
+      paymentSessionId,
+
+      paymentLink,
+
       message:
         `Order #${newOrder.id} placed successfully!`,
     };
@@ -1838,7 +2203,29 @@ export const placeOrder =
 ========================================================= */
 
 export const getOrder =
-  async (orderId) => {
+  async (orderId, phone = '') => {
+    try {
+      // Primary: Route to PublicDineInController tracking endpoint
+      const res = await api.get(
+        `/api/public/store/order/track/${orderId}${phone ? `?phone=${encodeURIComponent(phone)}` : ''}`
+      );
+      if (res?.data && (res.data.orderId || res.data.id)) {
+        return normalizeOrder({
+          ...res.data,
+          id: res.data.orderId || res.data.id,
+        });
+      }
+    } catch (e) {
+      try {
+        const orderRes = await api.get(`/api/Order/${orderId}`);
+        if (orderRes?.data && orderRes.data.id) {
+          return normalizeOrder(orderRes.data);
+        }
+      } catch (orderErr) {
+        // Fallback to local
+      }
+    }
+
     const orders =
       getLocalOrders();
 
@@ -2187,6 +2574,19 @@ export const initiateCashfreeCheckout =
       }
     );
 
+    const isTableOrdering = checkoutData.isTableOrderingEnabled !== false;
+    const effectiveTable = isTableOrdering && tableNumber && String(tableNumber).trim() !== '' && String(tableNumber) !== '0'
+      ? String(tableNumber).trim()
+      : null;
+
+    const returnUrl =
+      checkoutData.returnUrl ||
+      (typeof window !== 'undefined'
+        ? `${window.location.origin}${window.location.pathname}?order_id={order_id}&restaurantId=${restaurantId}${
+            effectiveTable ? `&tableId=${encodeURIComponent(effectiveTable)}` : ''
+          }`
+        : null);
+
     const res =
       await api.post(
         '/api/CashFreepayment/initiate-checkout',
@@ -2204,6 +2604,8 @@ export const initiateCashfreeCheckout =
           tableNumber,
 
           orderNotes,
+
+          returnUrl,
 
           deviceId,
         }
@@ -2244,6 +2646,56 @@ export const getCashfreePaymentStatus =
 
     return res.data;
   };
+
+
+/* =========================================================
+   PUBLIC STORE CONFIRM PAYMENT (PublicDineInController)
+========================================================= */
+
+export const confirmOrderPayment = async (orderId, paymentOrderId = '') => {
+  try {
+    const res = await api.post(
+      `/api/public/store/order/${orderId}/confirm-payment${
+        paymentOrderId ? `?paymentOrderId=${encodeURIComponent(paymentOrderId)}` : ''
+      }`
+    );
+    if (res?.data && (res.data.orderId || res.data.id)) {
+      const normalized = normalizeOrder({
+        ...res.data,
+        id: res.data.orderId || res.data.id,
+      });
+
+      // Sync with local orders
+      const orders = getLocalOrders();
+      const updated = orders.map((o) =>
+        Number(o.id) === Number(orderId)
+          ? { ...o, paymentStatus: 'SUCCESS', orderStatus: 'Confirmed' }
+          : o
+      );
+      saveLocalOrders(updated);
+
+      return normalized;
+    }
+  } catch (err) {
+    console.warn('Public confirm-payment error:', err?.message);
+  }
+
+  return updateOrderPaymentStatus(orderId, 'SUCCESS');
+};
+
+/* =========================================================
+   PUBLIC STORE CHECKOUT INITIATION (PublicDineInController)
+========================================================= */
+
+export const initiatePublicOrderCheckout = async (orderId, returnUrl = null, notifyUrl = null) => {
+  const queryParams = new URLSearchParams();
+  if (returnUrl) queryParams.set('returnUrl', returnUrl);
+  if (notifyUrl) queryParams.set('notifyUrl', notifyUrl);
+  const qStr = queryParams.toString() ? `?${queryParams.toString()}` : '';
+
+  const res = await api.post(`/api/public/store/order/${orderId}/checkout${qStr}`);
+  return res.data;
+};
 
 /* =========================================================
    UPDATE PAYMENT STATUS

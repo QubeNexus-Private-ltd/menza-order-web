@@ -170,6 +170,11 @@ export default function App() {
         'restaurantId'
       ) || 1;
 
+    const paymentReturnOrderId =
+      searchParams.get('order_id') ||
+      searchParams.get('orderId') ||
+      searchParams.get('cf_order_id');
+
     const initializeMenu =
       async () => {
         let targetEncryptedId =
@@ -194,6 +199,110 @@ export default function App() {
           targetEncryptedId,
           targetTableNum
         );
+
+        if (paymentReturnOrderId) {
+          try {
+            let statusRes = null;
+            try {
+              statusRes = await api.getCashfreePaymentStatus(
+                paymentReturnOrderId
+              );
+            } catch (statusErr) {
+              console.log(
+                'Cashfree status check:',
+                statusErr?.message
+              );
+            }
+
+            const ordersList =
+              (await api.getMyOrders()) || [];
+
+            let targetOrder =
+              ordersList.find(
+                (o) =>
+                  String(o.cashfreeOrderId) ===
+                    String(paymentReturnOrderId) ||
+                  String(o.paymentOrderId) ===
+                    String(paymentReturnOrderId) ||
+                  String(o.id) ===
+                    String(paymentReturnOrderId)
+              );
+
+            if (!targetOrder && ordersList.length > 0) {
+              targetOrder = ordersList[0];
+            }
+
+            if (targetOrder) {
+              // 1. Confirm payment and transition status via PublicDineInController endpoint
+              let confirmedOrder = null;
+              try {
+                confirmedOrder = await api.confirmOrderPayment(
+                  targetOrder.id,
+                  paymentReturnOrderId
+                );
+              } catch (confErr) {
+                console.log('Public confirmOrderPayment error:', confErr?.message);
+              }
+
+              // 2. Fetch full tracked order details via PublicDineInController
+              let fullOrder = confirmedOrder;
+              if (!fullOrder) {
+                try {
+                  fullOrder = await api.getOrder(targetOrder.id);
+                } catch (ordErr) {
+                  console.log('Fetch updated order error:', ordErr?.message);
+                }
+              }
+
+              const finalOrder = {
+                ...(fullOrder || targetOrder),
+                items: (fullOrder?.items && fullOrder.items.length > 0)
+                  ? fullOrder.items
+                  : (targetOrder.items || []),
+                paymentStatus: 'SUCCESS',
+                orderStatus: 'Confirmed',
+              };
+
+              setActiveOrder(finalOrder);
+              setOrderTrackerOpen(true);
+              showToast(
+                `🎉 Payment completed! Order #${finalOrder.id} is confirmed and sent to the kitchen.`
+              );
+
+              await api.clearCart();
+              syncCart(null);
+
+              if (
+                typeof window !== 'undefined' &&
+                window.history?.replaceState
+              ) {
+                const cleanUrl = new URL(
+                  window.location.href
+                );
+                cleanUrl.searchParams.delete('order_id');
+                cleanUrl.searchParams.delete('orderId');
+                cleanUrl.searchParams.delete('cf_order_id');
+                cleanUrl.searchParams.delete('payment_status');
+
+                // If table ordering is disabled or order has no table, remove tableId from URL
+                if (catData?.isTableOrderingEnabled === false || !targetOrder.tableId) {
+                  cleanUrl.searchParams.delete('tableId');
+                }
+
+                window.history.replaceState(
+                  {},
+                  document.title,
+                  cleanUrl.toString()
+                );
+              }
+            }
+          } catch (e) {
+            console.error(
+              'Post payment redirect handling error:',
+              e
+            );
+          }
+        }
       };
 
     initializeMenu();
@@ -395,17 +504,28 @@ export default function App() {
   const handleAddToCart =
     async (
       itemId,
-      quantity = 1
+      quantity = 1,
+      itemData = null
     ) => {
       const restId =
         catalog
           ? catalog.restaurantId
           : 1;
 
+      const itemObj =
+        itemData ||
+        (items || []).find(
+          (i) =>
+            Number(i.itemId) ===
+            Number(itemId)
+        ) ||
+        null;
+
       await api.addToCart(
         restId,
         itemId,
-        quantity
+        quantity,
+        { item: itemObj }
       );
 
       await refreshCart();
@@ -1050,6 +1170,9 @@ export default function App() {
             setScannerOpen(true)
           }
           cartItems={cartItems}
+          openCart={() =>
+            setCartModalOpen(true)
+          }
           onAddToCart={
             handleAddToCart
           }

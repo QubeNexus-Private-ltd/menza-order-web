@@ -22,9 +22,36 @@ import {
   Banknote,
   ShieldCheck,
   AlertTriangle,
-  MessageSquare,
+  ImageOff,
 } from 'lucide-react';
 import * as api from '../services/api';
+
+function ItemImageWithFallback({ uri, isVeg, style, resizeMode = 'cover' }) {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [uri]);
+
+  const hasValidUri = uri && typeof uri === 'string' && uri.trim() !== '' && uri !== api.IMAGE_NOT_AVAILABLE;
+
+  if (!hasValidUri || hasError) {
+    return (
+      <View style={[style, styles.noImageThumb]}>
+        <ImageOff size={18} color="#64748b" />
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode={resizeMode}
+      onError={() => setHasError(true)}
+    />
+  );
+}
 
 const getOrderTypeIcon = (typeName) => {
   const lower = (typeName || '').toLowerCase();
@@ -63,41 +90,56 @@ export default function CartModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [processingPayment, setProcessingPayment] = useState(false);
   const [fetchingCart, setFetchingCart] = useState(false);
-  const [editingNotesItemId, setEditingNotesItemId] = useState(null);
-  const [itemNoteText, setItemNoteText] = useState('');
   const [updatingItemId, setUpdatingItemId] = useState(null);
   const [removingItemId, setRemovingItemId] = useState(null);
   const [clearingCart, setClearingCart] = useState(false);
-  const [savingNoteItemId, setSavingNoteItemId] = useState(null);
+  const [liveOrderTypes, setLiveOrderTypes] = useState([]);
 
-  // Keep the existing behavior: refresh the server cart whenever the modal opens.
- useEffect(() => {
-  if (!visible || !onRefreshCart) return;
+  // Refresh server cart and fetch live OrderTypeMaster whenever the modal opens.
+  useEffect(() => {
+    if (!visible) return;
 
-  let mounted = true;
+    let mounted = true;
 
-  setFetchingCart(true);
+    const fetchCartAndOrderTypes = async () => {
+      setFetchingCart(true);
 
-  Promise.resolve(onRefreshCart())
-    .catch((error) => {
-      console.error('Cart refresh error:', error);
+      try {
+        if (onRefreshCart) {
+          await onRefreshCart();
+        }
 
-      if (mounted) {
-        setErrorMsg('Unable to refresh cart. Please try again.');
+        const restId = cart?.restaurantId || catalog?.restaurantId || null;
+        const types = await api.getOrderTypes(restId);
+
+        if (mounted && Array.isArray(types) && types.length > 0) {
+          setLiveOrderTypes(types);
+        }
+      } catch (error) {
+        console.error('Cart and OrderTypeMaster refresh error:', error);
+        if (mounted) {
+          setErrorMsg('Unable to refresh cart. Please try again.');
+        }
+      } finally {
+        if (mounted) {
+          setFetchingCart(false);
+        }
       }
-    })
-    .finally(() => {
-      if (mounted) {
-        setFetchingCart(false);
-      }
-    });
+    };
 
-  return () => {
-    mounted = false;
-  };
-}, [visible]);
+    fetchCartAndOrderTypes();
+
+    return () => {
+      mounted = false;
+    };
+  }, [visible]);
+
   const effectiveOrderTypes =
-    Array.isArray(orderTypes) && orderTypes.length > 0
+    Array.isArray(liveOrderTypes) && liveOrderTypes.length > 0
+      ? liveOrderTypes
+      : Array.isArray(cart?.availableOrderTypes) && cart.availableOrderTypes.length > 0
+      ? cart.availableOrderTypes
+      : Array.isArray(orderTypes) && orderTypes.length > 0
       ? orderTypes
       : [
           { id: 1, typeName: 'Dine-In', description: 'Dine-In order type' },
@@ -116,6 +158,9 @@ export default function CartModal({
   const taxableAmount = Number(cart?.taxableAmount ?? 0);
   const cgst = Number(cart?.cgstAmount ?? 0);
   const sgst = Number(cart?.sgstAmount ?? 0);
+  const cgstPercentage = Number(cart?.cgstPercentage ?? 2.5);
+  const sgstPercentage = Number(cart?.sgstPercentage ?? 2.5);
+  const gstNumber = cart?.gstNumber || null;
   const taxAmount = Number(cart?.taxAmount ?? (cgst + sgst));
   const platformFee = Number(cart?.platformFee ?? 0);
   const grandTotal = Number(cart?.totalAmount ?? 0);
@@ -125,41 +170,7 @@ export default function CartModal({
 
   const isItemBusy = (itemId) =>
     updatingItemId === itemId ||
-    removingItemId === itemId ||
-    savingNoteItemId === itemId;
-
-  const handleOpenNoteEditor = (item) => {
-    setErrorMsg('');
-    setEditingNotesItemId(item.itemId);
-    setItemNoteText(item.cookingInstruction || '');
-  };
-
-  const handleSaveNote = async (itemId, currentQty) => {
-    if (!onUpdateCartQuantity) return;
-
-    try {
-      setErrorMsg('');
-      setSavingNoteItemId(itemId);
-
-      await onUpdateCartQuantity(
-        itemId,
-        currentQty,
-        itemNoteText.trim() || null
-      );
-
-      setEditingNotesItemId(null);
-      setItemNoteText('');
-    } catch (error) {
-      console.error('Save cart note error:', error);
-      setErrorMsg(
-        error?.response?.data?.message ||
-          error?.message ||
-          'Unable to save special instruction.'
-      );
-    } finally {
-      setSavingNoteItemId(null);
-    }
-  };
+    removingItemId === itemId;
 
   const handleQuantityChange = async (item, nextQuantity) => {
     if (!onUpdateCartQuantity || isItemBusy(item.itemId)) return;
@@ -234,6 +245,18 @@ export default function CartModal({
       return;
     }
 
+    const cleanMobile = mobileNumber.trim();
+    if (!cleanMobile) {
+      setErrorMsg('Please enter your 10-digit mobile number.');
+      return;
+    }
+
+    const phoneDigits = cleanMobile.replace(/\D/g, '');
+    if (phoneDigits.length < 10) {
+      setErrorMsg('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
     if (hasUnavailableItems) {
       setErrorMsg(
         'Please remove out-of-stock items from your cart before proceeding.'
@@ -260,10 +283,12 @@ export default function CartModal({
       cookingInstruction: item.cookingInstruction || null,
     }));
 
+    const cleanPhone = phoneDigits.slice(-10);
+
     const orderPayload = {
       restaurantId: restId,
       name: guestName.trim(),
-      mobileNumber: mobileNumber.trim(),
+      mobileNumber: cleanPhone,
       remarks: remarks.trim(),
       isHomeDelivery: false,
       orderTypeId,
@@ -275,45 +300,96 @@ export default function CartModal({
         paymentMethod === 'cashfree'
           ? 'CASHFREE_SPLIT'
           : 'COUNTER_CASH',
+      gstNumber: gstNumber || null,
+      cgstPercentage,
+      sgstPercentage,
     };
 
     if (paymentMethod === 'cashfree') {
       setProcessingPayment(true);
 
       try {
+        const isTableOrdering = catalog?.isTableOrderingEnabled !== false;
+        const effectiveTable = isTableOrdering && activeTable ? String(activeTable.id) : null;
+
         const checkoutRes = await api.initiateCashfreeCheckout({
           restaurantId: restId,
           amount: Math.round(grandTotal * 100) / 100,
           customerName: guestName.trim(),
-          customerPhone: mobileNumber || '9999999999',
-          tableNumber: activeTable ? String(activeTable.id) : '1',
-          orderNotes: remarks,
+          customerPhone: cleanPhone,
+          customerEmail: `${cleanPhone}@menza.customer`,
+          tableNumber: effectiveTable || '',
+          isTableOrderingEnabled: isTableOrdering,
+          orderNotes: remarks.trim(),
         });
 
-        if (checkoutRes && checkoutRes.paymentLink) {
-          window.location.href = checkoutRes.paymentLink;
+        const paymentSessionId =
+          checkoutRes?.paymentSessionId ||
+          checkoutRes?.payment_session_id ||
+          checkoutRes?.data?.paymentSessionId;
+
+        const paymentLink =
+          checkoutRes?.paymentLink ||
+          checkoutRes?.payment_link ||
+          checkoutRes?.data?.paymentLink;
+
+        const cashfreeOrderId =
+          checkoutRes?.orderId ||
+          checkoutRes?.order_id ||
+          checkoutRes?.data?.orderId;
+
+        // Persist pending order with full items before navigating away
+        await api.createPendingPaymentOrder({
+          ...orderPayload,
+          tableId: isTableOrdering && activeTable ? activeTable.id : null,
+          tableNumber: effectiveTable,
+          paymentStatus: 'Pending',
+          orderStatus: 'PendingPayment',
+          paymentOrderId: cashfreeOrderId,
+          cashfreeOrderId,
+          subTotal: subTotal,
+          cgstAmount: cgst,
+          sgstAmount: sgst,
+          totalAmount: grandTotal,
+        });
+
+        if (typeof window !== 'undefined' && window.Cashfree && paymentSessionId) {
+          try {
+            const cashfree = window.Cashfree({
+              mode: 'sandbox',
+            });
+
+            cashfree.checkout({
+              paymentSessionId: paymentSessionId,
+              redirectTarget: '_self',
+            });
+            return;
+          } catch (sdkError) {
+            console.warn('Cashfree SDK checkout fallback to paymentLink:', sdkError);
+          }
+        }
+
+        if (paymentLink) {
+          window.location.href = paymentLink;
           return;
         }
 
         await onPlaceOrder({
           ...orderPayload,
-          cashfreeOrderId: checkoutRes?.orderId || null,
+          paymentStatus:
+            checkoutRes?.status === 'SUCCESS' || checkoutRes?.status === 'PAID'
+              ? 'SUCCESS'
+              : 'Pending',
+          paymentOrderId: cashfreeOrderId,
+          cashfreeOrderId,
         });
       } catch (err) {
-        console.error('Cashfree checkout error:', err);
-
-        // Preserve the existing fallback behavior.
-        try {
-          await onPlaceOrder(orderPayload);
-        } catch (orderError) {
-          console.error('Fallback place order error:', orderError);
-          setErrorMsg(
-            orderError?.response?.data?.message ||
-              orderError?.message ||
-              'Unable to place order.'
-          );
-        }
-      } finally {
+        console.error('Cashfree checkout API error:', err);
+        setErrorMsg(
+          err?.response?.data?.message ||
+            err?.message ||
+            'Unable to initiate Cashfree payment. Please try again or choose Pay at Counter.'
+        );
         setProcessingPayment(false);
       }
     } else {
@@ -347,6 +423,18 @@ export default function CartModal({
     >
       <View style={styles.overlay}>
         <View style={styles.sheetContainer}>
+          {processingPayment && (
+            <View style={styles.paymentProcessingOverlay}>
+              <ActivityIndicator size="large" color="#10b981" />
+              <Text style={styles.paymentProcessingTitle}>
+                Connecting to Cashfree Payment Gateway...
+              </Text>
+              <Text style={styles.paymentProcessingSubtitle}>
+                Please wait while we redirect you to secure checkout. Do not close or refresh this page.
+              </Text>
+            </View>
+          )}
+
           <View style={styles.sheetHeader}>
             <View style={styles.headerTitleRow}>
               <ShoppingBag size={20} color="#10b981" />
@@ -421,9 +509,6 @@ export default function CartModal({
                   </View>
 
                   {activeCartItems.map((item) => {
-                    const isEditingNote =
-                      editingNotesItemId === item.itemId;
-
                     const itemUnitPrice = Number(
                       item.unitPrice ?? item.amount ?? 0
                     );
@@ -433,13 +518,10 @@ export default function CartModal({
                         itemUnitPrice * Number(item.quantity || 0)
                     );
 
-                    const unitLabel =
-                      item.unitName ||
-                      (item.unit !== undefined &&
-                      item.unit !== null &&
-                      item.unit !== ''
-                        ? `Unit #${item.unit}`
-                        : null);
+                    const unitDescription =
+                      api.getUnitDescription
+                        ? api.getUnitDescription(item)
+                        : (item.unitName || 'Piece');
 
                     return (
                       <View
@@ -451,12 +533,9 @@ export default function CartModal({
                         ]}
                       >
                         <View style={styles.cartRow}>
-                          <Image
-                            source={{
-                              uri:
-                                item.imageUrl ||
-                                'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600',
-                            }}
+                          <ItemImageWithFallback
+                            uri={item.imageUrl}
+                            isVeg={item.isVeg}
                             style={styles.itemThumb}
                           />
 
@@ -484,11 +563,19 @@ export default function CartModal({
                               </Text>
                             ) : null}
 
-                            {unitLabel ? (
+                            {unitDescription ? (
                               <Text style={styles.itemMetaText}>
-                                Unit: {unitLabel}
+                                Unit: {unitDescription}
                               </Text>
                             ) : null}
+
+                            <View style={styles.quantityBadgeRow}>
+                              <View style={styles.quantityBadge}>
+                                <Text style={styles.quantityBadgeText}>
+                                  Quantity: <Text style={styles.quantityBadgeBold}>{item.quantity}</Text>{unitDescription ? ` • ${unitDescription}` : ''}
+                                </Text>
+                              </View>
+                            </View>
 
                             <View style={styles.priceRow}>
                               <Text style={styles.priceLabel}>
@@ -518,25 +605,15 @@ export default function CartModal({
                                 </View>
                               )}
 
-                            {item.cookingInstruction &&
-                            !isEditingNote ? (
-                              <TouchableOpacity
-                                style={styles.instructionPill}
-                                onPress={() =>
-                                  handleOpenNoteEditor(item)
-                                }
-                              >
-                                <MessageSquare
-                                  size={11}
-                                  color="#10b981"
-                                />
+                            {item.cookingInstruction ? (
+                              <View style={styles.instructionPill}>
                                 <Text
                                   style={styles.instructionText}
                                   numberOfLines={1}
                                 >
                                   {item.cookingInstruction}
                                 </Text>
-                              </TouchableOpacity>
+                              </View>
                             ) : null}
                           </View>
 
@@ -582,7 +659,7 @@ export default function CartModal({
 
                             <View style={styles.itemTotalRow}>
                               <Text style={styles.itemTotalLabel}>
-                                Item Total
+                                {item.quantity} × ₹{money(itemUnitPrice)}
                               </Text>
                               <Text style={styles.itemSubtotal}>
                                 ₹{money(itemLineTotal)}
@@ -610,77 +687,6 @@ export default function CartModal({
                             </TouchableOpacity>
                           </View>
                         </View>
-
-                        {isEditingNote ? (
-                          <View style={styles.inlineNoteBox}>
-                            <TextInput
-                              style={styles.inlineNoteInput}
-                              placeholder="Special chef note (e.g. less spicy)..."
-                              placeholderTextColor="#64748b"
-                              value={itemNoteText}
-                              onChangeText={setItemNoteText}
-                              editable={
-                                savingNoteItemId !== item.itemId
-                              }
-                            />
-
-                            <TouchableOpacity
-                              style={styles.saveNoteBtn}
-                              disabled={
-                                savingNoteItemId === item.itemId
-                              }
-                              onPress={() =>
-                                handleSaveNote(
-                                  item.itemId,
-                                  item.quantity
-                                )
-                              }
-                            >
-                              {savingNoteItemId === item.itemId ? (
-                                <ActivityIndicator
-                                  size="small"
-                                  color="#0f172a"
-                                />
-                              ) : (
-                                <Text style={styles.saveNoteBtnText}>
-                                  Save
-                                </Text>
-                              )}
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              style={styles.cancelNoteBtn}
-                              disabled={
-                                savingNoteItemId === item.itemId
-                              }
-                              onPress={() => {
-                                setEditingNotesItemId(null);
-                                setItemNoteText('');
-                              }}
-                            >
-                              <Text style={styles.cancelNoteBtnText}>
-                                Cancel
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        ) : (
-                          !item.cookingInstruction && (
-                            <TouchableOpacity
-                              style={styles.addNoteBtn}
-                              onPress={() =>
-                                handleOpenNoteEditor(item)
-                              }
-                            >
-                              <MessageSquare
-                                size={11}
-                                color="#64748b"
-                              />
-                              <Text style={styles.addNoteBtnText}>
-                                + Add special instruction
-                              </Text>
-                            </TouchableOpacity>
-                          )
-                        )}
                       </View>
                     );
                   })}
@@ -737,13 +743,14 @@ export default function CartModal({
 
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>
-                      Mobile Number (Optional)
+                      Mobile Number *
                     </Text>
                     <TextInput
                       style={styles.textInput}
-                      placeholder="Enter 10-digit mobile number"
+                      placeholder="Enter 10-digit mobile number *"
                       placeholderTextColor="#64748b"
                       keyboardType="phone-pad"
+                      maxLength={15}
                       value={mobileNumber}
                       onChangeText={setMobileNumber}
                     />
@@ -877,7 +884,7 @@ export default function CartModal({
 
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryLabel}>
-                      CGST
+                      CGST {cgstPercentage > 0 ? `(${cgstPercentage}%)` : ''}
                     </Text>
                     <Text style={styles.summaryValue}>
                       ₹{money(cgst)}
@@ -886,7 +893,7 @@ export default function CartModal({
 
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryLabel}>
-                      SGST
+                      SGST {sgstPercentage > 0 ? `(${sgstPercentage}%)` : ''}
                     </Text>
                     <Text style={styles.summaryValue}>
                       ₹{money(sgst)}
@@ -901,6 +908,14 @@ export default function CartModal({
                       ₹{money(taxAmount)}
                     </Text>
                   </View>
+
+                  {gstNumber ? (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.gstNumberLabel}>
+                        GSTIN: {gstNumber}
+                      </Text>
+                    </View>
+                  ) : null}
 
                   {platformFee > 0 ? (
                     <View style={styles.summaryRow}>
@@ -991,6 +1006,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheetContainer: {
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
     backgroundColor: '#0f172a',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -1108,6 +1126,16 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#0f172a',
   },
+  noImageThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
   itemInfo: {
     flex: 1,
     gap: 3,
@@ -1137,6 +1165,30 @@ const styles = StyleSheet.create({
   itemMetaText: {
     color: '#94a3b8',
     fontSize: 11,
+  },
+  quantityBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+    marginBottom: 2,
+  },
+  quantityBadge: {
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.25)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  quantityBadgeText: {
+    color: '#93c5fd',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  quantityBadgeBold: {
+    color: '#60a5fa',
+    fontWeight: '800',
+    fontSize: 12,
   },
   priceRow: {
     flexDirection: 'row',
@@ -1408,6 +1460,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  gstNumberLabel: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
   divider: {
     height: 1,
     backgroundColor: '#334155',
@@ -1468,5 +1526,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  paymentProcessingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    zIndex: 9999,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    borderRadius: 24,
+  },
+  paymentProcessingTitle: {
+    color: '#f8fafc',
+    fontSize: 17,
+    fontWeight: '700',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  paymentProcessingSubtitle: {
+    color: '#94a3b8',
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 18,
   },
 });

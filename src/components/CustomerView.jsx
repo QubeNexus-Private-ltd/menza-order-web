@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,38 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { Search, Plus, Minus, Bell, FileText, QrCode, Sparkles, Check, Building, MapPin, Lock, ShoppingBag, ArrowRight } from 'lucide-react';
+import { Search, Plus, Minus, Bell, FileText, QrCode, Sparkles, Check, Building, MapPin, Lock, ShoppingBag, ArrowRight, ImageOff } from 'lucide-react';
+import { DEFAULT_ITEM_IMAGE, IMAGE_NOT_AVAILABLE, getDefaultItemImage, getUnitDescription } from '../services/api';
+
+function ItemImageWithFallback({ uri, isVeg, style, resizeMode = 'cover' }) {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [uri]);
+
+  const hasValidUri = uri && typeof uri === 'string' && uri.trim() !== '' && uri !== IMAGE_NOT_AVAILABLE;
+
+  if (!hasValidUri || hasError) {
+    return (
+      <View style={[style, styles.noImageWrapper]}>
+        <View style={styles.noImageIconBox}>
+          <ImageOff size={22} color="#64748b" />
+        </View>
+        <Text style={styles.noImageText}>Image Not Available</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode={resizeMode}
+      onError={() => setHasError(true)}
+    />
+  );
+}
 
 export default function CustomerView({
   catalog,
@@ -67,18 +98,7 @@ export default function CustomerView({
   // Display item quantity/unit information from API data without inventing
   // meanings for numeric unit ids.
   const getUnitName = (item, cartItem) => {
-    const value =
-      item?.unitName ||
-      item?.unitTypeName ||
-      item?.unit?.name ||
-      item?.unit?.unitName ||
-      item?.unitDescription ||
-      cartItem?.unitName ||
-      cartItem?.unitTypeName ||
-      cartItem?.unit?.name ||
-      cartItem?.unit?.unitName;
-
-    return value ? String(value).trim() : '';
+    return getUnitDescription(cartItem || item);
   };
 
   const getVariantName = (item, cartItem) => {
@@ -169,7 +189,9 @@ export default function CustomerView({
               <View style={styles.tableBadge}>
                 <QrCode size={14} color="#f59e0b" />
                 <Text style={styles.tableBadgeText}>
-                  {activeTable ? `Table #${activeTable.id}` : 'General Guest'}
+                  {catalog?.isTableOrderingEnabled === false
+                    ? 'Quick QR Order'
+                    : (activeTable ? `Table #${activeTable.id}` : 'Direct QR Order')}
                 </Text>
               </View>
 
@@ -307,20 +329,19 @@ export default function CustomerView({
             const itemBusy = !!actionLoading[item.itemId];
             return (
               <View key={item.itemId} style={styles.card}>
-                {/* Image */}
-                {item.imageUrl ? (
-                  <View style={styles.imageWrapper}>
-                    <Image
-                      source={{ uri: item.imageUrl }}
-                      style={styles.itemImage}
-                      resizeMode="cover"
-                    />
-                    {/* Veg / Non-Veg Badge */}
-                    <View style={[styles.dietBadge, { borderColor: item.isVeg ? '#10b981' : '#ef4444' }]}>
-                      <View style={[styles.dietDot, { backgroundColor: item.isVeg ? '#10b981' : '#ef4444' }]} />
-                    </View>
+                {/* Dish Image with Fallback */}
+                <View style={styles.imageWrapper}>
+                  <ItemImageWithFallback
+                    uri={item.imageUrl}
+                    isVeg={item.isVeg}
+                    style={styles.itemImage}
+                    resizeMode="cover"
+                  />
+                  {/* Veg / Non-Veg Badge */}
+                  <View style={[styles.dietBadge, { borderColor: item.isVeg ? '#10b981' : '#ef4444' }]}>
+                    <View style={[styles.dietDot, { backgroundColor: item.isVeg ? '#10b981' : '#ef4444' }]} />
                   </View>
-                ) : null}
+                </View>
 
                 {/* Info Content */}
                 <View style={styles.cardContent}>
@@ -347,7 +368,7 @@ export default function CustomerView({
                     ) : qty === 0 ? (
                       <TouchableOpacity
                         style={styles.addButton}
-                        onPress={() => runItemAction(item.itemId, () => onAddToCart(item.itemId, 1))}
+                        onPress={() => runItemAction(item.itemId, () => onAddToCart(item.itemId, 1, item))}
                         disabled={itemBusy}
                         activeOpacity={0.8}
                       >
@@ -701,6 +722,30 @@ const styles = StyleSheet.create({
   itemImage: {
     width: '100%',
     height: '100%',
+  },
+  noImageWrapper: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  noImageIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#1e293b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  noImageText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
   dietBadge: {
     position: 'absolute',

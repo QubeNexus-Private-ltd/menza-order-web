@@ -10,9 +10,16 @@ import {
 import {
   X,
   CheckCircle2,
+  Clock,
   Flame,
   CreditCard,
   Receipt,
+  User,
+  Phone,
+  Calendar,
+  Tag,
+  MessageSquare,
+  Building,
 } from 'lucide-react';
 
 export default function OrderTrackerModal({
@@ -30,8 +37,22 @@ export default function OrderTrackerModal({
     'Delivered',
   ];
 
-  const normalizedStatus =
-    order.orderStatus || 'Pending';
+  const isOnline =
+    order.paymentMode === 'ONLINE' ||
+    order.paymentMode === 'CASHFREE' ||
+    order.paymentMode === 'UPI' ||
+    order.paymentMethod === 'cashfree' ||
+    order.paymentMethod === 'CASHFREE_SPLIT';
+
+  const isPaid =
+    order.paymentStatus === 'Paid' ||
+    order.paymentStatus === 'SUCCESS' ||
+    order.paymentStatus === 'PAID';
+
+  const isAwaitingPayment = isOnline && !isPaid;
+
+  const rawStatus = order.orderStatus || 'Pending';
+  const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
 
   const currentIdx =
     STATUSES.indexOf(normalizedStatus) >= 0
@@ -79,6 +100,26 @@ export default function OrderTrackerModal({
     order.paymentMethod ||
     'Pending';
 
+  const tokenNumber =
+    order.pickupToken ||
+    (order.tokenNumber ? `TK-${String(order.tokenNumber).padStart(3, '0')}` : `TK-${String(order.id).padStart(3, '0')}`);
+
+  const formattedDate = order.createdDateUtc
+    ? new Date(order.createdDateUtc).toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      })
+    : new Date().toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      });
+
+  const channelText = order.tableName
+    ? `Dine-In • ${order.tableName}`
+    : order.tableId
+    ? `Dine-In • Table #${order.tableId}`
+    : 'Direct Quick QR Order (Counter / Takeaway)';
+
   return (
     <Modal
       visible={visible}
@@ -92,15 +133,18 @@ export default function OrderTrackerModal({
           {/* HEADER */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <Text style={styles.orderIdText}>
-                ORDER #{order.id}
-              </Text>
+              <View style={styles.headerTopRow}>
+                <Text style={styles.orderIdText}>
+                  ORDER #{order.id}
+                </Text>
+                <View style={styles.tokenBadge}>
+                  <Tag size={12} color="#10b981" />
+                  <Text style={styles.tokenBadgeText}>{tokenNumber}</Text>
+                </View>
+              </View>
 
               <Text style={styles.tableNameText}>
-                {order.tableName ||
-                  (order.tableId
-                    ? `Table #${order.tableId}`
-                    : 'Takeaway')}
+                {channelText}
               </Text>
             </View>
 
@@ -123,28 +167,85 @@ export default function OrderTrackerModal({
             showsVerticalScrollIndicator={false}
           >
 
-            {/* ORDER SUCCESS */}
-            <View style={styles.successCard}>
-              <View style={styles.successIcon}>
-                <CheckCircle2
-                  size={28}
-                  color="#10b981"
-                />
+            {/* ORDER STATUS BANNER */}
+            <View style={[styles.successCard, isAwaitingPayment && { borderColor: 'rgba(245, 158, 11, 0.3)', backgroundColor: 'rgba(245, 158, 11, 0.08)' }]}>
+              <View style={[styles.successIcon, isAwaitingPayment && { backgroundColor: 'rgba(245, 158, 11, 0.2)' }]}>
+                {isAwaitingPayment ? (
+                  <Clock
+                    size={28}
+                    color="#f59e0b"
+                  />
+                ) : (
+                  <CheckCircle2
+                    size={28}
+                    color="#10b981"
+                  />
+                )}
               </View>
 
               <View style={styles.successTextBox}>
-                <Text style={styles.successTitle}>
-                  Order Received
+                <Text style={[styles.successTitle, isAwaitingPayment && { color: '#f59e0b' }]}>
+                  {isAwaitingPayment
+                    ? 'Payment Pending'
+                    : isPaid
+                    ? 'Payment Confirmed & Order Confirmed'
+                    : 'Order Placed (Pay at Counter)'}
                 </Text>
 
                 <Text style={styles.successSubtitle}>
-                  Your order has been sent to
-                  the restaurant kitchen.
+                  {isAwaitingPayment
+                    ? 'Awaiting online payment. Your order will be sent to the kitchen once payment is marked PAID.'
+                    : 'Your order has been confirmed and dispatched to the restaurant kitchen.'}
                 </Text>
               </View>
             </View>
 
-            {/* STATUS */}
+            {/* CUSTOMER & ORDER INFO CARD */}
+            <View style={styles.card}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionIcon}>
+                  <User size={16} color="#10b981" />
+                </View>
+                <Text style={styles.cardTitle}>Order & Customer Details</Text>
+              </View>
+
+              <View style={styles.infoGrid}>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Customer Name:</Text>
+                  <Text style={styles.infoValue}>
+                    {order.customerName || order.name || 'Guest Diner'}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Mobile Number:</Text>
+                  <Text style={styles.infoValue}>
+                    {order.mobileNumber || order.customerPhone || 'N/A'}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Order Time:</Text>
+                  <Text style={styles.infoValue}>{formattedDate}</Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Dining Channel:</Text>
+                  <Text style={styles.infoValue}>{channelText}</Text>
+                </View>
+
+                {order.remarks ? (
+                  <View style={styles.remarksBox}>
+                    <MessageSquare size={13} color="#f59e0b" />
+                    <Text style={styles.remarksText}>
+                      Special Request: {order.remarks}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+
+            {/* STATUS TIMELINE */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>
                 Live Kitchen Status
@@ -241,7 +342,9 @@ export default function OrderTrackerModal({
                       : normalizedStatus ===
                         'Delivered'
                       ? 'Enjoy your meal!'
-                      : 'Order received by restaurant kitchen.'}
+                      : isAwaitingPayment
+                      ? 'Awaiting payment confirmation before kitchen prep.'
+                      : 'Order confirmed and queued in kitchen.'}
                   </Text>
 
                   <Text
@@ -249,8 +352,7 @@ export default function OrderTrackerModal({
                       styles.calloutSub
                     }
                   >
-                    Estimated preparation time
-                    ~ 15 to 20 mins
+                    Estimated preparation time ~ 15 to 20 mins
                   </Text>
                 </View>
               </View>
@@ -273,7 +375,7 @@ export default function OrderTrackerModal({
                 <Text
                   style={styles.cardTitle}
                 >
-                  Ordered Items
+                  Ordered Items ({items.reduce((s, i) => s + (Number(i.quantity) || 1), 0)})
                 </Text>
               </View>
 
@@ -308,6 +410,8 @@ export default function OrderTrackerModal({
                         unitPrice *
                           quantity
                     );
+
+                  const unitDesc = item.unitName || item.unitDescription || (item.unit ? `Unit #${item.unit}` : '');
 
                   return (
                     <View
@@ -351,12 +455,14 @@ export default function OrderTrackerModal({
                             styles.unitPrice
                           }
                         >
-                          ₹
-                          {unitPrice.toFixed(
-                            2
-                          )}{' '}
-                          each
+                          {unitDesc ? `${unitDesc} • ` : ''}₹{unitPrice.toFixed(2)} each
                         </Text>
+
+                        {item.cookingInstruction ? (
+                          <Text style={styles.itemInstruction}>
+                            Note: {item.cookingInstruction}
+                          </Text>
+                        ) : null}
                       </View>
 
                       <Text
@@ -364,10 +470,7 @@ export default function OrderTrackerModal({
                           styles.itemPrice
                         }
                       >
-                        ₹
-                        {itemTotal.toFixed(
-                          2
-                        )}
+                        ₹{itemTotal.toFixed(2)}
                       </Text>
                     </View>
                   );
@@ -401,7 +504,7 @@ export default function OrderTrackerModal({
                 <Text
                   style={styles.billLabel}
                 >
-                  CGST
+                  CGST (2.5%)
                 </Text>
 
                 <Text
@@ -417,7 +520,7 @@ export default function OrderTrackerModal({
                 <Text
                   style={styles.billLabel}
                 >
-                  SGST
+                  SGST (2.5%)
                 </Text>
 
                 <Text
@@ -426,6 +529,24 @@ export default function OrderTrackerModal({
                   ₹{sgst.toFixed(2)}
                 </Text>
               </View>
+
+              {order.gstNumber ? (
+                <View
+                  style={styles.billRow}
+                >
+                  <Text
+                    style={[styles.billLabel, { fontStyle: 'italic', color: '#64748b' }]}
+                  >
+                    GSTIN
+                  </Text>
+
+                  <Text
+                    style={[styles.billValue, { color: '#94a3b8', fontSize: 12, fontWeight: '700' }]}
+                  >
+                    {order.gstNumber}
+                  </Text>
+                </View>
+              ) : null}
 
               <View
                 style={styles.divider}
@@ -437,7 +558,7 @@ export default function OrderTrackerModal({
                 <Text
                   style={styles.totalLabel}
                 >
-                  Total Payable
+                  Total Amount {isPaid ? 'Paid' : 'Payable'}
                 </Text>
 
                 <Text
@@ -448,7 +569,7 @@ export default function OrderTrackerModal({
               </View>
             </View>
 
-            {/* PAYMENT */}
+            {/* PAYMENT DETAILS CARD */}
             <View style={styles.paymentCard}>
               <View
                 style={styles.paymentIcon}
@@ -459,22 +580,29 @@ export default function OrderTrackerModal({
                 />
               </View>
 
-              <View>
-                <Text
-                  style={styles.paymentTitle}
-                >
-                  Payment
+              <View style={styles.paymentTextBox}>
+                <View style={styles.paymentHeaderRow}>
+                  <Text
+                    style={styles.paymentTitle}
+                  >
+                    Payment Method
+                  </Text>
+                  <View style={[styles.paymentBadge, isPaid ? styles.paymentBadgePaid : styles.paymentBadgePending]}>
+                    <Text style={[styles.paymentBadgeText, isPaid ? { color: '#10b981' } : { color: '#f59e0b' }]}>
+                      {isPaid ? 'PAID VIA CASHFREE' : isOnline ? 'PAYMENT PENDING' : 'PAY AT COUNTER'}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.paymentDetailsSub}>
+                  Mode: {isOnline ? 'Online Gateway (Cashfree)' : 'Cash / Counter Settlement'}
                 </Text>
 
-                <Text
-                  style={
-                    styles.paymentStatus
-                  }
-                >
-                  {String(
-                    paymentStatus
-                  ).toUpperCase()}
-                </Text>
+                {order.cashfreeOrderId || order.paymentOrderId ? (
+                  <Text style={styles.paymentTxnId}>
+                    Ref ID: {order.cashfreeOrderId || order.paymentOrderId}
+                  </Text>
+                ) : null}
               </View>
             </View>
 
@@ -812,9 +940,83 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
-  paymentCard: {
+  headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
+  },
+
+  tokenBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+
+  tokenBadgeText: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+
+  infoGrid: {
+    marginTop: 6,
+    gap: 8,
+  },
+
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  infoLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+
+  infoValue: {
+    color: '#f8fafc',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  remarksBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.3)',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 4,
+  },
+
+  remarksText: {
+    color: '#f59e0b',
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
+
+  itemInstruction: {
+    color: '#f59e0b',
+    fontSize: 10,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+
+  paymentCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     backgroundColor: '#1e293b',
     borderRadius: 14,
     padding: 14,
@@ -824,24 +1026,60 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 11,
-    backgroundColor:
-      'rgba(16,185,129,0.12)',
+    backgroundColor: 'rgba(16,185,129,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 11,
   },
 
+  paymentTextBox: {
+    flex: 1,
+  },
+
+  paymentHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
   paymentTitle: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
   },
 
-  paymentStatus: {
-    color: '#10b981',
+  paymentBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+
+  paymentBadgePaid: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderColor: '#10b981',
+  },
+
+  paymentBadgePending: {
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    borderColor: '#f59e0b',
+  },
+
+  paymentBadgeText: {
     fontSize: 10,
-    fontWeight: '900',
-    marginTop: 3,
+    fontWeight: '800',
+  },
+
+  paymentDetailsSub: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginTop: 4,
+  },
+
+  paymentTxnId: {
+    color: '#64748b',
+    fontSize: 10,
+    marginTop: 2,
   },
 
   footer: {
