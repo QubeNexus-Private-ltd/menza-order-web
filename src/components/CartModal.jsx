@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,6 @@ import {
   ShieldCheck,
   AlertTriangle,
   MessageSquare,
-  Sparkles,
 } from 'lucide-react';
 import * as api from '../services/api';
 
@@ -34,6 +33,11 @@ const getOrderTypeIcon = (typeName) => {
   if (lower.includes('delivery')) return '🛵';
   if (lower.includes('counter') || lower.includes('pos')) return '🧾';
   return '📋';
+};
+
+const money = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : '0.00';
 };
 
 export default function CartModal({
@@ -55,63 +59,173 @@ export default function CartModal({
   const [mobileNumber, setMobileNumber] = useState('');
   const [remarks, setRemarks] = useState('');
   const [orderTypeId, setOrderTypeId] = useState(1);
-  const [paymentMethod, setPaymentMethod] = useState('cashfree'); // 'cashfree' | 'counter'
+  const [paymentMethod, setPaymentMethod] = useState('cashfree');
   const [errorMsg, setErrorMsg] = useState('');
   const [processingPayment, setProcessingPayment] = useState(false);
   const [fetchingCart, setFetchingCart] = useState(false);
   const [editingNotesItemId, setEditingNotesItemId] = useState(null);
   const [itemNoteText, setItemNoteText] = useState('');
+  const [updatingItemId, setUpdatingItemId] = useState(null);
+  const [removingItemId, setRemovingItemId] = useState(null);
+  const [clearingCart, setClearingCart] = useState(false);
+  const [savingNoteItemId, setSavingNoteItemId] = useState(null);
 
-  // Auto-fetch fresh cart items from API whenever modal opens
-  React.useEffect(() => {
-    if (visible && onRefreshCart) {
-      setFetchingCart(true);
-      Promise.resolve(onRefreshCart()).finally(() => setFetchingCart(false));
-    }
-  }, [visible]);
+  // Keep the existing behavior: refresh the server cart whenever the modal opens.
+ useEffect(() => {
+  if (!visible || !onRefreshCart) return;
 
-  const effectiveOrderTypes = (Array.isArray(orderTypes) && orderTypes.length > 0)
-    ? orderTypes
-    : [
-        { id: 1, typeName: 'Dine-In', description: 'Dine-In order type' },
-        { id: 2, typeName: 'Self Pickup', description: 'Self Pickup / Takeaway' },
-        { id: 3, typeName: 'Delivery', description: 'Delivery order type' },
-        { id: 4, typeName: 'Counter POS Ordering', description: 'Express counter POS order processing' }
-      ];
+  let mounted = true;
 
-  // Extract items list
-  const activeCartItems = (cart && Array.isArray(cart.items)) ? cart.items : cartItems;
+  setFetchingCart(true);
 
-  // Server-computed financial breakdown or client fallback
-  const subTotal = cart?.subTotal !== undefined && cart?.subTotal > 0
-    ? cart.subTotal
-    : activeCartItems.reduce((sum, item) => sum + (item.unitPrice || item.amount) * item.quantity, 0);
+  Promise.resolve(onRefreshCart())
+    .catch((error) => {
+      console.error('Cart refresh error:', error);
 
-  const cgst = cart?.cgstAmount !== undefined && cart?.cgstAmount > 0
-    ? cart.cgstAmount
-    : Math.round(subTotal * 0.025 * 100) / 100;
+      if (mounted) {
+        setErrorMsg('Unable to refresh cart. Please try again.');
+      }
+    })
+    .finally(() => {
+      if (mounted) {
+        setFetchingCart(false);
+      }
+    });
 
-  const sgst = cart?.sgstAmount !== undefined && cart?.sgstAmount > 0
-    ? cart.sgstAmount
-    : Math.round(subTotal * 0.025 * 100) / 100;
+  return () => {
+    mounted = false;
+  };
+}, [visible]);
+  const effectiveOrderTypes =
+    Array.isArray(orderTypes) && orderTypes.length > 0
+      ? orderTypes
+      : [
+          { id: 1, typeName: 'Dine-In', description: 'Dine-In order type' },
+          { id: 2, typeName: 'Self Pickup', description: 'Self Pickup / Takeaway' },
+          { id: 3, typeName: 'Delivery', description: 'Delivery order type' },
+          { id: 4, typeName: 'Counter POS Ordering', description: 'Express counter POS order processing' },
+        ];
 
-  const grandTotal = cart?.totalAmount !== undefined && cart?.totalAmount > 0
-    ? cart.totalAmount
-    : (subTotal + cgst + sgst);
+  const activeCartItems =
+    cart && Array.isArray(cart.items) ? cart.items : cartItems;
 
-  const hasUnavailableItems = cart?.hasUnavailableItems || activeCartItems.some((i) => !i.isAvailable);
+  // The backend is authoritative for these values.
+  // The old frontend 2.5% tax calculation has intentionally been removed.
+  const subTotal = Number(cart?.subTotal ?? 0);
+  const discountAmount = Number(cart?.discountAmount ?? 0);
+  const taxableAmount = Number(cart?.taxableAmount ?? 0);
+  const cgst = Number(cart?.cgstAmount ?? 0);
+  const sgst = Number(cart?.sgstAmount ?? 0);
+  const taxAmount = Number(cart?.taxAmount ?? (cgst + sgst));
+  const platformFee = Number(cart?.platformFee ?? 0);
+  const grandTotal = Number(cart?.totalAmount ?? 0);
+  const hasUnavailableItems =
+    Boolean(cart?.hasUnavailableItems) ||
+    activeCartItems.some((item) => item.isAvailable === false);
+
+  const isItemBusy = (itemId) =>
+    updatingItemId === itemId ||
+    removingItemId === itemId ||
+    savingNoteItemId === itemId;
 
   const handleOpenNoteEditor = (item) => {
+    setErrorMsg('');
     setEditingNotesItemId(item.itemId);
     setItemNoteText(item.cookingInstruction || '');
   };
 
   const handleSaveNote = async (itemId, currentQty) => {
-    if (onUpdateCartQuantity) {
-      await onUpdateCartQuantity(itemId, currentQty, itemNoteText.trim());
+    if (!onUpdateCartQuantity) return;
+
+    try {
+      setErrorMsg('');
+      setSavingNoteItemId(itemId);
+
+      await onUpdateCartQuantity(
+        itemId,
+        currentQty,
+        itemNoteText.trim() || null
+      );
+
+      setEditingNotesItemId(null);
+      setItemNoteText('');
+    } catch (error) {
+      console.error('Save cart note error:', error);
+      setErrorMsg(
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to save special instruction.'
+      );
+    } finally {
+      setSavingNoteItemId(null);
     }
-    setEditingNotesItemId(null);
-    setItemNoteText('');
+  };
+
+  const handleQuantityChange = async (item, nextQuantity) => {
+    if (!onUpdateCartQuantity || isItemBusy(item.itemId)) return;
+
+    if (nextQuantity <= 0) {
+      await handleRemoveItem(item.itemId);
+      return;
+    }
+
+    try {
+      setErrorMsg('');
+      setUpdatingItemId(item.itemId);
+
+      await onUpdateCartQuantity(
+        item.itemId,
+        nextQuantity,
+        item.cookingInstruction || null
+      );
+    } catch (error) {
+      console.error('Update cart quantity error:', error);
+      setErrorMsg(
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to update item quantity.'
+      );
+    } finally {
+      setUpdatingItemId(null);
+    }
+  };
+
+  const handleRemoveItem = async (itemId) => {
+    if (!onRemoveFromCart || isItemBusy(itemId)) return;
+
+    try {
+      setErrorMsg('');
+      setRemovingItemId(itemId);
+      await onRemoveFromCart(itemId);
+    } catch (error) {
+      console.error('Remove cart item error:', error);
+      setErrorMsg(
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to remove item from cart.'
+      );
+    } finally {
+      setRemovingItemId(null);
+    }
+  };
+
+  const handleClearCartClick = async () => {
+    if (!onClearCart || clearingCart) return;
+
+    try {
+      setErrorMsg('');
+      setClearingCart(true);
+      await onClearCart();
+    } catch (error) {
+      console.error('Clear cart error:', error);
+      setErrorMsg(
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to clear cart.'
+      );
+    } finally {
+      setClearingCart(false);
+    }
   };
 
   const handleCheckout = async () => {
@@ -119,15 +233,26 @@ export default function CartModal({
       setErrorMsg('Please enter customer / guest name.');
       return;
     }
+
     if (hasUnavailableItems) {
-      setErrorMsg('Please remove out-of-stock items from your cart before proceeding.');
+      setErrorMsg(
+        'Please remove out-of-stock items from your cart before proceeding.'
+      );
       return;
     }
+
+    if (!activeCartItems.length) {
+      setErrorMsg('Your cart is empty.');
+      return;
+    }
+
     setErrorMsg('');
 
-    const restId = (cart && cart.restaurantId) || (catalog ? catalog.restaurantId : 1);
-    
-    // Prepare items list for backend PlaceOrderModel
+    const restId =
+      (cart && cart.restaurantId) ||
+      (catalog ? catalog.restaurantId : 1);
+
+    // Existing order business logic is preserved.
     const orderItems = activeCartItems.map((item) => ({
       itemId: item.itemId,
       quantity: item.quantity,
@@ -141,21 +266,25 @@ export default function CartModal({
       mobileNumber: mobileNumber.trim(),
       remarks: remarks.trim(),
       isHomeDelivery: false,
-      orderTypeId: orderTypeId,
+      orderTypeId,
       tableId: activeTable ? activeTable.id : null,
       tableNumber: activeTable ? String(activeTable.id) : '1',
       items: orderItems,
       paymentMode: paymentMethod === 'cashfree' ? 'ONLINE' : 'CASH',
-      paymentMethod: paymentMethod === 'cashfree' ? 'CASHFREE_SPLIT' : 'COUNTER_CASH',
+      paymentMethod:
+        paymentMethod === 'cashfree'
+          ? 'CASHFREE_SPLIT'
+          : 'COUNTER_CASH',
     };
 
     if (paymentMethod === 'cashfree') {
       setProcessingPayment(true);
+
       try {
         const checkoutRes = await api.initiateCashfreeCheckout({
           restaurantId: restId,
           amount: Math.round(grandTotal * 100) / 100,
-          customerName: guestName,
+          customerName: guestName.trim(),
           customerPhone: mobileNumber || '9999999999',
           tableNumber: activeTable ? String(activeTable.id) : '1',
           orderNotes: remarks,
@@ -166,90 +295,160 @@ export default function CartModal({
           return;
         }
 
-        onPlaceOrder({
+        await onPlaceOrder({
           ...orderPayload,
           cashfreeOrderId: checkoutRes?.orderId || null,
         });
       } catch (err) {
         console.error('Cashfree checkout error:', err);
-        onPlaceOrder(orderPayload);
+
+        // Preserve the existing fallback behavior.
+        try {
+          await onPlaceOrder(orderPayload);
+        } catch (orderError) {
+          console.error('Fallback place order error:', orderError);
+          setErrorMsg(
+            orderError?.response?.data?.message ||
+              orderError?.message ||
+              'Unable to place order.'
+          );
+        }
       } finally {
         setProcessingPayment(false);
       }
     } else {
-      onPlaceOrder(orderPayload);
+      try {
+        await onPlaceOrder(orderPayload);
+      } catch (error) {
+        console.error('Place order error:', error);
+        setErrorMsg(
+          error?.response?.data?.message ||
+            error?.message ||
+            'Unable to place order.'
+        );
+      }
     }
   };
 
   if (!visible) return null;
 
   const isLoadingState = loading || processingPayment;
+  const totalQuantity = activeCartItems.reduce(
+    (acc, item) => acc + Number(item.quantity || 0),
+    0
+  );
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <View style={styles.overlay}>
         <View style={styles.sheetContainer}>
-          {/* Header */}
           <View style={styles.sheetHeader}>
             <View style={styles.headerTitleRow}>
               <ShoppingBag size={20} color="#10b981" />
               <View>
                 <Text style={styles.headerTitle}>Your Order Basket</Text>
                 {cart?.restaurantName ? (
-                  <Text style={styles.headerSubTitle}>{cart.restaurantName}</Text>
+                  <Text style={styles.headerSubTitle}>
+                    {cart.restaurantName}
+                  </Text>
                 ) : null}
               </View>
             </View>
+
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <X size={20} color="#94a3b8" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.bodyScroll} contentContainerStyle={styles.bodyContent}>
+          <ScrollView
+            style={styles.bodyScroll}
+            contentContainerStyle={styles.bodyContent}
+            keyboardShouldPersistTaps="handled"
+          >
             {fetchingCart && activeCartItems.length === 0 ? (
               <View style={styles.emptyCartBox}>
                 <ActivityIndicator size="large" color="#10b981" />
-                <Text style={styles.emptyCartTitle}>Loading Basket Items...</Text>
-                <Text style={styles.emptyCartSub}>Retrieving your cart items from the server.</Text>
+                <Text style={styles.emptyCartTitle}>
+                  Loading Basket Items...
+                </Text>
+                <Text style={styles.emptyCartSub}>
+                  Retrieving your cart items from the server.
+                </Text>
               </View>
             ) : activeCartItems.length === 0 ? (
               <View style={styles.emptyCartBox}>
                 <ShoppingBag size={48} color="#334155" />
-                <Text style={styles.emptyCartTitle}>Your Basket is Empty</Text>
-                <Text style={styles.emptyCartSub}>Browse our menu catalog and add delicious dishes.</Text>
+                <Text style={styles.emptyCartTitle}>
+                  Your Basket is Empty
+                </Text>
+                <Text style={styles.emptyCartSub}>
+                  Browse our menu catalog and add delicious dishes.
+                </Text>
               </View>
             ) : (
               <>
-                {/* Out of Stock Notice */}
                 {hasUnavailableItems && (
                   <View style={styles.outOfStockBanner}>
                     <AlertTriangle size={18} color="#f59e0b" />
                     <Text style={styles.outOfStockBannerText}>
-                      Some items are currently unavailable. Please remove them to place your order.
+                      Some items are currently unavailable. Please remove them
+                      to place your order.
                     </Text>
                   </View>
                 )}
 
-                {/* Cart Items List */}
                 <View style={styles.itemsSection}>
                   <View style={styles.sectionHeaderRow}>
                     <Text style={styles.sectionTitle}>
-                      Selected Items ({activeCartItems.reduce((acc, i) => acc + i.quantity, 0)})
+                      Selected Items ({totalQuantity})
                     </Text>
-                    <TouchableOpacity onPress={onClearCart}>
-                      <Text style={styles.clearText}>Clear All</Text>
+
+                    <TouchableOpacity
+                      onPress={handleClearCartClick}
+                      disabled={clearingCart}
+                    >
+                      {clearingCart ? (
+                        <ActivityIndicator size="small" color="#ef4444" />
+                      ) : (
+                        <Text style={styles.clearText}>Clear All</Text>
+                      )}
                     </TouchableOpacity>
                   </View>
 
                   {activeCartItems.map((item) => {
-                    const isEditingNote = editingNotesItemId === item.itemId;
-                    const itemUnitPrice = item.unitPrice || item.amount;
-                    const itemLineTotal = item.totalAmount || (itemUnitPrice * item.quantity);
+                    const isEditingNote =
+                      editingNotesItemId === item.itemId;
+
+                    const itemUnitPrice = Number(
+                      item.unitPrice ?? item.amount ?? 0
+                    );
+
+                    const itemLineTotal = Number(
+                      item.totalAmount ??
+                        itemUnitPrice * Number(item.quantity || 0)
+                    );
+
+                    const unitLabel =
+                      item.unitName ||
+                      (item.unit !== undefined &&
+                      item.unit !== null &&
+                      item.unit !== ''
+                        ? `Unit #${item.unit}`
+                        : null);
 
                     return (
                       <View
                         key={item.itemId}
-                        style={[styles.cartRowWrapper, !item.isAvailable && styles.cartRowUnavailable]}
+                        style={[
+                          styles.cartRowWrapper,
+                          !item.isAvailable &&
+                            styles.cartRowUnavailable,
+                        ]}
                       >
                         <View style={styles.cartRow}>
                           <Image
@@ -260,91 +459,158 @@ export default function CartModal({
                             }}
                             style={styles.itemThumb}
                           />
+
                           <View style={styles.itemInfo}>
                             <View style={styles.itemNameRow}>
-                              <Text style={styles.itemName} numberOfLines={1}>
+                              <Text
+                                style={styles.itemName}
+                                numberOfLines={2}
+                              >
                                 {item.itemName}
                               </Text>
+
                               {!item.isAvailable && (
                                 <View style={styles.unavailBadge}>
-                                  <Text style={styles.unavailBadgeText}>Out of Stock</Text>
+                                  <Text style={styles.unavailBadgeText}>
+                                    Out of Stock
+                                  </Text>
                                 </View>
                               )}
                             </View>
 
-                            <Text style={styles.itemPriceSingle}>₹{itemUnitPrice.toFixed(2)} each</Text>
-
-                            {/* Variant & Modifiers tags */}
                             {item.variantName ? (
-                              <View style={styles.tagBadge}>
-                                <Text style={styles.tagBadgeText}>Size: {item.variantName}</Text>
-                              </View>
+                              <Text style={styles.itemMetaText}>
+                                Size: {item.variantName}
+                              </Text>
                             ) : null}
 
-                            {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
-                              <View style={styles.modifierRow}>
-                                {item.modifiers.map((m) => (
-                                  <View key={m.modifierId} style={styles.modifierBadge}>
-                                    <Text style={styles.modifierBadgeText}>
-                                      +{m.modifierName} (₹{m.extraPrice})
-                                    </Text>
-                                  </View>
-                                ))}
-                              </View>
-                            )}
+                            {unitLabel ? (
+                              <Text style={styles.itemMetaText}>
+                                Unit: {unitLabel}
+                              </Text>
+                            ) : null}
 
-                            {/* Cooking Instruction Display */}
-                            {item.cookingInstruction && !isEditingNote ? (
+                            <View style={styles.priceRow}>
+                              <Text style={styles.priceLabel}>
+                                Unit Price
+                              </Text>
+                              <Text style={styles.itemPriceSingle}>
+                                ₹{money(itemUnitPrice)}
+                              </Text>
+                            </View>
+
+                            {Array.isArray(item.modifiers) &&
+                              item.modifiers.length > 0 && (
+                                <View style={styles.modifierRow}>
+                                  {item.modifiers.map((m) => (
+                                    <View
+                                      key={m.modifierId}
+                                      style={styles.modifierBadge}
+                                    >
+                                      <Text
+                                        style={styles.modifierBadgeText}
+                                      >
+                                        +{m.modifierName} (₹
+                                        {money(m.extraPrice)})
+                                      </Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+
+                            {item.cookingInstruction &&
+                            !isEditingNote ? (
                               <TouchableOpacity
                                 style={styles.instructionPill}
-                                onPress={() => handleOpenNoteEditor(item)}
+                                onPress={() =>
+                                  handleOpenNoteEditor(item)
+                                }
                               >
-                                <MessageSquare size={11} color="#10b981" />
-                                <Text style={styles.instructionText} numberOfLines={1}>
+                                <MessageSquare
+                                  size={11}
+                                  color="#10b981"
+                                />
+                                <Text
+                                  style={styles.instructionText}
+                                  numberOfLines={1}
+                                >
                                   {item.cookingInstruction}
                                 </Text>
                               </TouchableOpacity>
                             ) : null}
                           </View>
 
-                          {/* Quantity & Delete Controls */}
                           <View style={styles.actionsRight}>
                             <View style={styles.qtyBox}>
                               <TouchableOpacity
                                 style={styles.qtyBtn}
+                                disabled={isItemBusy(item.itemId)}
                                 onPress={() =>
-                                  item.quantity > 1
-                                    ? onUpdateCartQuantity(item.itemId, item.quantity - 1, item.cookingInstruction)
-                                    : onRemoveFromCart(item.itemId)
+                                  handleQuantityChange(
+                                    item,
+                                    Number(item.quantity || 0) - 1
+                                  )
                                 }
                               >
-                                <Minus size={12} color="#ffffff" />
+                                {updatingItemId === item.itemId ? (
+                                  <ActivityIndicator
+                                    size="small"
+                                    color="#ffffff"
+                                  />
+                                ) : (
+                                  <Minus size={12} color="#ffffff" />
+                                )}
                               </TouchableOpacity>
 
-                              <Text style={styles.qtyText}>{item.quantity}</Text>
+                              <Text style={styles.qtyText}>
+                                {item.quantity}
+                              </Text>
 
                               <TouchableOpacity
                                 style={styles.qtyBtn}
+                                disabled={isItemBusy(item.itemId)}
                                 onPress={() =>
-                                  onUpdateCartQuantity(item.itemId, item.quantity + 1, item.cookingInstruction)
+                                  handleQuantityChange(
+                                    item,
+                                    Number(item.quantity || 0) + 1
+                                  )
                                 }
                               >
                                 <Plus size={12} color="#ffffff" />
                               </TouchableOpacity>
                             </View>
 
-                            <Text style={styles.itemSubtotal}>₹{itemLineTotal.toFixed(2)}</Text>
+                            <View style={styles.itemTotalRow}>
+                              <Text style={styles.itemTotalLabel}>
+                                Item Total
+                              </Text>
+                              <Text style={styles.itemSubtotal}>
+                                ₹{money(itemLineTotal)}
+                              </Text>
+                            </View>
 
                             <TouchableOpacity
                               style={styles.trashBtn}
-                              onPress={() => onRemoveFromCart(item.itemId)}
+                              disabled={isItemBusy(item.itemId)}
+                              onPress={() =>
+                                handleRemoveItem(item.itemId)
+                              }
                             >
-                              <Trash2 size={15} color="#ef4444" />
+                              {removingItemId === item.itemId ? (
+                                <ActivityIndicator
+                                  size="small"
+                                  color="#ef4444"
+                                />
+                              ) : (
+                                <Trash2
+                                  size={15}
+                                  color="#ef4444"
+                                />
+                              )}
                             </TouchableOpacity>
                           </View>
                         </View>
 
-                        {/* Inline Item Note Editor */}
                         {isEditingNote ? (
                           <View style={styles.inlineNoteBox}>
                             <TextInput
@@ -353,28 +619,65 @@ export default function CartModal({
                               placeholderTextColor="#64748b"
                               value={itemNoteText}
                               onChangeText={setItemNoteText}
+                              editable={
+                                savingNoteItemId !== item.itemId
+                              }
                             />
+
                             <TouchableOpacity
                               style={styles.saveNoteBtn}
-                              onPress={() => handleSaveNote(item.itemId, item.quantity)}
+                              disabled={
+                                savingNoteItemId === item.itemId
+                              }
+                              onPress={() =>
+                                handleSaveNote(
+                                  item.itemId,
+                                  item.quantity
+                                )
+                              }
                             >
-                              <Text style={styles.saveNoteBtnText}>Save</Text>
+                              {savingNoteItemId === item.itemId ? (
+                                <ActivityIndicator
+                                  size="small"
+                                  color="#0f172a"
+                                />
+                              ) : (
+                                <Text style={styles.saveNoteBtnText}>
+                                  Save
+                                </Text>
+                              )}
                             </TouchableOpacity>
+
                             <TouchableOpacity
                               style={styles.cancelNoteBtn}
-                              onPress={() => setEditingNotesItemId(null)}
+                              disabled={
+                                savingNoteItemId === item.itemId
+                              }
+                              onPress={() => {
+                                setEditingNotesItemId(null);
+                                setItemNoteText('');
+                              }}
                             >
-                              <Text style={styles.cancelNoteBtnText}>Cancel</Text>
+                              <Text style={styles.cancelNoteBtnText}>
+                                Cancel
+                              </Text>
                             </TouchableOpacity>
                           </View>
                         ) : (
                           !item.cookingInstruction && (
                             <TouchableOpacity
                               style={styles.addNoteBtn}
-                              onPress={() => handleOpenNoteEditor(item)}
+                              onPress={() =>
+                                handleOpenNoteEditor(item)
+                              }
                             >
-                              <MessageSquare size={11} color="#64748b" />
-                              <Text style={styles.addNoteBtnText}>+ Add special note for chef</Text>
+                              <MessageSquare
+                                size={11}
+                                color="#64748b"
+                              />
+                              <Text style={styles.addNoteBtnText}>
+                                + Add special instruction
+                              </Text>
                             </TouchableOpacity>
                           )
                         )}
@@ -383,39 +686,46 @@ export default function CartModal({
                   })}
                 </View>
 
-                {/* Order Options */}
                 <View style={styles.formSection}>
                   <Text style={styles.sectionTitle}>Order Details</Text>
 
-                  {/* Dynamic Order Types from OrderType API */}
                   <View style={styles.orderTypeContainer}>
                     {effectiveOrderTypes.map((type) => {
                       const isSelected = orderTypeId === type.id;
                       const icon = getOrderTypeIcon(type.typeName);
+
                       return (
                         <TouchableOpacity
                           key={type.id}
-                          style={[styles.orderTypeTab, isSelected && styles.orderTypeTabActive]}
+                          style={[
+                            styles.orderTypeTab,
+                            isSelected &&
+                              styles.orderTypeTabActive,
+                          ]}
                           onPress={() => setOrderTypeId(type.id)}
                           activeOpacity={0.8}
                         >
                           <Text
                             style={[
                               styles.orderTypeText,
-                              isSelected && styles.orderTypeTextActive,
+                              isSelected &&
+                                styles.orderTypeTextActive,
                             ]}
                           >
                             {icon} {type.typeName}
-                            {type.id === 1 && activeTable ? ` (Table #${activeTable.id})` : ''}
+                            {type.id === 1 && activeTable
+                              ? ` (Table #${activeTable.id})`
+                              : ''}
                           </Text>
                         </TouchableOpacity>
                       );
                     })}
                   </View>
 
-                  {/* Input Fields */}
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Customer Name *</Text>
+                    <Text style={styles.inputLabel}>
+                      Customer Name *
+                    </Text>
                     <TextInput
                       style={styles.textInput}
                       placeholder="Enter guest / diner name"
@@ -426,7 +736,9 @@ export default function CartModal({
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Mobile Number (Optional)</Text>
+                    <Text style={styles.inputLabel}>
+                      Mobile Number (Optional)
+                    </Text>
                     <TextInput
                       style={styles.textInput}
                       placeholder="Enter 10-digit mobile number"
@@ -438,9 +750,14 @@ export default function CartModal({
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Order Remarks / Instructions</Text>
+                    <Text style={styles.inputLabel}>
+                      Order Remarks / Instructions
+                    </Text>
                     <TextInput
-                      style={[styles.textInput, styles.multilineInput]}
+                      style={[
+                        styles.textInput,
+                        styles.multilineInput,
+                      ]}
                       placeholder="Cutlery needed, quick service, etc..."
                       placeholderTextColor="#64748b"
                       multiline
@@ -450,119 +767,212 @@ export default function CartModal({
                   </View>
                 </View>
 
-                {/* Payment Selection Section */}
                 <View style={styles.formSection}>
-                  <Text style={styles.sectionTitle}>Payment Method</Text>
+                  <Text style={styles.sectionTitle}>
+                    Payment Method
+                  </Text>
+
                   <View style={styles.paymentMethodRow}>
                     <TouchableOpacity
                       style={[
                         styles.paymentCard,
-                        paymentMethod === 'cashfree' && styles.paymentCardActive,
+                        paymentMethod === 'cashfree' &&
+                          styles.paymentCardActive,
                       ]}
                       onPress={() => setPaymentMethod('cashfree')}
                     >
                       <CreditCard
                         size={20}
-                        color={paymentMethod === 'cashfree' ? '#10b981' : '#94a3b8'}
+                        color={
+                          paymentMethod === 'cashfree'
+                            ? '#10b981'
+                            : '#94a3b8'
+                        }
                       />
                       <View>
                         <Text
                           style={[
                             styles.paymentCardTitle,
-                            paymentMethod === 'cashfree' && styles.paymentCardTitleActive,
+                            paymentMethod === 'cashfree' &&
+                              styles.paymentCardTitleActive,
                           ]}
                         >
                           Cashfree Direct Pay
                         </Text>
-                        <Text style={styles.paymentCardSub}>UPI • Cards • NetBanking</Text>
+                        <Text style={styles.paymentCardSub}>
+                          UPI • Cards • NetBanking
+                        </Text>
                       </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
                       style={[
                         styles.paymentCard,
-                        paymentMethod === 'counter' && styles.paymentCardActive,
+                        paymentMethod === 'counter' &&
+                          styles.paymentCardActive,
                       ]}
                       onPress={() => setPaymentMethod('counter')}
                     >
                       <Banknote
                         size={20}
-                        color={paymentMethod === 'counter' ? '#10b981' : '#94a3b8'}
+                        color={
+                          paymentMethod === 'counter'
+                            ? '#10b981'
+                            : '#94a3b8'
+                        }
                       />
                       <View>
                         <Text
                           style={[
                             styles.paymentCardTitle,
-                            paymentMethod === 'counter' && styles.paymentCardTitleActive,
+                            paymentMethod === 'counter' &&
+                              styles.paymentCardTitleActive,
                           ]}
                         >
                           Pay at Counter / Table
                         </Text>
-                        <Text style={styles.paymentCardSub}>Cash / POS at Table</Text>
+                        <Text style={styles.paymentCardSub}>
+                          Cash / POS at Table
+                        </Text>
                       </View>
                     </TouchableOpacity>
                   </View>
                 </View>
 
-                {/* Price Summary Breakdown */}
                 <View style={styles.summarySection}>
-                  <Text style={styles.sectionTitle}>Bill Breakdown</Text>
+                  <Text style={styles.sectionTitle}>
+                    Bill Breakdown
+                  </Text>
+
                   <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>Item Subtotal</Text>
-                    <Text style={styles.summaryValue}>₹{subTotal.toFixed(2)}</Text>
-                  </View>
-                  <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>CGST (2.5%)</Text>
-                    <Text style={styles.summaryValue}>₹{cgst.toFixed(2)}</Text>
-                  </View>
-                  <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>SGST (2.5%)</Text>
-                    <Text style={styles.summaryValue}>₹{sgst.toFixed(2)}</Text>
+                    <Text style={styles.summaryLabel}>
+                      Item Subtotal
+                    </Text>
+                    <Text style={styles.summaryValue}>
+                      ₹{money(subTotal)}
+                    </Text>
                   </View>
 
-                  {/* Customer zero platform fee guarantee banner */}
+                  {discountAmount > 0 ? (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>
+                        Discount
+                      </Text>
+                      <Text style={styles.discountValue}>
+                        -₹{money(discountAmount)}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {taxableAmount > 0 ? (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>
+                        Taxable Amount
+                      </Text>
+                      <Text style={styles.summaryValue}>
+                        ₹{money(taxableAmount)}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>
+                      CGST
+                    </Text>
+                    <Text style={styles.summaryValue}>
+                      ₹{money(cgst)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>
+                      SGST
+                    </Text>
+                    <Text style={styles.summaryValue}>
+                      ₹{money(sgst)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>
+                      Total Tax
+                    </Text>
+                    <Text style={styles.summaryValue}>
+                      ₹{money(taxAmount)}
+                    </Text>
+                  </View>
+
+                  {platformFee > 0 ? (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>
+                        Platform Fee
+                      </Text>
+                      <Text style={styles.summaryValue}>
+                        ₹{money(platformFee)}
+                      </Text>
+                    </View>
+                  ) : null}
+
                   <View style={styles.zeroFeeBadge}>
                     <ShieldCheck size={14} color="#10b981" />
-                    <Text style={styles.zeroFeeBadgeText}>Zero Platform Fee for Customers</Text>
+                    <Text style={styles.zeroFeeBadgeText}>
+                      Zero Platform Fee for Customers
+                    </Text>
                   </View>
 
                   <View style={styles.divider} />
+
                   <View style={styles.grandTotalRow}>
-                    <Text style={styles.grandTotalLabel}>Total Payable</Text>
-                    <Text style={styles.grandTotalValue}>₹{grandTotal.toFixed(2)}</Text>
+                    <Text style={styles.grandTotalLabel}>
+                      Total Payable
+                    </Text>
+                    <Text style={styles.grandTotalValue}>
+                      ₹{money(grandTotal)}
+                    </Text>
                   </View>
                 </View>
 
                 {errorMsg ? (
                   <View style={styles.errorBanner}>
                     <AlertCircle size={16} color="#ef4444" />
-                    <Text style={styles.errorText}>{errorMsg}</Text>
+                    <Text style={styles.errorText}>
+                      {errorMsg}
+                    </Text>
                   </View>
                 ) : null}
               </>
             )}
           </ScrollView>
 
-          {/* Footer Submit Button */}
           {activeCartItems.length > 0 && (
             <View style={styles.footerContainer}>
               <TouchableOpacity
                 style={[
                   styles.checkoutBtn,
-                  (isLoadingState || hasUnavailableItems) && styles.checkoutBtnDisabled,
+                  (isLoadingState || hasUnavailableItems) &&
+                    styles.checkoutBtnDisabled,
                 ]}
                 onPress={handleCheckout}
                 disabled={isLoadingState || hasUnavailableItems}
                 activeOpacity={0.85}
               >
                 {isLoadingState ? (
-                  <ActivityIndicator size="small" color="#0f172a" />
+                  <ActivityIndicator
+                    size="small"
+                    color="#0f172a"
+                  />
                 ) : (
                   <>
                     <Text style={styles.checkoutBtnText}>
-                      {paymentMethod === 'cashfree' ? 'PAY VIA CASHFREE' : 'CONFIRM & PLACE ORDER'} • ₹{grandTotal.toFixed(2)}
+                      {paymentMethod === 'cashfree'
+                        ? 'PAY VIA CASHFREE'
+                        : 'CONFIRM & PLACE ORDER'}{' '}
+                      • ₹{money(grandTotal)}
                     </Text>
-                    <ArrowRight size={18} color="#0f172a" />
+                    <ArrowRight
+                      size={18}
+                      color="#0f172a"
+                    />
                   </>
                 )}
               </TouchableOpacity>
@@ -682,35 +1092,36 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#334155',
-    gap: 6,
+    gap: 8,
   },
   cartRowUnavailable: {
     opacity: 0.65,
   },
   cartRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
   },
   itemThumb: {
-    width: 46,
-    height: 46,
-    borderRadius: 8,
+    width: 56,
+    height: 56,
+    borderRadius: 10,
     backgroundColor: '#0f172a',
   },
   itemInfo: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
   itemNameRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 6,
   },
   itemName: {
     color: '#ffffff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+    flex: 1,
   },
   unavailBadge: {
     backgroundColor: '#ef4444',
@@ -723,22 +1134,24 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
   },
-  itemPriceSingle: {
+  itemMetaText: {
     color: '#94a3b8',
+    fontSize: 11,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 3,
+  },
+  priceLabel: {
+    color: '#64748b',
+    fontSize: 11,
+  },
+  itemPriceSingle: {
+    color: '#ffffff',
     fontSize: 12,
-  },
-  tagBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#0f172a',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 2,
-  },
-  tagBadgeText: {
-    color: '#38bdf8',
-    fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   modifierRow: {
     flexDirection: 'row',
@@ -767,11 +1180,13 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginTop: 3,
     alignSelf: 'flex-start',
+    maxWidth: '100%',
   },
   instructionText: {
     color: '#10b981',
     fontSize: 11,
     fontWeight: '500',
+    flexShrink: 1,
   },
   addNoteBtn: {
     flexDirection: 'row',
@@ -797,14 +1212,14 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
     borderRadius: 6,
     paddingHorizontal: 8,
-    height: 30,
+    height: 34,
     color: '#ffffff',
     fontSize: 11,
   },
   saveNoteBtn: {
     backgroundColor: '#10b981',
     paddingHorizontal: 10,
-    height: 30,
+    height: 34,
     justifyContent: 'center',
     borderRadius: 6,
   },
@@ -815,7 +1230,7 @@ const styles = StyleSheet.create({
   },
   cancelNoteBtn: {
     paddingHorizontal: 6,
-    height: 30,
+    height: 34,
     justifyContent: 'center',
   },
   cancelNoteBtnText: {
@@ -824,7 +1239,8 @@ const styles = StyleSheet.create({
   },
   actionsRight: {
     alignItems: 'flex-end',
-    gap: 6,
+    gap: 7,
+    minWidth: 82,
   },
   qtyBox: {
     flexDirection: 'row',
@@ -849,9 +1265,18 @@ const styles = StyleSheet.create({
     minWidth: 14,
     textAlign: 'center',
   },
+  itemTotalRow: {
+    alignItems: 'flex-end',
+    gap: 1,
+  },
+  itemTotalLabel: {
+    color: '#64748b',
+    fontSize: 9,
+    textTransform: 'uppercase',
+  },
   itemSubtotal: {
     color: '#10b981',
-    fontWeight: '700',
+    fontWeight: '800',
     fontSize: 14,
   },
   trashBtn: {
@@ -963,6 +1388,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  discountValue: {
+    color: '#10b981',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   zeroFeeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1012,6 +1442,7 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 13,
     fontWeight: '600',
+    flex: 1,
   },
   footerContainer: {
     padding: 20,

@@ -28,6 +28,8 @@ export default function CustomerView({
   const [selectedCategory, setSelectedCategory] = useState(null); // null = All
   const [searchQuery, setSearchQuery] = useState('');
   const [vegOnly, setVegOnly] = useState(false);
+  const [actionLoading, setActionLoading] = useState({});
+  const [utilityLoading, setUtilityLoading] = useState({});
 
   const restaurantName = catalog ? catalog.restaurantName || `Restaurant #${catalog.restaurantId}` : 'Menza Fine Dining';
   const restaurantAddress = catalog ? catalog.restaurantAddress || '' : '';
@@ -53,9 +55,102 @@ export default function CustomerView({
     return true;
   });
 
+  const getCartItem = (itemId) => {
+    return (cartItems || []).find((c) => c.itemId === itemId) || null;
+  };
+
   const getCartQuantity = (itemId) => {
-    const found = cartItems.find((c) => c.itemId === itemId);
-    return found ? found.quantity : 0;
+    const found = getCartItem(itemId);
+    return found ? Number(found.quantity || 0) : 0;
+  };
+
+  // Display item quantity/unit information from API data without inventing
+  // meanings for numeric unit ids.
+  const getUnitName = (item, cartItem) => {
+    const value =
+      item?.unitName ||
+      item?.unitTypeName ||
+      item?.unit?.name ||
+      item?.unit?.unitName ||
+      item?.unitDescription ||
+      cartItem?.unitName ||
+      cartItem?.unitTypeName ||
+      cartItem?.unit?.name ||
+      cartItem?.unit?.unitName;
+
+    return value ? String(value).trim() : '';
+  };
+
+  const getVariantName = (item, cartItem) => {
+    const value =
+      item?.variantName ||
+      cartItem?.variantName ||
+      item?.sizeName ||
+      item?.size ||
+      '';
+
+    return value ? String(value).trim() : '';
+  };
+
+  const getUnitPrice = (item, cartItem) => {
+    // Prefer the cart/server price once the item is in the cart.
+    const value =
+      cartItem?.unitPrice ??
+      cartItem?.amount ??
+      item?.unitPrice ??
+      item?.price ??
+      0;
+
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  };
+
+  const getItemLineText = (item, cartItem) => {
+    const unitName = getUnitName(item, cartItem);
+    const variantName = getVariantName(item, cartItem);
+    const price = getUnitPrice(item, cartItem);
+
+    // Customer-friendly wording: "1 Plate • ₹220.00" instead of
+    // technical labels such as "Unit: 5".
+    const quantityWord = variantName || unitName;
+
+    if (quantityWord) {
+      return `1 ${quantityWord} • ₹${price.toFixed(2)}`;
+    }
+
+    return `₹${price.toFixed(2)}`;
+  };
+
+  const runItemAction = async (itemId, action) => {
+    if (actionLoading[itemId]) return;
+    setActionLoading((prev) => ({ ...prev, [itemId]: true }));
+    try {
+      await action();
+    } catch (error) {
+      console.error('Customer item action failed:', error);
+    } finally {
+      setActionLoading((prev) => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+    }
+  };
+
+  const runUtilityAction = async (key, action) => {
+    if (utilityLoading[key]) return;
+    setUtilityLoading((prev) => ({ ...prev, [key]: true }));
+    try {
+      await action();
+    } catch (error) {
+      console.error(`Customer ${key} action failed:`, error);
+    } finally {
+      setUtilityLoading((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
   };
 
   return (
@@ -109,13 +204,21 @@ export default function CustomerView({
 
             {activeTable && (
               <>
-                <TouchableOpacity style={styles.bannerButtonWaiter} onPress={onCallWaiter}>
-                  <Bell size={16} color="#f59e0b" />
+                <TouchableOpacity
+                  style={styles.bannerButtonWaiter}
+                  onPress={() => runUtilityAction('waiter', onCallWaiter)}
+                  disabled={!!utilityLoading.waiter}
+                >
+                  {utilityLoading.waiter ? <ActivityIndicator size="small" color="#f59e0b" /> : <Bell size={16} color="#f59e0b" />}
                   <Text style={styles.bannerButtonWaiterText}>Call Waiter</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.bannerButtonBill} onPress={onRequestBill}>
-                  <FileText size={16} color="#3b82f6" />
+                <TouchableOpacity
+                  style={styles.bannerButtonBill}
+                  onPress={() => runUtilityAction('bill', onRequestBill)}
+                  disabled={!!utilityLoading.bill}
+                >
+                  {utilityLoading.bill ? <ActivityIndicator size="small" color="#3b82f6" /> : <FileText size={16} color="#3b82f6" />}
                   <Text style={styles.bannerButtonBillText}>Request Bill</Text>
                 </TouchableOpacity>
               </>
@@ -197,7 +300,11 @@ export default function CustomerView({
         /* Items Grid */
         <View style={styles.grid}>
           {filteredItems.map((item) => {
+            const cartItem = getCartItem(item.itemId);
             const qty = getCartQuantity(item.itemId);
+            const unitPrice = getUnitPrice(item, cartItem);
+            const itemTotal = unitPrice * qty;
+            const itemBusy = !!actionLoading[item.itemId];
             return (
               <View key={item.itemId} style={styles.card}>
                 {/* Image */}
@@ -217,11 +324,21 @@ export default function CustomerView({
 
                 {/* Info Content */}
                 <View style={styles.cardContent}>
-                  <Text style={styles.itemName} numberOfLines={1}>{item.itemName}</Text>
-                  <Text style={styles.itemDesc} numberOfLines={2}>{item.description}</Text>
+                  <Text style={styles.itemName} numberOfLines={2}>{item.itemName}</Text>
+                  {item.description ? <Text style={styles.itemDesc} numberOfLines={2}>{item.description}</Text> : null}
+
+                  <View style={styles.itemMeta}>
+                    <Text style={styles.itemMetaText}>
+                      {getItemLineText(item, cartItem)}
+                    </Text>
+                    {qty > 0 ? (
+                      <Text style={styles.itemMetaTotal}>
+                        {qty} × ₹{unitPrice.toFixed(2)} = ₹{itemTotal.toFixed(2)}
+                      </Text>
+                    ) : null}
+                  </View>
 
                   <View style={styles.cardFooter}>
-                    <Text style={styles.itemPrice}>₹{item.price}</Text>
 
                     {!item.isAvailable ? (
                       <View style={[styles.addButton, { backgroundColor: '#334155', opacity: 0.6 }]}>
@@ -230,26 +347,29 @@ export default function CustomerView({
                     ) : qty === 0 ? (
                       <TouchableOpacity
                         style={styles.addButton}
-                        onPress={() => onAddToCart(item.itemId, 1)}
+                        onPress={() => runItemAction(item.itemId, () => onAddToCart(item.itemId, 1))}
+                        disabled={itemBusy}
                         activeOpacity={0.8}
                       >
-                        <Plus size={16} color="#0f172a" />
-                        <Text style={styles.addButtonText}>ADD</Text>
+                        {itemBusy ? <ActivityIndicator size="small" color="#0f172a" /> : <Plus size={16} color="#0f172a" />}
+                        <Text style={styles.addButtonText}>{itemBusy ? 'ADDING' : 'ADD'}</Text>
                       </TouchableOpacity>
                     ) : (
                       <View style={styles.quantityCounter}>
                         <TouchableOpacity
-                          style={styles.qtyBtn}
-                          onPress={() => onUpdateCartQuantity(item.itemId, qty - 1)}
+                          style={[styles.qtyBtn, itemBusy && styles.qtyBtnDisabled]}
+                          onPress={() => runItemAction(item.itemId, () => onUpdateCartQuantity(item.itemId, qty - 1))}
+                          disabled={itemBusy}
                         >
-                          <Minus size={14} color="#ffffff" />
+                          {itemBusy ? <ActivityIndicator size="small" color="#ffffff" /> : <Minus size={14} color="#ffffff" />}
                         </TouchableOpacity>
-                        <Text style={styles.qtyText}>{qty}</Text>
+                        <Text style={styles.qtyText}>{itemBusy ? '…' : qty}</Text>
                         <TouchableOpacity
-                          style={styles.qtyBtn}
-                          onPress={() => onUpdateCartQuantity(item.itemId, qty + 1)}
+                          style={[styles.qtyBtn, itemBusy && styles.qtyBtnDisabled]}
+                          onPress={() => runItemAction(item.itemId, () => onUpdateCartQuantity(item.itemId, qty + 1))}
+                          disabled={itemBusy}
                         >
-                          <Plus size={14} color="#ffffff" />
+                          {itemBusy ? <ActivityIndicator size="small" color="#ffffff" /> : <Plus size={14} color="#ffffff" />}
                         </TouchableOpacity>
                       </View>
                     )}
@@ -615,15 +735,29 @@ const styles = StyleSheet.create({
     height: 32,
     marginBottom: 12,
   },
+  itemMeta: {
+    marginTop: 2,
+    marginBottom: 12,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  itemMetaText: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  itemMetaTotal: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 3,
+  },
   cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  itemPrice: {
-    color: '#10b981',
-    fontSize: 18,
-    fontWeight: '800',
+    justifyContent: 'flex-end',
+    minHeight: 40,
   },
   addButton: {
     flexDirection: 'row',
@@ -633,6 +767,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
+  },
+  buttonBusy: {
+    opacity: 0.78,
   },
   addButtonText: {
     color: '#0f172a',
