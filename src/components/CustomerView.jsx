@@ -34,7 +34,7 @@ const COLORS = {
   orange: '#F47A24',
   orangeDark: '#E96816',
   orangeLight: '#FFF1E8',
-  orangeSoft: '#FFF5EE',
+  orangeSoft: '#fcf7f3',
 
   background: '#FFFCFA',
   white: '#FFFFFF',
