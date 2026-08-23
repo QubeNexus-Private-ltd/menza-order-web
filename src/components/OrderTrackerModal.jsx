@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -26,9 +26,8 @@ export default function OrderTrackerModal({
   visible,
   onClose,
   order,
+  onRefreshOrder,
 }) {
-  if (!visible || !order) return null;
-
   const STATUSES = [
     'Pending',
     'Confirmed',
@@ -37,21 +36,128 @@ export default function OrderTrackerModal({
     'Delivered',
   ];
 
-  const isOnline =
-    order.paymentMode === 'ONLINE' ||
-    order.paymentMode === 'CASHFREE' ||
-    order.paymentMode === 'UPI' ||
-    order.paymentMethod === 'cashfree' ||
-    order.paymentMethod === 'CASHFREE_SPLIT';
+  // Keep a local copy so the tracker changes immediately when the parent
+  // supplies a refreshed order object.
+  const [liveOrder, setLiveOrder] = useState(order);
 
-  const isPaid =
-    order.paymentStatus === 'Paid' ||
-    order.paymentStatus === 'SUCCESS' ||
-    order.paymentStatus === 'PAID';
+  useEffect(() => {
+    setLiveOrder(order);
+  }, [order]);
+
+  // IMPORTANT:
+  // The tracker cannot know that the kitchen changed "Confirmed" -> "Preparing"
+  // unless the latest order is fetched again. The parent should pass:
+  // onRefreshOrder={yourRefreshFunction}
+  //
+  // We poll every 3 seconds while the tracker is open.
+  useEffect(() => {
+    if (!visible || !order?.id || typeof onRefreshOrder !== 'function') {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const latest = await onRefreshOrder(order.id);
+
+        if (!cancelled && latest) {
+          setLiveOrder(latest);
+        }
+      } catch (error) {
+        console.log('Order tracker refresh error:', error?.message || error);
+      }
+    };
+
+    refresh();
+    const interval = setInterval(refresh, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [visible, order?.id, onRefreshOrder]);
+
+  if (!visible || !liveOrder) return null;
+
+  const currentOrder = liveOrder;
+
+  const normalizeStatus = (value) => {
+    const valueLower = String(value ?? '').trim().toLowerCase();
+
+    if (['pending', 'placed', 'created', 'new', 'received'].includes(valueLower)) {
+      return 'Pending';
+    }
+
+    if (['confirmed', 'accepted', 'approved', 'order confirmed'].includes(valueLower)) {
+      return 'Confirmed';
+    }
+
+    if (
+      [
+        'preparing',
+        'prepare',
+        'in preparation',
+        'processing',
+        'cooking',
+        'in kitchen',
+        'kitchen',
+      ].includes(valueLower)
+    ) {
+      return 'Preparing';
+    }
+
+    if (['ready', 'prepared', 'ready to serve', 'ready for pickup'].includes(valueLower)) {
+      return 'Ready';
+    }
+
+    if (
+      ['delivered', 'completed', 'served', 'picked up', 'pickedup', 'closed'].includes(
+        valueLower
+      )
+    ) {
+      return 'Delivered';
+    }
+
+    return 'Pending';
+  };
+
+  // Different backend screens can expose the same progress under different
+  // property names. Use the furthest valid status so a stale "Confirmed"
+  // field cannot hide a newer "Preparing"/"Ready" status.
+  const statusCandidates = [
+    currentOrder.kitchenStatus,
+    currentOrder.kitchenOrderStatus,
+    currentOrder.orderStatus,
+    currentOrder.orderStatusName,
+    currentOrder.status,
+    currentOrder.statusName,
+    currentOrder.orderState,
+  ]
+    .filter((value) => value !== null && value !== undefined && value !== '')
+    .map(normalizeStatus);
+
+  const rawStatus =
+    statusCandidates.length > 0
+      ? statusCandidates.reduce((best, value) =>
+          STATUSES.indexOf(value) > STATUSES.indexOf(best) ? value : best
+        )
+      : 'Pending';
+
+  const paymentMode = String(currentOrder.paymentMode ?? '').trim().toUpperCase();
+  const paymentMethod = String(currentOrder.paymentMethod ?? '').trim().toUpperCase();
+  const paymentState = String(currentOrder.paymentStatus ?? '').trim().toUpperCase();
+
+  const isOnline =
+    ['ONLINE', 'CASHFREE', 'UPI'].includes(paymentMode) ||
+    ['CASHFREE', 'CASHFREE_SPLIT', 'ONLINE', 'UPI'].includes(paymentMethod);
+
+  const isPaid = ['PAID', 'SUCCESS', 'COMPLETED', 'CAPTURED'].includes(paymentState);
 
   const isAwaitingPayment = isOnline && !isPaid;
 
-  const rawStatus = order.orderStatus || 'Pending';
+  // Payment should block kitchen progress only while payment is actually pending.
+  // Once payment is successful, show the real kitchen/order status.
   const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
 
   const currentIdx =
@@ -59,14 +165,14 @@ export default function OrderTrackerModal({
       ? STATUSES.indexOf(normalizedStatus)
       : 0;
 
-  const items = Array.isArray(order.items)
-    ? order.items
+  const items = Array.isArray(currentOrder.items)
+    ? currentOrder.items
     : [];
 
   const subtotal =
     Number(
-      order.subTotal ??
-        order.itemTotal ??
+      currentOrder.subTotal ??
+        currentOrder.itemTotal ??
         items.reduce(
           (sum, item) =>
             sum +
@@ -82,30 +188,30 @@ export default function OrderTrackerModal({
     ) || 0;
 
   const cgst =
-    Number(order.cgstAmount ?? 0) ||
+    Number(currentOrder.cgstAmount ?? 0) ||
     Math.round(subtotal * 0.025 * 100) / 100;
 
   const sgst =
-    Number(order.sgstAmount ?? 0) ||
+    Number(currentOrder.sgstAmount ?? 0) ||
     Math.round(subtotal * 0.025 * 100) / 100;
 
   const total =
     Number(
-      order.totalAmount ??
+      currentOrder.totalAmount ??
         subtotal + cgst + sgst
     ) || 0;
 
   const paymentStatus =
-    order.paymentStatus ||
-    order.paymentMethod ||
+    currentOrder.paymentStatus ||
+    currentOrder.paymentMethod ||
     'Pending';
 
   const tokenNumber =
-    order.pickupToken ||
-    (order.tokenNumber ? `TK-${String(order.tokenNumber).padStart(3, '0')}` : `TK-${String(order.id).padStart(3, '0')}`);
+    currentOrder.pickupToken ||
+    (currentOrder.tokenNumber ? `TK-${String(currentOrder.tokenNumber).padStart(3, '0')}` : `TK-${String(currentOrder.id).padStart(3, '0')}`);
 
-  const formattedDate = order.createdDateUtc
-    ? new Date(order.createdDateUtc).toLocaleString('en-IN', {
+  const formattedDate = currentOrder.createdDateUtc
+    ? new Date(currentOrder.createdDateUtc).toLocaleString('en-IN', {
         dateStyle: 'medium',
         timeStyle: 'short',
       })
@@ -114,10 +220,10 @@ export default function OrderTrackerModal({
         timeStyle: 'short',
       });
 
-  const channelText = order.tableName
-    ? `Dine-In • ${order.tableName}`
-    : order.tableId
-    ? `Dine-In • Table #${order.tableId}`
+  const channelText = currentOrder.tableName
+    ? `Dine-In • ${currentOrder.tableName}`
+    : currentOrder.tableId
+    ? `Dine-In • Table #${currentOrder.tableId}`
     : 'Direct Quick QR Order (Counter / Takeaway)';
 
   return (
@@ -128,14 +234,14 @@ export default function OrderTrackerModal({
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.modalBox}>
+        <View style={styles.sheetContainer}>
 
           {/* HEADER */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <View style={styles.headerTopRow}>
                 <Text style={styles.orderIdText}>
-                  ORDER #{order.id}
+                  ORDER #{currentOrder.id}
                 </Text>
                 <View style={styles.tokenBadge}>
                   <Tag size={12} color="#10b981" />
@@ -213,14 +319,14 @@ export default function OrderTrackerModal({
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Customer Name:</Text>
                   <Text style={styles.infoValue}>
-                    {order.customerName || order.name || 'Guest Diner'}
+                    {currentOrder.customerName || currentOrder.name || 'Guest Diner'}
                   </Text>
                 </View>
 
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Mobile Number:</Text>
                   <Text style={styles.infoValue}>
-                    {order.mobileNumber || order.customerPhone || 'N/A'}
+                    {currentOrder.mobileNumber || currentOrder.customerPhone || 'N/A'}
                   </Text>
                 </View>
 
@@ -234,11 +340,11 @@ export default function OrderTrackerModal({
                   <Text style={styles.infoValue}>{channelText}</Text>
                 </View>
 
-                {order.remarks ? (
+                {currentOrder.remarks ? (
                   <View style={styles.remarksBox}>
                     <MessageSquare size={13} color="#f59e0b" />
                     <Text style={styles.remarksText}>
-                      Special Request: {order.remarks}
+                      Special Request: {currentOrder.remarks}
                     </Text>
                   </View>
                 ) : null}
@@ -246,7 +352,7 @@ export default function OrderTrackerModal({
             </View>
 
             {/* STATUS TIMELINE */}
-            <View style={styles.card}>
+            {/* <View style={styles.card}>
               <Text style={styles.cardTitle}>
                 Live Kitchen Status
               </Text>
@@ -356,7 +462,7 @@ export default function OrderTrackerModal({
                   </Text>
                 </View>
               </View>
-            </View>
+            </View> */}
 
             {/* ORDER ITEMS */}
             <View style={styles.card}>
@@ -530,7 +636,7 @@ export default function OrderTrackerModal({
                 </Text>
               </View>
 
-              {order.gstNumber ? (
+              {currentOrder.gstNumber ? (
                 <View
                   style={styles.billRow}
                 >
@@ -543,7 +649,7 @@ export default function OrderTrackerModal({
                   <Text
                     style={[styles.billValue, { color: '#94a3b8', fontSize: 12, fontWeight: '700' }]}
                   >
-                    {order.gstNumber}
+                    {currentOrder.gstNumber}
                   </Text>
                 </View>
               ) : null}
@@ -598,9 +704,9 @@ export default function OrderTrackerModal({
                   Mode: {isOnline ? 'Online Gateway (Cashfree)' : 'Cash / Counter Settlement'}
                 </Text>
 
-                {order.cashfreeOrderId || order.paymentOrderId ? (
+                {currentOrder.cashfreeOrderId || currentOrder.paymentOrderId ? (
                   <Text style={styles.paymentTxnId}>
-                    Ref ID: {order.cashfreeOrderId || order.paymentOrderId}
+                    Ref ID: {currentOrder.cashfreeOrderId || currentOrder.paymentOrderId}
                   </Text>
                 ) : null}
               </View>

@@ -1,6 +1,7 @@
 import React, {
   useState,
   useEffect,
+  useCallback,
 } from 'react';
 
 import {
@@ -858,6 +859,34 @@ export default function App() {
     };
 
   /* =========================
+     LIVE ORDER TRACKING
+  ========================= */
+
+  const handleRefreshOrder = useCallback(
+    async (orderId) => {
+      if (!orderId) return null;
+
+      const restId = Number(catalog?.restaurantId) || 1;
+
+      try {
+        const latest = await api.getLiveOrderTracking(orderId, restId);
+        if (latest) {
+          setActiveOrder((previous) => ({
+            ...(previous || {}),
+            ...latest,
+          }));
+          return latest;
+        }
+      } catch (error) {
+        console.log('handleRefreshOrder error:', error?.message);
+      }
+
+      return null;
+    },
+    [catalog?.restaurantId]
+  );
+
+  /* =========================
      STAFF AUTH
   ========================= */
 
@@ -1278,6 +1307,7 @@ export default function App() {
           )
         }
         order={activeOrder}
+        onRefreshOrder={handleRefreshOrder}
       />
 
       <QrScannerModal

@@ -2,145 +2,99 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import {
   ShoppingBag as CartIcon,
-  QrCode as ScanIcon,
-  Bell as WaiterIcon,
-  FileText as BillIcon,
-  User as UserIcon,
-  Shield as StaffIcon,
-  LogOut,
+  ClipboardList as OrderIcon,
   Store,
-  Wifi,
 } from 'lucide-react';
 
 export default function Header({
-  mode,
-  setMode,
-  activeTable,
-  openScanner,
-  cartCount,
+  restaurantName,
+  cartCount = 0,
   openCart,
   openOrderTracker,
   activeOrder,
-  onCallWaiter,
-  onRequestBill,
-  staffUser,
-  openLogin,
-  onLogout,
-  restaurantName,
 }) {
   const displayName = restaurantName || 'Saffron Café';
 
   return (
     <View style={styles.container}>
-      <View style={styles.topRow}>
-        {/* Brand Logo & Name */}
+      <View style={styles.headerRow}>
+
+        {/* =========================
+            RESTAURANT NAME
+        ========================== */}
         <View style={styles.brandContainer}>
           <View style={styles.logoBadge}>
-            <Store size={22} color="#78350f" />
+            <Store size={21} color="#ffffff" />
           </View>
-          <View>
-            <Text style={styles.brandTitle}>{displayName}</Text>
-            <Text style={styles.brandSub}>Streamlined Smart Ordering</Text>
+
+          <View style={styles.brandTextContainer}>
+            <Text
+              style={styles.brandTitle}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {displayName}
+            </Text>
+
+            <Text style={styles.brandSub}>
+              Smart Ordering
+            </Text>
           </View>
         </View>
 
-        {/* Mode Switcher Pills */}
-        <View style={styles.modeSwitchContainer}>
-          <TouchableOpacity
-            style={[styles.modeButton, mode === 'customer' && styles.modeButtonActive]}
-            onPress={() => setMode('customer')}
-            activeOpacity={0.8}
-          >
-            <ScanIcon size={15} color={mode === 'customer' ? '#ffffff' : '#78716c'} />
-            <Text style={[styles.modeText, mode === 'customer' && styles.modeTextActive]}>
-              Customer QR
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.modeButton, mode === 'staff' && styles.modeButtonActive]}
-            onPress={() => setMode('staff')}
-            activeOpacity={0.8}
-          >
-            <StaffIcon size={15} color={mode === 'staff' ? '#ffffff' : '#78716c'} />
-            <Text style={[styles.modeText, mode === 'staff' && styles.modeTextActive]}>
-              Staff POS
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Right Actions */}
+        {/* =========================
+            RIGHT SIDE ACTIONS
+        ========================== */}
         <View style={styles.actionsRow}>
-          {mode === 'customer' ? (
-            <>
-              {/* Online/Wifi indicator icon */}
-              <View style={styles.wifiBox}>
-                <Wifi size={18} color="#78350f" />
-              </View>
 
-              {/* Table Info / Scanner button */}
-              <TouchableOpacity style={styles.tableChip} onPress={openScanner}>
-                <ScanIcon size={15} color="#78350f" />
-                <Text style={styles.tableChipText}>
-                  {activeTable ? `Table #${activeTable.id}` : 'Scan Table'}
-                </Text>
-              </TouchableOpacity>
+          {/* =========================
+              ORDER BUTTON
+          ========================== */}
+          {activeOrder && (
+            <TouchableOpacity
+              style={styles.orderButton}
+              onPress={openOrderTracker}
+              activeOpacity={0.8}
+            >
+              <OrderIcon
+                size={19}
+                color="#D33401"
+                strokeWidth={2.3}
+              />
 
-              {/* Call Waiter Quick Action */}
-              {activeTable && (
-                <TouchableOpacity style={styles.iconActionButton} onPress={onCallWaiter} title="Call Waiter">
-                  <WaiterIcon size={17} color="#d97706" />
-                </TouchableOpacity>
-              )}
+              <Text style={styles.orderButtonText}>
+                Order
+              </Text>
 
-              {/* Request Bill Quick Action */}
-              {activeTable && (
-                <TouchableOpacity style={styles.iconActionButton} onPress={onRequestBill} title="Request Bill">
-                  <BillIcon size={17} color="#78350f" />
-                </TouchableOpacity>
-              )}
-
-              {/* Active Order Tracker Button if order placed */}
-              {activeOrder && (
-                <TouchableOpacity style={styles.trackerChip} onPress={openOrderTracker}>
-                  <View style={styles.pulseDot} />
-                  <Text style={styles.trackerText}>Order #{activeOrder.id}</Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Cart Button with Count Badge */}
-              <TouchableOpacity style={styles.cartButton} onPress={openCart}>
-                <CartIcon size={19} color="#ffffff" />
-                {cartCount > 0 && (
-                  <View style={styles.cartBadge}>
-                    <Text style={styles.cartBadgeText}>{cartCount}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              {staffUser ? (
-                <View style={styles.userProfileRow}>
-                  <View style={styles.userAvatar}>
-                    <Text style={styles.userAvatarText}>{staffUser.name ? staffUser.name[0].toUpperCase() : 'S'}</Text>
-                  </View>
-                  <View style={styles.userInfoCol}>
-                    <Text style={styles.userNameText}>{staffUser.name}</Text>
-                    <Text style={styles.userRoleText}>{staffUser.role || 'Staff / Waiter'}</Text>
-                  </View>
-                  <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
-                    <LogOut size={16} color="#b91c1c" />
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity style={styles.loginBtn} onPress={openLogin}>
-                  <UserIcon size={16} color="#ffffff" />
-                  <Text style={styles.loginBtnText}>Staff Login</Text>
-                </TouchableOpacity>
-              )}
-            </>
+              {/* Order status dot */}
+              <View style={styles.orderDot} />
+            </TouchableOpacity>
           )}
+
+          {/* =========================
+              CART BUTTON
+          ========================== */}
+          <TouchableOpacity
+            style={styles.cartButton}
+            onPress={openCart}
+            activeOpacity={0.8}
+          >
+            <CartIcon
+              size={20}
+              color="#ffffff"
+              strokeWidth={2.3}
+            />
+
+            {/* Cart Count */}
+            {cartCount > 0 && (
+              <View style={styles.cartBadge}>
+                <Text style={styles.cartBadgeText}>
+                  {cartCount > 99 ? '99+' : cartCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
         </View>
       </View>
     </View>
@@ -148,219 +102,202 @@ export default function Header({
 }
 
 const styles = StyleSheet.create({
+
+  // ==========================================
+  // MAIN HEADER
+  // ==========================================
   container: {
+    width: '100%',
     backgroundColor: '#FBF9F9',
+
     borderBottomWidth: 1,
     borderBottomColor: '#E0DDD8',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    zIndex: 10,
+
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+
+    zIndex: 100,
+    elevation: 5,
   },
-  topRow: {
+
+  // ==========================================
+  // HEADER ROW
+  // ==========================================
+  headerRow: {
     width: '100%',
-    maxWidth: 1280,
-    alignSelf: 'center',
+
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 12,
+
+    minHeight: 44,
   },
+
+  // ==========================================
+  // RESTAURANT BRAND
+  // ==========================================
   brandContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+
+    flex: 1,
+    minWidth: 0,
   },
+
   logoBadge: {
     width: 38,
     height: 38,
+
     borderRadius: 10,
+
     backgroundColor: '#1B1C1C',
+
     alignItems: 'center',
     justifyContent: 'center',
+
+    marginRight: 10,
   },
+
+  brandTextContainer: {
+    flex: 1,
+    minWidth: 0,
+  },
+
   brandTitle: {
     color: '#1B1C1C',
-    fontSize: 18,
+
+    fontSize: 17,
     fontWeight: '800',
+
     letterSpacing: -0.3,
+
+    maxWidth: '100%',
   },
+
   brandSub: {
     color: '#747878',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  modeSwitchContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#EFEDED',
-    borderRadius: 24,
-    padding: 3,
-    gap: 3,
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-  },
-  modeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 13,
-    paddingVertical: 7,
-    borderRadius: 20,
-  },
-  modeButtonActive: {
-    backgroundColor: '#1B1C1C',
-  },
-  modeText: {
-    color: '#444748',
-    fontSize: 12,
+
+    fontSize: 10,
+
     fontWeight: '600',
+
+    marginTop: 1,
   },
-  modeTextActive: {
-    color: '#ffffff',
-    fontWeight: '700',
-  },
+
+  // ==========================================
+  // RIGHT ACTIONS
+  // ==========================================
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+
+    marginLeft: 10,
+
+    gap: 8,
   },
-  wifiBox: {
-    padding: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tableChip: {
+
+  // ==========================================
+  // ORDER BUTTON
+  // ==========================================
+  orderButton: {
+    height: 40,
+
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#EFEDED',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
+
     paddingHorizontal: 12,
-    paddingVertical: 7,
+
     borderRadius: 20,
+
+    backgroundColor: '#FFF1EC',
+
+    borderWidth: 1,
+    borderColor: '#F3C8BA',
+
+    position: 'relative',
   },
-  tableChipText: {
-    color: '#1B1C1C',
-    fontWeight: '700',
+
+  orderButtonText: {
+    color: '#D33401',
+
     fontSize: 12,
+
+    fontWeight: '800',
+
+    marginLeft: 6,
   },
-  iconActionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#EFEDED',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  trackerChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(211, 52, 1, 0.1)',
-    borderWidth: 1,
-    borderColor: '#D33401',
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 20,
-  },
-  pulseDot: {
+
+  // ==========================================
+  // ORDER STATUS DOT
+  // ==========================================
+  orderDot: {
     width: 7,
     height: 7,
+
     borderRadius: 4,
+
     backgroundColor: '#D33401',
+
+    marginLeft: 6,
   },
-  trackerText: {
-    color: '#D33401',
-    fontWeight: '700',
-    fontSize: 12,
-  },
+
+  // ==========================================
+  // CART BUTTON
+  // ==========================================
   cartButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+
+    borderRadius: 21,
+
     backgroundColor: '#D33401',
+
     alignItems: 'center',
     justifyContent: 'center',
+
     position: 'relative',
+
     shadowColor: '#D33401',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: {
+      width: 0,
+      height: 3,
+    },
     shadowOpacity: 0.25,
     shadowRadius: 6,
+
+    elevation: 4,
   },
+
+  // ==========================================
+  // CART BADGE
+  // ==========================================
   cartBadge: {
     position: 'absolute',
-    top: -4,
-    right: -4,
+
+    top: -5,
+    right: -5,
+
+    minWidth: 19,
+    height: 19,
+
+    borderRadius: 10,
+
     backgroundColor: '#1B1C1C',
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 3,
+
+    paddingHorizontal: 4,
+
     borderWidth: 2,
     borderColor: '#FBF9F9',
   },
+
   cartBadgeText: {
     color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  userProfileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#EFEDED',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-  },
-  userAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#1B1C1C',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userAvatarText: {
-    color: '#ffffff',
-    fontWeight: '800',
-    fontSize: 12,
-  },
-  userInfoCol: {
-    justifyContent: 'center',
-  },
-  userNameText: {
-    color: '#1B1C1C',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  userRoleText: {
-    color: '#444748',
-    fontSize: 10,
-    fontWeight: '500',
-  },
-  logoutBtn: {
-    padding: 4,
-  },
-  loginBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#1B1C1C',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  loginBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
+
+    fontSize: 9,
+
+    fontWeight: '900',
   },
 });

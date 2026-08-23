@@ -2320,6 +2320,507 @@ export const getKitchenOrders =
         normalizeOrder
       );
   };
+  /* =========================================================
+   LIVE KITCHEN ORDER API
+
+   GET:
+   /api/Order/Kitchen?restaurantId={restaurantId}
+
+   This is the REAL backend API used for kitchen status.
+========================================================= */
+
+export const getLiveKitchenOrder = async (
+  restaurantId,
+  orderId = null
+) => {
+  const restId = Number(restaurantId);
+
+  if (!restId || restId <= 0) {
+    console.warn(
+      'getLiveKitchenOrder: invalid restaurantId',
+      restaurantId
+    );
+
+    return null;
+  }
+
+  try {
+    console.log(
+      '========================================'
+    );
+
+    console.log(
+      'LIVE KITCHEN API REQUEST'
+    );
+
+    console.log(
+      'Restaurant ID:',
+      restId
+    );
+
+    console.log(
+      'Order ID:',
+      orderId
+    );
+
+    console.log(
+      '========================================'
+    );
+
+    const response = await api.get(
+      '/api/Order/Kitchen',
+      {
+        params: {
+          restaurantId: restId,
+        },
+      }
+    );
+
+    const data = response?.data;
+
+    console.log(
+      'LIVE KITCHEN API RESPONSE:',
+      data
+    );
+
+    if (!data) {
+      return null;
+    }
+
+    /*
+     * Backend may return:
+     *
+     * [
+     *   { orderId: 82, status: "New" }
+     * ]
+     *
+     * OR
+     *
+     * {
+     *   orderId: 82,
+     *   status: "New"
+     * }
+     *
+     * OR
+     *
+     * {
+     *   orders: [...]
+     * }
+     *
+     * OR
+     *
+     * {
+     *   data: [...]
+     * }
+     */
+
+    let kitchenOrders = [];
+
+    if (Array.isArray(data)) {
+
+      kitchenOrders = data;
+
+    } else if (
+      Array.isArray(data.orders)
+    ) {
+
+      kitchenOrders = data.orders;
+
+    } else if (
+      Array.isArray(data.data)
+    ) {
+
+      kitchenOrders = data.data;
+
+    } else {
+
+      kitchenOrders = [data];
+
+    }
+
+    /*
+     * If we are looking for one specific order,
+     * find that order.
+     */
+
+    if (
+      orderId !== null &&
+      orderId !== undefined
+    ) {
+
+      const matchedOrder =
+        kitchenOrders.find(
+          (item) => {
+
+            const backendOrderId =
+              item?.orderId ??
+              item?.id ??
+              item?.orderID ??
+              item?.OrderId;
+
+            return (
+              Number(backendOrderId) ===
+              Number(orderId)
+            );
+
+          }
+        );
+
+      if (!matchedOrder) {
+
+        console.log(
+          'Kitchen order not found:',
+          orderId
+        );
+
+        return null;
+      }
+
+      /*
+       * Your Swagger API returns:
+       *
+       * "status": "New"
+       *
+       * But other endpoints may return:
+       *
+       * kitchenStatus
+       * kitchenOrderStatus
+       * orderStatus
+       */
+
+      const status =
+        matchedOrder?.kitchenStatus ??
+        matchedOrder?.kitchenOrderStatus ??
+        matchedOrder?.orderStatus ??
+        matchedOrder?.status ??
+        'Pending';
+
+      const backendId =
+        matchedOrder?.orderId ??
+        matchedOrder?.id ??
+        matchedOrder?.orderID ??
+        matchedOrder?.OrderId ??
+        orderId;
+
+      return {
+
+        ...matchedOrder,
+
+        id: Number(
+          backendId
+        ),
+
+        orderId: Number(
+          backendId
+        ),
+
+        /*
+         * Normalize the backend status into
+         * fields used by OrderTrackerModal.
+         */
+
+        orderStatus:
+          status,
+
+        kitchenStatus:
+          status,
+
+      };
+
+    }
+
+    /*
+     * No orderId supplied.
+     * Return all kitchen orders.
+     */
+
+    return kitchenOrders.map(
+      (item) => {
+
+        const backendId =
+          item?.orderId ??
+          item?.id ??
+          item?.orderID ??
+          item?.OrderId ??
+          0;
+
+        const status =
+          item?.kitchenStatus ??
+          item?.kitchenOrderStatus ??
+          item?.orderStatus ??
+          item?.status ??
+          'Pending';
+
+        return {
+
+          ...item,
+
+          id: Number(
+            backendId
+          ),
+
+          orderId: Number(
+            backendId
+          ),
+
+          orderStatus:
+            status,
+
+          kitchenStatus:
+            status,
+
+        };
+
+      }
+    );
+
+  } catch (error) {
+
+    console.warn(
+      '========================================'
+    );
+
+    console.warn(
+      'LIVE KITCHEN API ERROR'
+    );
+
+    console.warn(
+      'Status:',
+      error?.response?.status
+    );
+
+    console.warn(
+      'Response:',
+      error?.response?.data
+    );
+
+    console.warn(
+      'Message:',
+      error?.message
+    );
+
+    console.warn(
+      '========================================'
+    );
+
+    /*
+     * Do NOT crash the customer app if this
+     * endpoint requires staff/admin authorization.
+     */
+
+    return null;
+  }
+};
+
+
+/* =========================================================
+   LIVE CUSTOMER ORDER TRACKING
+
+   Priority:
+   1. GET /api/Order/Kitchen
+   2. Existing public order tracking API
+========================================================= */
+
+export const getLiveOrderTracking = async (
+  orderId,
+  restaurantId
+) => {
+
+  if (!orderId) {
+
+    console.warn(
+      'getLiveOrderTracking: missing orderId'
+    );
+
+    return null;
+
+  }
+
+  console.log(
+    '========================================'
+  );
+
+  console.log(
+    'LIVE CUSTOMER ORDER TRACKING'
+  );
+
+  console.log(
+    'Order ID:',
+    orderId
+  );
+
+  console.log(
+    'Restaurant ID:',
+    restaurantId
+  );
+
+  console.log(
+    '========================================'
+  );
+
+
+  /*
+   * STEP 1
+   *
+   * Get latest kitchen status.
+   */
+
+  let kitchenOrder = null;
+
+  if (restaurantId) {
+
+    kitchenOrder =
+      await getLiveKitchenOrder(
+        restaurantId,
+        orderId
+      );
+
+  }
+
+
+  /*
+   * STEP 2
+   *
+   * If kitchen API returned the order,
+   * combine it with the complete order.
+   */
+
+  if (kitchenOrder) {
+
+    let fullOrder = null;
+
+    try {
+
+      fullOrder =
+        await getOrder(
+          orderId
+        );
+
+    } catch (error) {
+
+      console.log(
+        'Full order API failed:',
+        error?.message
+      );
+
+    }
+
+
+    /*
+     * Kitchen status MUST have priority.
+     *
+     * Example:
+     *
+     * Customer order:
+     * Confirmed
+     *
+     * Kitchen:
+     * Preparing
+     *
+     * Final result:
+     * Preparing
+     */
+
+    const kitchenStatus =
+      kitchenOrder?.kitchenStatus ??
+      kitchenOrder?.kitchenOrderStatus ??
+      kitchenOrder?.orderStatus ??
+      kitchenOrder?.status ??
+      fullOrder?.kitchenStatus ??
+      fullOrder?.orderStatus ??
+      fullOrder?.status ??
+      'Pending';
+
+
+    const backendOrderId =
+      kitchenOrder?.orderId ??
+      kitchenOrder?.id ??
+      orderId;
+
+
+    const combinedOrder = {
+
+      ...(fullOrder || {}),
+
+      ...kitchenOrder,
+
+      id: Number(
+        backendOrderId
+      ),
+
+      orderId: Number(
+        backendOrderId
+      ),
+
+      /*
+       * IMPORTANT:
+       * Kitchen status wins.
+       */
+
+      orderStatus:
+        kitchenStatus,
+
+      kitchenStatus:
+        kitchenStatus,
+
+    };
+
+
+    console.log(
+      'FINAL LIVE ORDER:',
+      combinedOrder
+    );
+
+
+    return normalizeOrder(
+      combinedOrder
+    );
+
+  }
+
+
+  /*
+   * STEP 3
+   *
+   * Kitchen API didn't return the order.
+   *
+   * Use your existing public tracking API.
+   */
+
+  try {
+
+    console.log(
+      'Kitchen API unavailable.'
+    );
+
+    console.log(
+      'Using public order tracking API...'
+    );
+
+    const publicOrder =
+      await getOrder(
+        orderId
+      );
+
+    if (publicOrder) {
+
+      return publicOrder;
+
+    }
+
+  } catch (error) {
+
+    console.warn(
+      'Public order tracking failed:',
+      error?.message
+    );
+
+  }
+
+
+  return null;
+
+};
 
 /* =========================================================
    UPDATE ORDER STATUS
