@@ -27,11 +27,39 @@ import {
 
 
 /* =========================================================
+   COLOR PALETTE
+========================================================= */
+
+const COLORS = {
+  orange: '#F47A24',
+  orangeDark: '#E96816',
+  orangeLight: '#FFF1E8',
+  orangeSoft: '#FFF5EE',
+
+  background: '#FFFCFA',
+  white: '#FFFFFF',
+
+  text: '#171717',
+  textSecondary: '#8C8885',
+  textMuted: '#AAA5A1',
+
+  softGray: '#F7F5F3',
+  gray: '#EFECE9',
+  border: '#EEE8E3',
+
+  green: '#15803D',
+  greenLight: '#DCFCE7',
+
+  red: '#DC2626',
+
+  placeholder: '#F5F3F1',
+};
+
+
+/* =========================================================
    ITEM IMAGE
-
-   Displays the REAL image coming from API.
-
-   No new API call.
+   Same working logic as Basket:
+   direct URI -> Image
 ========================================================= */
 
 function ItemImageWithFallback({
@@ -45,20 +73,33 @@ function ItemImageWithFallback({
     setHasError(false);
   }, [uri]);
 
+  const cleanUri =
+    typeof uri === 'string'
+      ? uri.trim()
+      : '';
+
   const hasValidUri =
-    typeof uri === 'string' &&
-    uri.trim() !== '' &&
-    uri.trim() !== IMAGE_NOT_AVAILABLE;
+    cleanUri !== '' &&
+    cleanUri !== IMAGE_NOT_AVAILABLE;
 
   if (!hasValidUri || hasError) {
     return (
-      <View style={[style, styles.imagePlaceholder]}>
+      <View
+        style={[
+          style,
+          styles.imagePlaceholder,
+        ]}
+      >
         <Store
           size={28}
-          color="#B8B8B8"
+          color={COLORS.textMuted}
         />
 
-        <Text style={styles.imagePlaceholderText}>
+        <Text
+          style={
+            styles.imagePlaceholderText
+          }
+        >
           Image unavailable
         </Text>
       </View>
@@ -68,20 +109,20 @@ function ItemImageWithFallback({
   return (
     <Image
       source={{
-        uri: uri.trim(),
+        uri: cleanUri,
       }}
       style={style}
       resizeMode={resizeMode}
       onLoad={() => {
         console.log(
-          'ITEM IMAGE LOADED:',
-          uri
+          'CUSTOMER IMAGE LOADED:',
+          cleanUri
         );
       }}
       onError={(error) => {
         console.log(
-          'ITEM IMAGE ERROR:',
-          uri,
+          'CUSTOMER IMAGE FAILED:',
+          cleanUri,
           error?.nativeEvent
         );
 
@@ -443,24 +484,17 @@ export default function CustomerView({
 
   /* =======================================================
      REAL API IMAGE
+     
+     IMPORTANT:
+     Basket uses:
+     
+       item.imageUrl
+     
+     directly.
+     
+     CustomerView now does the same.
+  ======================================================= */
 
-     ONLY IMAGE LOGIC
-
-     The item itself is used as the source.
-     No additional API request is made.
-========================================================= */
-
-  /*
-   * Resolve the same real image value that the API/cart provides.
-   *
-   * IMPORTANT:
-   * - No image URL is invented here.
-   * - No image API request is made per card.
-   * - Complete URLs are used exactly as returned by the API.
-   * - Relative Azure/blob paths go through the existing API helper.
-   * - When an item is already in the server cart, its imageUrl is also
-   *   accepted as the authoritative API value.
-   */
   const getDisplayImage =
     (item, cartItem = null) => {
 
@@ -468,49 +502,95 @@ export default function CustomerView({
         return '';
       }
 
+
+      /* ===================================================
+         1. EXACT SAME FIELD AS BASKET
+      =================================================== */
+
+      const directImageUrl =
+        cartItem?.imageUrl ||
+        item?.imageUrl ||
+        '';
+
+
+      if (
+        typeof directImageUrl === 'string' &&
+        directImageUrl.trim() !== '' &&
+        directImageUrl.trim() !== IMAGE_NOT_AVAILABLE
+      ) {
+
+        const cleanDirectUrl =
+          directImageUrl.trim();
+
+
+        console.log(
+          'CUSTOMER API IMAGE:',
+          item?.itemName,
+          '=>',
+          cleanDirectUrl
+        );
+
+
+        return cleanDirectUrl;
+      }
+
+
+      /* ===================================================
+         2. OTHER POSSIBLE API IMAGE FIELDS
+      =================================================== */
+
       const imageCandidates = [
-        item?.imageUrl,
+
         item?.ImageUrl,
         item?.ImageURL,
         item?.imageURL,
+
         item?.imagePath,
         item?.ImagePath,
+
         item?.photoUrl,
         item?.PhotoUrl,
         item?.photoURL,
         item?.PhotoURL,
+
         item?.img,
+
         item?.itemImage,
         item?.itemImageUrl,
         item?.ItemImage,
         item?.ItemImageUrl,
+
         item?.itemImageURL,
         item?.ItemImageURL,
+
         item?.imageFile,
         item?.ImageFile,
+
         item?.imageName,
         item?.ImageName,
 
-        /*
-         * Cart API image. This is especially useful when the same
-         * item has already been loaded by GET /api/Cart.
-         */
-        cartItem?.imageUrl,
+
         cartItem?.ImageUrl,
         cartItem?.ImageURL,
         cartItem?.imageURL,
+
         cartItem?.imagePath,
         cartItem?.ImagePath,
+
         cartItem?.photoUrl,
         cartItem?.PhotoUrl,
         cartItem?.photoURL,
         cartItem?.PhotoURL,
+
         cartItem?.img,
+
         cartItem?.itemImage,
         cartItem?.itemImageUrl,
         cartItem?.ItemImage,
         cartItem?.ItemImageUrl,
+
       ];
+
 
       const apiImage =
         imageCandidates.find(
@@ -518,53 +598,77 @@ export default function CustomerView({
             typeof value === 'string' &&
             value.trim() !== '' &&
             value.trim() !== IMAGE_NOT_AVAILABLE
-        ) || '';
+        );
+
 
       if (!apiImage) {
+
         console.log(
-          'NO REAL API IMAGE FOR ITEM:',
+          'NO IMAGE FOUND FOR CUSTOMER ITEM:',
           item?.itemName,
-          'itemId:',
-          item?.itemId
+          'ITEM ID:',
+          item?.itemId,
+          'FULL ITEM:',
+          item
         );
 
         return '';
       }
 
-      const cleanImage = apiImage.trim();
 
-      /*
-       * The API can already return a complete URL.
-       * Never rebuild or replace it.
-       */
+      const cleanImage =
+        apiImage.trim();
+
+
+      /* ===================================================
+         3. COMPLETE API URL
+      =================================================== */
+
       if (
-        cleanImage.startsWith('http://') ||
-        cleanImage.startsWith('https://') ||
-        cleanImage.startsWith('data:')
+        cleanImage.startsWith(
+          'http://'
+        ) ||
+        cleanImage.startsWith(
+          'https://'
+        ) ||
+        cleanImage.startsWith(
+          'data:'
+        )
       ) {
+
+        console.log(
+          'CUSTOMER COMPLETE IMAGE URL:',
+          item?.itemName,
+          '=>',
+          cleanImage
+        );
+
         return cleanImage;
       }
 
-      /*
-       * The API can also return an Azure/blob relative path.
-       * Use the existing service helper so the exact project
-       * image-storage configuration remains in one place.
-       */
+
+      /* ===================================================
+         4. RELATIVE API IMAGE PATH
+      =================================================== */
+
       const generatedUrl =
         getItemImageUrl(
           cleanImage,
           item?.isVeg !== false
         );
 
+
       console.log(
-        'ITEM API IMAGE:',
+        'CUSTOMER GENERATED IMAGE:',
         item?.itemName,
+        'SOURCE:',
         cleanImage,
-        '=>',
+        'FINAL:',
         generatedUrl
       );
 
-      return generatedUrl;
+
+      return generatedUrl || '';
     };
 
 
@@ -698,8 +802,8 @@ export default function CustomerView({
           >
 
             <Search
-              size={16}
-              color="#747878"
+              size={20}
+              color={COLORS.textSecondary}
             />
 
             <TextInput
@@ -709,7 +813,9 @@ export default function CustomerView({
               placeholder={
                 `Search dishes in ${restaurantName}...`
               }
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={
+                COLORS.textMuted
+              }
               value={
                 searchQuery
               }
@@ -737,13 +843,9 @@ export default function CustomerView({
           >
 
             <View
-              style={[
-                styles.vegDot,
-                {
-                  backgroundColor:
-                    '#15803d',
-                },
-              ]}
+              style={
+                styles.vegDot
+              }
             />
 
             <Text
@@ -818,7 +920,9 @@ export default function CustomerView({
 
             <ActivityIndicator
               size="large"
-              color="#D33401"
+              color={
+                COLORS.orange
+              }
             />
 
             <Text
@@ -907,10 +1011,6 @@ export default function CustomerView({
                   ];
 
 
-                /*
-                 * REAL API IMAGE
-                 */
-
                 const imageUrl =
                   getDisplayImage(
                     item,
@@ -958,7 +1058,7 @@ export default function CustomerView({
                     >
 
                       {/* =================================
-                          REAL API ITEM PHOTO
+                          REAL API IMAGE
                       ================================== */}
 
                       <ItemImageWithFallback
@@ -996,8 +1096,8 @@ export default function CustomerView({
                               {
                                 backgroundColor:
                                   item.isVeg
-                                    ? '#15803d'
-                                    : '#dc2626',
+                                    ? COLORS.green
+                                    : COLORS.red,
                               },
                             ]}
                           />
@@ -1178,7 +1278,9 @@ export default function CustomerView({
 
                               <Minus
                                 size={13}
-                                color="#1b1c1c"
+                                color={
+                                  COLORS.text
+                                }
                               />
 
                             </TouchableOpacity>
@@ -1222,7 +1324,9 @@ export default function CustomerView({
 
                               <Plus
                                 size={13}
-                                color="#1b1c1c"
+                                color={
+                                  COLORS.text
+                                }
                               />
 
                             </TouchableOpacity>
@@ -1260,14 +1364,18 @@ export default function CustomerView({
 
                               <ActivityIndicator
                                 size="small"
-                                color="#ffffff"
+                                color={
+                                  COLORS.white
+                                }
                               />
 
                             ) : (
 
                               <Plus
                                 size={16}
-                                color="#ffffff"
+                                color={
+                                  COLORS.white
+                                }
                               />
 
                             )}
@@ -1325,7 +1433,7 @@ export default function CustomerView({
               <Text
                 style={
                   styles.cartCountCircleText
-              }
+                }
               >
                 {
                   totalCartCount
@@ -1357,7 +1465,7 @@ export default function CustomerView({
               <Text
                 style={
                   styles.cartRightAmount
-              }
+                }
               >
                 ₹
                 {
@@ -1374,7 +1482,9 @@ export default function CustomerView({
 
               <ChevronUp
                 size={20}
-                color="#ffffff"
+                color={
+                  COLORS.white
+                }
               />
 
             </View>
@@ -1399,23 +1509,26 @@ const styles =
 
     rootWrapper: {
       flex: 1,
-      backgroundColor: '#FBF9F9',
+      backgroundColor:
+        COLORS.background,
       position: 'relative',
     },
 
+
     container: {
       flex: 1,
-      backgroundColor: 'rgb(40, 61, 6)',
+      backgroundColor:
+        COLORS.background,
     },
+
 
     contentContainer: {
       maxWidth: 1280,
       width: '100%',
       alignSelf: 'center',
-
       paddingHorizontal: 20,
-      paddingTop: 16,
-      paddingBottom: 110,
+      paddingTop: 18,
+      paddingBottom: 115,
     },
 
 
@@ -1424,39 +1537,76 @@ const styles =
     ===================================================== */
 
     categoriesScroll: {
-      marginBottom: 16,
+      marginBottom: 17,
     },
 
+
     categoriesContainer: {
-      gap: 8,
+      gap: 10,
       paddingRight: 10,
     },
 
+
     categoryChip: {
-      backgroundColor: '#EFEDED',
+      backgroundColor:
+        COLORS.orangeLight,
 
       borderWidth: 1,
-      borderColor: '#E0DDD8',
 
-      paddingHorizontal: 16,
-      paddingVertical: 8,
+      borderColor:
+        '#F8E1D2',
 
-      borderRadius: 20,
+      paddingHorizontal: 18,
+
+      paddingVertical: 9,
+
+      borderRadius: 22,
+
+      minHeight: 38,
+
+      alignItems: 'center',
+
+      justifyContent: 'center',
     },
+
 
     categoryChipActive: {
-      backgroundColor: '#1B1C1C',
-      borderColor: '#1B1C1C',
+      backgroundColor:
+        COLORS.orange,
+
+      borderColor:
+        COLORS.orange,
+
+      shadowColor:
+        COLORS.orange,
+
+      shadowOffset: {
+        width: 0,
+        height: 2,
+      },
+
+      shadowOpacity: 0.16,
+
+      shadowRadius: 5,
+
+      elevation: 2,
     },
 
+
     categoryChipText: {
-      color: '#444748',
+      color:
+        COLORS.text,
+
       fontSize: 13,
+
       fontWeight: '600',
     },
 
+
     categoryChipTextActive: {
-      color: '#ffffff',
+      color:
+        COLORS.white,
+
       fontWeight: '700',
     },
 
@@ -1467,83 +1617,130 @@ const styles =
 
     controlsRow: {
       flexDirection: 'row',
+
       alignItems: 'center',
 
       gap: 10,
 
-      marginBottom: 20,
+      marginBottom: 22,
 
       maxWidth: 680,
+
       width: '100%',
     },
+
 
     searchBox: {
       flex: 1,
 
       flexDirection: 'row',
+
       alignItems: 'center',
 
-      gap: 8,
+      gap: 9,
 
-      backgroundColor: '#FFFFFF',
+      backgroundColor:
+        COLORS.white,
 
       borderWidth: 1,
-      borderColor: '#E0DDD8',
 
-      borderRadius: 14,
+      borderColor:
+        COLORS.border,
 
-      paddingHorizontal: 12,
+      borderRadius: 15,
 
-      height: 44,
+      paddingHorizontal: 13,
+
+      height: 46,
+
+      shadowColor:
+        '#000000',
+
+      shadowOffset: {
+        width: 0,
+        height: 1,
+      },
+
+      shadowOpacity: 0.025,
+
+      shadowRadius: 4,
     },
+
 
     searchInput: {
       flex: 1,
 
-      color: '#1B1C1C',
+      color:
+        COLORS.text,
 
       fontSize: 13,
 
       outlineStyle: 'none',
     },
 
+
+    /* =====================================================
+       VEG
+    ===================================================== */
+
     vegToggle: {
       flexDirection: 'row',
+
       alignItems: 'center',
 
       gap: 6,
 
-      backgroundColor: '#FFFFFF',
+      backgroundColor:
+        COLORS.white,
 
       borderWidth: 1,
-      borderColor: '#E0DDD8',
 
-      paddingHorizontal: 12,
+      borderColor:
+        COLORS.border,
 
-      height: 44,
+      paddingHorizontal: 13,
 
-      borderRadius: 14,
+      height: 46,
+
+      borderRadius: 15,
     },
+
 
     vegToggleActive: {
-      backgroundColor: '#DCFCE7',
-      borderColor: '#86EFAC',
+      backgroundColor:
+        COLORS.greenLight,
+
+      borderColor:
+        '#86EFAC',
     },
+
 
     vegDot: {
       width: 8,
+
       height: 8,
+
       borderRadius: 4,
+
+      backgroundColor:
+        COLORS.green,
     },
 
+
     vegText: {
-      color: '#747878',
+      color:
+        COLORS.textSecondary,
+
       fontSize: 12,
+
       fontWeight: '600',
     },
 
+
     vegTextActive: {
-      color: '#15803d',
+      color:
+        COLORS.green,
+
       fontWeight: '700',
     },
 
@@ -1560,21 +1757,25 @@ const styles =
 
       alignItems: 'center',
 
-      marginBottom: 14,
+      marginBottom: 15,
     },
+
 
     sectionHeaderTitle: {
-      color: '#1B1C1C',
+      color:
+        COLORS.text,
 
-      fontSize: 19,
+      fontSize: 20,
 
-      fontWeight: '700',
+      fontWeight: '800',
 
-      letterSpacing: -0.3,
+      letterSpacing: -0.4,
     },
 
+
     itemCountBadge: {
-      color: '#747878',
+      color:
+        COLORS.textSecondary,
 
       fontSize: 12,
 
@@ -1615,32 +1816,39 @@ const styles =
 
       minHeight: 340,
 
-      backgroundColor: '#FFFFFF',
+      backgroundColor:
+        COLORS.white,
 
-      borderRadius: 16,
+      borderRadius: 18,
 
       borderWidth: 1,
 
-      borderColor: '#E0DDD8',
+      borderColor:
+        '#F0ECE9',
 
-      padding: 12,
+      padding: 11,
 
       justifyContent:
         'space-between',
 
       position: 'relative',
 
-      shadowColor: '#000000',
+      shadowColor:
+        '#000000',
 
       shadowOffset: {
         width: 0,
-        height: 1,
+
+        height: 2,
       },
 
-      shadowOpacity: 0.03,
+      shadowOpacity: 0.045,
 
-      shadowRadius: 4,
+      shadowRadius: 8,
+
+      elevation: 2,
     },
+
 
     cardTouchable: {
       flex: 1,
@@ -1659,19 +1867,21 @@ const styles =
 
       height: 165,
 
-      borderRadius: 12,
+      borderRadius: 14,
 
       marginBottom: 12,
 
-      backgroundColor: '#EFEDED',
+      backgroundColor:
+        COLORS.placeholder,
     },
+
 
     imagePlaceholder: {
       width: '100%',
 
       height: 165,
 
-      borderRadius: 12,
+      borderRadius: 14,
 
       marginBottom: 12,
 
@@ -1680,11 +1890,14 @@ const styles =
       justifyContent:
         'center',
 
-      backgroundColor: '#EFEDED',
+      backgroundColor:
+        COLORS.placeholder,
     },
 
+
     imagePlaceholderText: {
-      color: '#A0A0A0',
+      color:
+        COLORS.textMuted,
 
       fontSize: 10,
 
@@ -1703,10 +1916,11 @@ const styles =
 
       alignItems: 'center',
 
-      gap: 8,
+      gap: 7,
 
       marginBottom: 8,
     },
+
 
     dietBadge: {
       width: 14,
@@ -1721,15 +1935,23 @@ const styles =
 
       justifyContent:
         'center',
+
+      backgroundColor:
+        COLORS.white,
     },
+
 
     vegBadgeBorder: {
-      borderColor: '#15803d',
+      borderColor:
+        COLORS.green,
     },
 
+
     nonVegBadgeBorder: {
-      borderColor: '#dc2626',
+      borderColor:
+        COLORS.red,
     },
+
 
     dietDot: {
       width: 5,
@@ -1739,10 +1961,12 @@ const styles =
       borderRadius: 2.5,
     },
 
-    itemTag: {
-      color: '#747878',
 
-      fontSize: 11,
+    itemTag: {
+      color:
+        COLORS.textSecondary,
+
+      fontSize: 10,
 
       fontWeight: '600',
 
@@ -1754,18 +1978,22 @@ const styles =
       flex: 1,
     },
 
+
     ratingPill: {
-      backgroundColor: '#EFEDED',
+      backgroundColor:
+        COLORS.orangeSoft,
 
-      paddingHorizontal: 6,
+      paddingHorizontal: 7,
 
-      paddingVertical: 2,
+      paddingVertical: 3,
 
-      borderRadius: 6,
+      borderRadius: 7,
     },
 
+
     ratingText: {
-      color: '#D33401',
+      color:
+        COLORS.orangeDark,
 
       fontSize: 10,
 
@@ -1786,20 +2014,24 @@ const styles =
       marginVertical: 4,
     },
 
+
     itemName: {
-      color: '#1B1C1C',
+      color:
+        COLORS.text,
 
       fontSize: 15,
 
-      fontWeight: '700',
+      fontWeight: '800',
 
       lineHeight: 20,
 
-      letterSpacing: -0.2,
+      letterSpacing: -0.25,
     },
 
+
     itemDesc: {
-      color: '#747878',
+      color:
+        COLORS.textSecondary,
 
       fontSize: 12,
 
@@ -1827,16 +2059,20 @@ const styles =
 
       borderTopWidth: 1,
 
-      borderTopColor: '#EFEDED',
+      borderTopColor:
+        '#F3EFEC',
     },
+
 
     priceContainer: {
       justifyContent:
         'center',
     },
 
+
     priceCurrency: {
-      color: '#747878',
+      color:
+        COLORS.textMuted,
 
       fontSize: 9,
 
@@ -1844,10 +2080,14 @@ const styles =
 
       textTransform:
         'uppercase',
+
+      marginBottom: 1,
     },
 
+
     itemPrice: {
-      color: '#1B1C1C',
+      color:
+        COLORS.text,
 
       fontSize: 18,
 
@@ -1862,13 +2102,14 @@ const styles =
     ===================================================== */
 
     addBtn: {
-      width: 34,
+      width: 36,
 
-      height: 34,
+      height: 36,
 
-      borderRadius: 17,
+      borderRadius: 18,
 
-      backgroundColor: '#D33401',
+      backgroundColor:
+        COLORS.orange,
 
       alignItems: 'center',
 
@@ -1876,16 +2117,19 @@ const styles =
         'center',
 
       shadowColor:
-        '#D33401',
+        COLORS.orange,
 
       shadowOffset: {
         width: 0,
-        height: 2,
+
+        height: 3,
       },
 
-      shadowOpacity: 0.25,
+      shadowOpacity: 0.22,
 
-      shadowRadius: 4,
+      shadowRadius: 5,
+
+      elevation: 3,
     },
 
 
@@ -1901,28 +2145,30 @@ const styles =
       gap: 8,
 
       backgroundColor:
-        '#EFEDED',
+        COLORS.orangeLight,
 
-      borderRadius: 16,
+      borderRadius: 18,
 
       paddingHorizontal: 6,
 
-      paddingVertical: 3,
+      paddingVertical: 4,
 
       borderWidth: 1,
 
-      borderColor: '#E0DDD8',
+      borderColor:
+        '#F7D9C6',
     },
 
+
     qtyActionBtn: {
-      width: 22,
+      width: 23,
 
-      height: 22,
+      height: 23,
 
-      borderRadius: 11,
+      borderRadius: 12,
 
       backgroundColor:
-        '#FFFFFF',
+        COLORS.white,
 
       alignItems: 'center',
 
@@ -1930,12 +2176,15 @@ const styles =
         'center',
     },
 
+
     qtyBtnBusy: {
       opacity: 0.5,
     },
 
+
     qtyActionText: {
-      color: '#1B1C1C',
+      color:
+        COLORS.text,
 
       fontWeight: '800',
 
@@ -1953,19 +2202,21 @@ const styles =
 
     soldOutBadge: {
       backgroundColor:
-        '#EFEDED',
+        COLORS.gray,
 
-      borderRadius: 6,
+      borderRadius: 8,
 
-      paddingHorizontal: 8,
+      paddingHorizontal: 9,
 
-      paddingVertical: 4,
+      paddingVertical: 5,
 
       alignItems: 'center',
     },
 
+
     soldOutText: {
-      color: '#747878',
+      color:
+        COLORS.textSecondary,
 
       fontSize: 10,
 
@@ -1991,6 +2242,7 @@ const styles =
       alignItems: 'center',
     },
 
+
     floatingCartBar: {
       width: '100%',
 
@@ -2004,38 +2256,40 @@ const styles =
         'space-between',
 
       backgroundColor:
-        '#D33401',
+        COLORS.orange,
 
-      borderRadius: 16,
+      borderRadius: 18,
 
       paddingVertical: 12,
 
       paddingHorizontal: 16,
 
       shadowColor:
-        '#D33401',
+        COLORS.orange,
 
       shadowOffset: {
         width: 0,
-        height: 6,
+
+        height: 7,
       },
 
-      shadowOpacity: 0.35,
+      shadowOpacity: 0.28,
 
-      shadowRadius: 10,
+      shadowRadius: 12,
 
-      elevation: 6,
+      elevation: 7,
     },
 
+
     cartCountCircle: {
-      width: 30,
+      width: 31,
 
-      height: 30,
+      height: 31,
 
-      borderRadius: 15,
+      borderRadius: 16,
 
       backgroundColor:
-        '#FFFFFF',
+        COLORS.white,
 
       alignItems: 'center',
 
@@ -2043,16 +2297,20 @@ const styles =
         'center',
     },
 
+
     cartCountCircleText: {
-      color: '#D33401',
+      color:
+        COLORS.orangeDark,
 
       fontWeight: '800',
 
       fontSize: 13,
     },
 
+
     cartCenterText: {
-      color: '#FFFFFF',
+      color:
+        COLORS.white,
 
       fontSize: 14,
 
@@ -2060,6 +2318,7 @@ const styles =
 
       letterSpacing: 0.2,
     },
+
 
     cartRightBox: {
       flexDirection: 'row',
@@ -2069,8 +2328,10 @@ const styles =
       gap: 4,
     },
 
+
     cartRightAmount: {
-      color: '#FFFFFF',
+      color:
+        COLORS.white,
 
       fontSize: 17,
 
@@ -2091,8 +2352,10 @@ const styles =
       paddingVertical: 50,
     },
 
+
     loaderText: {
-      color: '#747878',
+      color:
+        COLORS.textSecondary,
 
       marginTop: 10,
 
@@ -2115,30 +2378,34 @@ const styles =
       paddingVertical: 50,
 
       backgroundColor:
-        '#FFFFFF',
+        COLORS.white,
 
-      borderRadius: 16,
+      borderRadius: 18,
 
       borderWidth: 1,
 
       borderColor:
-        '#E0DDD8',
+        COLORS.border,
 
       padding: 24,
     },
 
+
     emptyTitle: {
-      color: '#1B1C1C',
+      color:
+        COLORS.text,
 
       fontSize: 16,
 
-      fontWeight: '700',
+      fontWeight: '800',
 
       marginBottom: 4,
     },
 
+
     emptySub: {
-      color: '#747878',
+      color:
+        COLORS.textSecondary,
 
       fontSize: 12,
 
