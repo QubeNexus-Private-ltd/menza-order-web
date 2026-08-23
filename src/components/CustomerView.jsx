@@ -1405,7 +1405,7 @@ const styles =
 
     container: {
       flex: 1,
-      backgroundColor: 'rgb(146, 228, 13)',
+      backgroundColor: 'rgb(40, 61, 6)',
     },
 
     contentContainer: {
