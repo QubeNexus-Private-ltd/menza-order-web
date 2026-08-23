@@ -1196,15 +1196,9 @@ export default function CartModal({
                               ]}
                             >
                               {icon}{' '}
-                              {
-                                type.typeName
-                              }
-
-                              {type.id ===
-                                1 &&
-                              activeTable
-                                ? ` (Table #${activeTable.id})`
-                                : ''}
+                              {type.id === 1
+                              ? 'Dine-in'
+                              : type.typeName}
                             </Text>
                           </TouchableOpacity>
                         );
