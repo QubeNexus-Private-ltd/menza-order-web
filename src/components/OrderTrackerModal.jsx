@@ -11,28 +11,22 @@ import {
 } from 'react-native';
 import {
   X,
-  CheckCircle2,
-  Clock,
-  Flame,
   CreditCard,
   Receipt,
   User,
-  Phone,
   Calendar,
   Tag,
   MessageSquare,
-  Building,
   ArrowLeft,
   RefreshCw,
   Search,
   ChevronRight,
   UtensilsCrossed,
   ShoppingBag,
-  Sparkles,
   Layers,
   ChefHat,
-  Bell,
   Check,
+  Flame,
 } from 'lucide-react';
 import * as api from '../services/api';
 
@@ -55,12 +49,11 @@ export default function OrderTrackerModal({
 }) {
   const [selectedOrder, setSelectedOrder] = useState(order || null);
   const [viewMode, setViewMode] = useState(order ? 'detail' : 'list');
-  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'active' | 'completed'
+  const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [allOrdersList, setAllOrdersList] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
 
-  // Sync selectedOrder when order prop changes
   useEffect(() => {
     if (order) {
       setSelectedOrder(order);
@@ -68,7 +61,6 @@ export default function OrderTrackerModal({
     }
   }, [order]);
 
-  // Load orders on open
   useEffect(() => {
     if (!visible) return;
     loadOrders();
@@ -77,30 +69,40 @@ export default function OrderTrackerModal({
   const loadOrders = async () => {
     try {
       setLoadingOrders(true);
+
       const restId = catalog?.restaurantId || null;
       const savedUser = api.getSavedCustomer();
       const phone = savedUser?.mobile || '';
 
       const ords = await api.getRestaurantOrders(restId, phone);
-      
-      // Combine with props.orders if available
+
       const combined = [...(ords || []), ...(orders || [])];
       const uniqueMap = new Map();
+
       for (const o of combined) {
         const id = Number(o?.orderId || o?.id);
+
         if (id && !uniqueMap.has(id)) {
-          uniqueMap.set(id, api.normalizeOrder ? api.normalizeOrder(o) : o);
+          uniqueMap.set(
+            id,
+            api.normalizeOrder ? api.normalizeOrder(o) : o
+          );
         }
       }
 
       const list = Array.from(uniqueMap.values()).sort(
-        (a, b) => new Date(b?.createdAt || b?.createdDateUtc || 0) - new Date(a?.createdAt || a?.createdDateUtc || 0)
+        (a, b) =>
+          new Date(b?.createdAt || b?.createdDateUtc || 0) -
+          new Date(a?.createdAt || a?.createdDateUtc || 0)
       );
 
       setAllOrdersList(list);
 
-      // If user opened with no specific order selected
-      if (!order && (!selectedOrder || !list.some((o) => Number(o.id) === Number(selectedOrder.id)))) {
+      if (
+        !order &&
+        (!selectedOrder ||
+          !list.some((o) => Number(o.id) === Number(selectedOrder.id)))
+      ) {
         if (list.length === 1) {
           setSelectedOrder(list[0]);
         }
@@ -112,7 +114,6 @@ export default function OrderTrackerModal({
     }
   };
 
-  // Poll active selected order
   useEffect(() => {
     if (!visible || viewMode !== 'detail' || !selectedOrder?.id) {
       return undefined;
@@ -123,6 +124,7 @@ export default function OrderTrackerModal({
     const refresh = async () => {
       try {
         let latest = null;
+
         if (typeof onRefreshOrder === 'function') {
           latest = await onRefreshOrder(selectedOrder.id);
         } else {
@@ -133,30 +135,58 @@ export default function OrderTrackerModal({
           setSelectedOrder(latest);
         }
       } catch (error) {
-        console.log('Order tracker refresh error:', error?.message || error);
+        console.log(
+          'Order tracker refresh error:',
+          error?.message || error
+        );
       }
     };
 
     refresh();
+
     const interval = setInterval(refresh, 3000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [visible, viewMode, selectedOrder?.id, onRefreshOrder]);
+  }, [
+    visible,
+    viewMode,
+    selectedOrder?.id,
+    onRefreshOrder,
+  ]);
 
   if (!visible) return null;
 
   const normalizeStatus = (value) => {
-    const valueLower = String(value ?? '').trim().toLowerCase();
+    const valueLower = String(value ?? '')
+      .trim()
+      .toLowerCase();
 
-    if (['pending', 'placed', 'created', 'new', 'received'].includes(valueLower)) {
+    if (
+      [
+        'pending',
+        'placed',
+        'created',
+        'new',
+        'received',
+      ].includes(valueLower)
+    ) {
       return 'Pending';
     }
-    if (['confirmed', 'accepted', 'approved', 'order confirmed'].includes(valueLower)) {
+
+    if (
+      [
+        'confirmed',
+        'accepted',
+        'approved',
+        'order confirmed',
+      ].includes(valueLower)
+    ) {
       return 'Confirmed';
     }
+
     if (
       [
         'preparing',
@@ -170,17 +200,39 @@ export default function OrderTrackerModal({
     ) {
       return 'Preparing';
     }
-    if (['ready', 'prepared', 'ready to serve', 'ready for pickup'].includes(valueLower)) {
+
+    if (
+      [
+        'ready',
+        'prepared',
+        'ready to serve',
+        'ready for pickup',
+      ].includes(valueLower)
+    ) {
       return 'Ready';
     }
+
     if (
-      ['delivered', 'completed', 'served', 'picked up', 'pickedup', 'closed'].includes(
-        valueLower
-      )
+      [
+        'delivered',
+        'completed',
+        'served',
+        'picked up',
+        'pickedup',
+        'closed',
+      ].includes(valueLower)
     ) {
       return 'Delivered';
     }
-    if (['cancelled', 'rejected', 'canceled', 'declined'].includes(valueLower)) {
+
+    if (
+      [
+        'cancelled',
+        'rejected',
+        'canceled',
+        'declined',
+      ].includes(valueLower)
+    ) {
       return 'Cancelled';
     }
 
@@ -197,27 +249,67 @@ export default function OrderTrackerModal({
       ord?.statusName,
       ord?.orderState,
     ]
-      .filter((v) => v !== null && v !== undefined && v !== '')
+      .filter(
+        (v) =>
+          v !== null &&
+          v !== undefined &&
+          v !== ''
+      )
       .map(normalizeStatus);
 
     const rawStatus =
       statusCandidates.length > 0
         ? statusCandidates.reduce((best, value) =>
-            STATUSES.indexOf(value) > STATUSES.indexOf(best) ? value : best
+            STATUSES.indexOf(value) >
+            STATUSES.indexOf(best)
+              ? value
+              : best
           )
         : 'Pending';
 
-    const paymentMode = String(ord?.paymentMode ?? '').trim().toUpperCase();
-    const paymentMethod = String(ord?.paymentMethod ?? '').trim().toUpperCase();
-    const paymentState = String(ord?.paymentStatus ?? '').trim().toUpperCase();
+    const paymentMode = String(
+      ord?.paymentMode ?? ''
+    )
+      .trim()
+      .toUpperCase();
+
+    const paymentMethod = String(
+      ord?.paymentMethod ?? ''
+    )
+      .trim()
+      .toUpperCase();
+
+    const paymentState = String(
+      ord?.paymentStatus ?? ''
+    )
+      .trim()
+      .toUpperCase();
 
     const isOnline =
-      ['ONLINE', 'CASHFREE', 'UPI'].includes(paymentMode) ||
-      ['CASHFREE', 'CASHFREE_SPLIT', 'ONLINE', 'UPI'].includes(paymentMethod);
-    const isPaid = ['PAID', 'SUCCESS', 'COMPLETED', 'CAPTURED'].includes(paymentState);
-    const isAwaitingPayment = isOnline && !isPaid;
+      ['ONLINE', 'CASHFREE', 'UPI'].includes(
+        paymentMode
+      ) ||
+      [
+        'CASHFREE',
+        'CASHFREE_SPLIT',
+        'ONLINE',
+        'UPI',
+      ].includes(paymentMethod) ||
+      ord?.isOnline === true;
 
-    const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
+    const isPaid = [
+      'PAID',
+      'SUCCESS',
+      'COMPLETED',
+      'CAPTURED',
+    ].includes(paymentState) || isOnline;
+
+    const isAwaitingPayment =
+      isOnline && !isPaid;
+
+    const normalizedStatus = isAwaitingPayment
+      ? 'Pending'
+      : rawStatus;
 
     let badgeColor = '#0284c7';
     let badgeBg = '#e0f2fe';
@@ -227,7 +319,9 @@ export default function OrderTrackerModal({
       badgeColor = '#0d9488';
       badgeBg = '#ccfbf1';
       label = 'Confirmed';
-    } else if (normalizedStatus === 'Preparing') {
+    } else if (
+      normalizedStatus === 'Preparing'
+    ) {
       badgeColor = '#ea580c';
       badgeBg = '#ffedd5';
       label = 'In Kitchen';
@@ -235,11 +329,15 @@ export default function OrderTrackerModal({
       badgeColor = '#7c3aed';
       badgeBg = '#ede9fe';
       label = 'Ready to Serve';
-    } else if (normalizedStatus === 'Delivered') {
+    } else if (
+      normalizedStatus === 'Delivered'
+    ) {
       badgeColor = '#15803d';
       badgeBg = '#dcfce7';
       label = 'Served / Done';
-    } else if (normalizedStatus === 'Cancelled') {
+    } else if (
+      normalizedStatus === 'Cancelled'
+    ) {
       badgeColor = '#dc2626';
       badgeBg = '#fee2e2';
       label = 'Cancelled';
@@ -257,47 +355,101 @@ export default function OrderTrackerModal({
     };
   };
 
-  // Filtered orders list
-  const filteredOrders = allOrdersList.filter((ord) => {
-    const { normalizedStatus } = getOrderStatusInfo(ord);
+  const filteredOrders = allOrdersList.filter(
+    (ord) => {
+      const { normalizedStatus } =
+        getOrderStatusInfo(ord);
 
-    if (activeTab === 'active') {
-      if (['Delivered', 'Cancelled'].includes(normalizedStatus)) return false;
-    } else if (activeTab === 'completed') {
-      if (!['Delivered', 'Cancelled'].includes(normalizedStatus)) return false;
+      if (activeTab === 'active') {
+        if (
+          ['Delivered', 'Cancelled'].includes(
+            normalizedStatus
+          )
+        ) {
+          return false;
+        }
+      } else if (activeTab === 'completed') {
+        if (
+          !['Delivered', 'Cancelled'].includes(
+            normalizedStatus
+          )
+        ) {
+          return false;
+        }
+      }
+
+      if (searchQuery.trim()) {
+        const q =
+          searchQuery.toLowerCase();
+
+        const idStr = String(
+          ord.id || ord.orderId || ''
+        );
+
+        const tokenStr = String(
+          ord.pickupToken ||
+            ord.tokenNumber ||
+            ''
+        ).toLowerCase();
+
+        const dinerName = String(
+          ord.customerName ||
+            ord.name ||
+            ''
+        ).toLowerCase();
+
+        const tableStr = String(
+          ord.tableName ||
+            ord.tableNumber ||
+            ''
+        ).toLowerCase();
+
+        const itemsMatch =
+          Array.isArray(ord.items) &&
+          ord.items.some((i) =>
+            String(
+              i.itemName ||
+                i.name ||
+                ''
+            )
+              .toLowerCase()
+              .includes(q)
+          );
+
+        return (
+          idStr.includes(q) ||
+          tokenStr.includes(q) ||
+          dinerName.includes(q) ||
+          tableStr.includes(q) ||
+          itemsMatch
+        );
+      }
+
+      return true;
     }
+  );
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const idStr = String(ord.id || ord.orderId || '');
-      const tokenStr = String(ord.pickupToken || ord.tokenNumber || '').toLowerCase();
-      const dinerName = String(ord.customerName || ord.name || '').toLowerCase();
-      const tableStr = String(ord.tableName || ord.tableNumber || '').toLowerCase();
-      const itemsMatch = Array.isArray(ord.items) && ord.items.some((i) =>
-        String(i.itemName || i.name || '').toLowerCase().includes(q)
-      );
+  const activeCount =
+    allOrdersList.filter((o) => {
+      const { normalizedStatus } =
+        getOrderStatusInfo(o);
 
-      return (
-        idStr.includes(q) ||
-        tokenStr.includes(q) ||
-        dinerName.includes(q) ||
-        tableStr.includes(q) ||
-        itemsMatch
-      );
-    }
+      return ![
+        'Delivered',
+        'Cancelled',
+      ].includes(normalizedStatus);
+    }).length;
 
-    return true;
-  });
+  const completedCount =
+    allOrdersList.filter((o) => {
+      const { normalizedStatus } =
+        getOrderStatusInfo(o);
 
-  const activeCount = allOrdersList.filter((o) => {
-    const { normalizedStatus } = getOrderStatusInfo(o);
-    return !['Delivered', 'Cancelled'].includes(normalizedStatus);
-  }).length;
-
-  const completedCount = allOrdersList.filter((o) => {
-    const { normalizedStatus } = getOrderStatusInfo(o);
-    return ['Delivered', 'Cancelled'].includes(normalizedStatus);
-  }).length;
+      return [
+        'Delivered',
+        'Cancelled',
+      ].includes(normalizedStatus);
+    }).length;
 
   /* =========================================================
      RENDER: ORDER DETAIL & RECEIPT VIEW
@@ -306,13 +458,28 @@ export default function OrderTrackerModal({
     if (!selectedOrder) {
       return (
         <View style={styles.emptyContainer}>
-          <UtensilsCrossed size={36} color="#cbd5e1" />
-          <Text style={styles.emptyTitle}>No Order Selected</Text>
+          <UtensilsCrossed
+            size={36}
+            color="#cbd5e1"
+          />
+
+          <Text style={styles.emptyTitle}>
+            No Order Selected
+          </Text>
+
           <TouchableOpacity
             style={styles.backToListBtn}
-            onPress={() => setViewMode('list')}
+            onPress={() =>
+              setViewMode('list')
+            }
           >
-            <Text style={styles.backToListBtnText}>View All Orders</Text>
+            <Text
+              style={
+                styles.backToListBtnText
+              }
+            >
+              View All Orders
+            </Text>
           </TouchableOpacity>
         </View>
       );
@@ -326,14 +493,20 @@ export default function OrderTrackerModal({
       badgeColor,
       badgeBg,
       label,
-    } = getOrderStatusInfo(selectedOrder);
+    } = getOrderStatusInfo(
+      selectedOrder
+    );
 
     const currentIdx =
       STATUSES.indexOf(normalizedStatus) >= 0
         ? STATUSES.indexOf(normalizedStatus)
         : 0;
 
-    const items = Array.isArray(selectedOrder.items) ? selectedOrder.items : [];
+    const items = Array.isArray(
+      selectedOrder.items
+    )
+      ? selectedOrder.items
+      : [];
 
     const subtotal =
       Number(
@@ -342,61 +515,112 @@ export default function OrderTrackerModal({
           items.reduce(
             (sum, item) =>
               sum +
-              Number(item.amount ?? item.unitPrice ?? item.price ?? 0) *
-                Number(item.quantity || 1),
+              Number(
+                item.amount ??
+                  item.unitPrice ??
+                  item.price ??
+                  0
+              ) *
+                Number(
+                  item.quantity || 1
+                ),
             0
           )
       ) || 0;
 
     const cgst =
-      Number(selectedOrder.cgstAmount ?? 0) ||
-      Math.round(subtotal * 0.025 * 100) / 100;
+      Number(
+        selectedOrder.cgstAmount ?? 0
+      ) ||
+      Math.round(
+        subtotal * 0.025 * 100
+      ) / 100;
 
     const sgst =
-      Number(selectedOrder.sgstAmount ?? 0) ||
-      Math.round(subtotal * 0.025 * 100) / 100;
+      Number(
+        selectedOrder.sgstAmount ?? 0
+      ) ||
+      Math.round(
+        subtotal * 0.025 * 100
+      ) / 100;
 
     const grandTotal =
       Number(
-        selectedOrder.totalAmount ?? subtotal + cgst + sgst
+        selectedOrder.totalAmount ??
+          subtotal + cgst + sgst
       ) || 0;
 
     const tokenNumber =
       selectedOrder.pickupToken ||
       (selectedOrder.tokenNumber
-        ? `TK-${String(selectedOrder.tokenNumber).padStart(3, '0')}`
-        : `TK-${String(selectedOrder.id).padStart(3, '0')}`);
+        ? `TK-${String(
+            selectedOrder.tokenNumber
+          ).padStart(3, '0')}`
+        : `TK-${String(
+            selectedOrder.id
+          ).padStart(3, '0')}`);
 
-    const formattedDate = selectedOrder.createdDateUtc || selectedOrder.createdAt
-      ? new Date(selectedOrder.createdDateUtc || selectedOrder.createdAt).toLocaleString('en-IN', {
-          dateStyle: 'medium',
-          timeStyle: 'short',
-        })
-      : new Date().toLocaleString('en-IN', {
-          dateStyle: 'medium',
-          timeStyle: 'short',
-        });
+    const formattedDate =
+      selectedOrder.createdDateUtc ||
+      selectedOrder.createdAt
+        ? new Date(
+            selectedOrder.createdDateUtc ||
+              selectedOrder.createdAt
+          ).toLocaleString(
+            'en-IN',
+            {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+            }
+          )
+        : new Date().toLocaleString(
+            'en-IN',
+            {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+            }
+          );
 
-    const channelText = selectedOrder.tableName
-      ? `Dine-In • ${selectedOrder.tableName}`
-      : selectedOrder.tableId
-      ? `Dine-In • Table #${selectedOrder.tableId}`
-      : 'Quick Order (Counter / Takeaway)';
+    const channelText =
+      selectedOrder.tableName
+        ? `Dine-In • ${selectedOrder.tableName}`
+        : selectedOrder.tableId
+        ? `Dine-In • Table #${selectedOrder.tableId}`
+        : 'Quick Order (Counter / Takeaway)';
 
     return (
       <ScrollView
         style={styles.scrollBody}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={
+          styles.scrollContent
+        }
+        showsVerticalScrollIndicator={
+          false
+        }
       >
         {/* Navigation & Header */}
-        <View style={styles.detailNavRow}>
+        <View
+          style={styles.detailNavRow}
+        >
           <TouchableOpacity
             style={styles.backNavBtn}
-            onPress={() => setViewMode('list')}
+            onPress={() =>
+              setViewMode('list')
+            }
           >
-            <ArrowLeft size={16} color="#D33401" />
-            <Text style={styles.backNavBtnText}>All Orders ({allOrdersList.length})</Text>
+            <ArrowLeft
+              size={16}
+              color="#D33401"
+            />
+
+            <Text
+              style={
+                styles.backNavBtnText
+              }
+            >
+              All Orders (
+              {allOrdersList.length})
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -405,9 +629,15 @@ export default function OrderTrackerModal({
             disabled={loadingOrders}
           >
             {loadingOrders ? (
-              <ActivityIndicator size="small" color="#747878" />
+              <ActivityIndicator
+                size="small"
+                color="#747878"
+              />
             ) : (
-              <RefreshCw size={15} color="#747878" />
+              <RefreshCw
+                size={15}
+                color="#747878"
+              />
             )}
           </TouchableOpacity>
         </View>
@@ -416,28 +646,81 @@ export default function OrderTrackerModal({
         <View
           style={[
             styles.statusHeroCard,
-            { borderColor: badgeColor, backgroundColor: badgeBg },
+            {
+              borderColor:
+                badgeColor,
+              backgroundColor:
+                badgeBg,
+            },
           ]}
         >
-          <View style={styles.statusHeroTop}>
-            <View style={styles.statusHeroLeft}>
-              <View style={styles.tokenPill}>
-                <Tag size={13} color="#D33401" />
-                <Text style={styles.tokenPillText}>{tokenNumber}</Text>
+          <View
+            style={styles.statusHeroTop}
+          >
+            <View
+              style={
+                styles.statusHeroLeft
+              }
+            >
+              <View
+                style={styles.tokenPill}
+              >
+                <Tag
+                  size={13}
+                  color="#D33401"
+                />
+
+                <Text
+                  style={
+                    styles.tokenPillText
+                  }
+                >
+                  {tokenNumber}
+                </Text>
               </View>
               <Text style={styles.orderIdHeroText}>Order #{selectedOrder.id}</Text>
             </View>
 
-            <View style={[styles.statusBadgePill, { backgroundColor: badgeColor }]}>
-              <Text style={styles.statusBadgePillText}>{label}</Text>
+            <View
+              style={[
+                styles.statusBadgePill,
+                {
+                  backgroundColor:
+                    badgeColor,
+                },
+              ]}
+            >
+              <Text
+                style={
+                  styles.statusBadgePillText
+                }
+              >
+                {label}
+              </Text>
             </View>
           </View>
 
-          <Text style={styles.channelHeroText}>{channelText}</Text>
+          <Text
+            style={
+              styles.channelHeroText
+            }
+          >
+            {channelText}
+          </Text>
 
-          <View style={styles.heroTimeRow}>
-            <Calendar size={12} color="#64748b" />
-            <Text style={styles.heroTimeText}>{formattedDate}</Text>
+          <View
+            style={styles.heroTimeRow}
+          >
+            <Calendar
+              size={12}
+              color="#64748b"
+            />
+
+            <Text
+              style={styles.heroTimeText}
+            >
+              {formattedDate}
+            </Text>
           </View>
         </View>
 
@@ -516,23 +799,69 @@ export default function OrderTrackerModal({
 
         {/* CUSTOMER & DINER INFO */}
         <View style={styles.card}>
-          <View style={styles.sectionHeader}>
-            <User size={16} color="#10b981" />
-            <Text style={styles.cardTitle}>Customer & Dining Info</Text>
+          <View
+            style={styles.sectionHeader}
+          >
+            <User
+              size={16}
+              color="#10b981"
+            />
+
+            <Text
+              style={styles.cardTitle}
+            >
+              Customer & Dining Info
+            </Text>
           </View>
 
-          <View style={styles.infoTable}>
-            <View style={styles.infoTableRow}>
-              <Text style={styles.infoTableLabel}>Customer Name:</Text>
-              <Text style={styles.infoTableValue}>
-                {selectedOrder.customerName || selectedOrder.name || 'Guest Diner'}
+          <View
+            style={styles.infoTable}
+          >
+            <View
+              style={
+                styles.infoTableRow
+              }
+            >
+              <Text
+                style={
+                  styles.infoTableLabel
+                }
+              >
+                Customer Name:
+              </Text>
+
+              <Text
+                style={
+                  styles.infoTableValue
+                }
+              >
+                {selectedOrder.customerName ||
+                  selectedOrder.name ||
+                  'Guest Diner'}
               </Text>
             </View>
 
-            <View style={styles.infoTableRow}>
-              <Text style={styles.infoTableLabel}>Mobile Number:</Text>
-              <Text style={styles.infoTableValue}>
-                {selectedOrder.mobileNumber || selectedOrder.customerPhone || 'N/A'}
+            <View
+              style={
+                styles.infoTableRow
+              }
+            >
+              <Text
+                style={
+                  styles.infoTableLabel
+                }
+              >
+                Mobile Number:
+              </Text>
+
+              <Text
+                style={
+                  styles.infoTableValue
+                }
+              >
+                {selectedOrder.mobileNumber ||
+                  selectedOrder.customerPhone ||
+                  'N/A'}
               </Text>
             </View>
 
@@ -543,9 +872,26 @@ export default function OrderTrackerModal({
               </Text>
             </View>
 
-            <View style={styles.infoTableRow}>
-              <Text style={styles.infoTableLabel}>Dining Channel:</Text>
-              <Text style={styles.infoTableValue}>{channelText}</Text>
+            <View
+              style={
+                styles.infoTableRow
+              }
+            >
+              <Text
+                style={
+                  styles.infoTableLabel
+                }
+              >
+                Dining Channel:
+              </Text>
+
+              <Text
+                style={
+                  styles.infoTableValue
+                }
+              >
+                {channelText}
+              </Text>
             </View>
 
             <View style={styles.infoTableRow}>
@@ -563,10 +909,23 @@ export default function OrderTrackerModal({
             </View>
 
             {selectedOrder.remarks ? (
-              <View style={styles.remarksBanner}>
-                <MessageSquare size={13} color="#f59e0b" />
-                <Text style={styles.remarksBannerText}>
-                  Special Note: {selectedOrder.remarks}
+              <View
+                style={
+                  styles.remarksBanner
+                }
+              >
+                <MessageSquare
+                  size={13}
+                  color="#f59e0b"
+                />
+
+                <Text
+                  style={
+                    styles.remarksBannerText
+                  }
+                >
+                  Special Note:{' '}
+                  {selectedOrder.remarks}
                 </Text>
               </View>
             ) : null}
@@ -575,143 +934,406 @@ export default function OrderTrackerModal({
 
         {/* DETAILED RECEIPT / ORDERED ITEMS BREAKDOWN */}
         <View style={styles.card}>
-          <View style={styles.sectionHeader}>
-            <Receipt size={16} color="#D33401" />
-            <Text style={styles.cardTitle}>
-              Official Receipt Breakdown ({items.reduce((s, i) => s + (Number(i.quantity) || 1), 0)} items)
+          <View
+            style={styles.sectionHeader}
+          >
+            <Receipt
+              size={16}
+              color="#D33401"
+            />
+
+            <Text
+              style={styles.cardTitle}
+            >
+              Official Receipt Breakdown (
+              {items.reduce(
+                (s, i) =>
+                  s +
+                  (Number(
+                    i.quantity
+                  ) || 1),
+                0
+              )}{' '}
+              items)
             </Text>
           </View>
 
-          {/* Receipt Table Header */}
-          <View style={styles.receiptTableHeader}>
-            <Text style={[styles.receiptHeaderCol, { flex: 2 }]}>Dish Item</Text>
-            <Text style={[styles.receiptHeaderCol, { flex: 1.2, textAlign: 'center' }]}>
+          <View
+            style={
+              styles.receiptTableHeader
+            }
+          >
+            <Text
+              style={[
+                styles.receiptHeaderCol,
+                { flex: 2 },
+              ]}
+            >
+              Dish Item
+            </Text>
+
+            <Text
+              style={[
+                styles.receiptHeaderCol,
+                {
+                  flex: 1.2,
+                  textAlign:
+                    'center',
+                },
+              ]}
+            >
               Qty & Unit
             </Text>
-            <Text style={[styles.receiptHeaderCol, { flex: 1, textAlign: 'right' }]}>
+
+            <Text
+              style={[
+                styles.receiptHeaderCol,
+                {
+                  flex: 1,
+                  textAlign:
+                    'right',
+                },
+              ]}
+            >
               Price
             </Text>
-            <Text style={[styles.receiptHeaderCol, { flex: 1, textAlign: 'right' }]}>
+
+            <Text
+              style={[
+                styles.receiptHeaderCol,
+                {
+                  flex: 1,
+                  textAlign:
+                    'right',
+                },
+              ]}
+            >
               Total
             </Text>
           </View>
 
           {items.length === 0 ? (
-            <View style={styles.emptyItems}>
-              <Text style={styles.emptyText}>No items found for this order.</Text>
+            <View
+              style={
+                styles.emptyItems
+              }
+            >
+              <Text
+                style={
+                  styles.emptyText
+                }
+              >
+                No items found for this
+                order.
+              </Text>
             </View>
           ) : (
-            items.map((item, idx) => {
-              const qty = Number(item.quantity || 1);
-              const unitPrice = Number(item.unitPrice ?? item.amount ?? item.price ?? 0);
-              const lineTotal = Number(item.totalAmount ?? unitPrice * qty);
-              const unitName =
-                item.unitName ||
-                item.unitDescription ||
-                (item.unit ? `Unit #${item.unit}` : '') ||
-                'Plate';
+            items.map(
+              (item, idx) => {
+                const qty =
+                  Number(
+                    item.quantity || 1
+                  );
 
-              return (
-                <View key={item.itemId ?? idx} style={styles.receiptItemRow}>
-                  {/* Item Description */}
-                  <View style={{ flex: 2, paddingRight: 6 }}>
-                    <Text style={styles.receiptItemName}>
-                      {item.itemName || item.name || 'Menu Dish'}
-                    </Text>
-                    {item.cookingInstruction ? (
-                      <Text style={styles.receiptItemNote}>
-                        Note: {item.cookingInstruction}
+                const unitPrice =
+                  Number(
+                    item.unitPrice ??
+                      item.amount ??
+                      item.price ??
+                      0
+                  );
+
+                const lineTotal =
+                  Number(
+                    item.totalAmount ??
+                      unitPrice * qty
+                  );
+
+                const unitName =
+                  item.unitName ||
+                  item.unitDescription ||
+                  (item.unit
+                    ? `Unit #${item.unit}`
+                    : '') ||
+                  'Plate';
+
+                return (
+                  <View
+                    key={
+                      item.itemId ??
+                      idx
+                    }
+                    style={
+                      styles.receiptItemRow
+                    }
+                  >
+                    <View
+                      style={{
+                        flex: 2,
+                        paddingRight: 6,
+                      }}
+                    >
+                      <Text
+                        style={
+                          styles.receiptItemName
+                        }
+                      >
+                        {item.itemName ||
+                          item.name ||
+                          'Menu Dish'}
                       </Text>
-                    ) : null}
-                  </View>
 
-                  {/* Quantity & Unit Name Badge */}
-                  <View style={{ flex: 1.2, alignItems: 'center' }}>
-                    <View style={styles.qtyUnitBadge}>
-                      <Text style={styles.qtyUnitBadgeNumber}>{qty}×</Text>
-                      <Text style={styles.qtyUnitBadgeName} numberOfLines={1}>
-                        {unitName}
+                      {item.cookingInstruction ? (
+                        <Text
+                          style={
+                            styles.receiptItemNote
+                          }
+                        >
+                          Note:{' '}
+                          {
+                            item.cookingInstruction
+                          }
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    <View
+                      style={{
+                        flex: 1.2,
+                        alignItems:
+                          'center',
+                      }}
+                    >
+                      <View
+                        style={
+                          styles.qtyUnitBadge
+                        }
+                      >
+                        <Text
+                          style={
+                            styles.qtyUnitBadgeNumber
+                          }
+                        >
+                          {qty}×
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.qtyUnitBadgeName
+                          }
+                          numberOfLines={1}
+                        >
+                          {unitName}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View
+                      style={{
+                        flex: 1,
+                        alignItems:
+                          'flex-end',
+                      }}
+                    >
+                      <Text
+                        style={
+                          styles.receiptUnitPriceText
+                        }
+                      >
+                        ₹
+                        {unitPrice.toFixed(
+                          2
+                        )}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={{
+                        flex: 1,
+                        alignItems:
+                          'flex-end',
+                      }}
+                    >
+                      <Text
+                        style={
+                          styles.receiptLineTotalText
+                        }
+                      >
+                        ₹
+                        {lineTotal.toFixed(
+                          2
+                        )}
                       </Text>
                     </View>
                   </View>
-
-                  {/* Unit Price */}
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={styles.receiptUnitPriceText}>
-                      ₹{unitPrice.toFixed(2)}
-                    </Text>
-                  </View>
-
-                  {/* Total Price */}
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={styles.receiptLineTotalText}>
-                      ₹{lineTotal.toFixed(2)}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })
+                );
+              }
+            )
           )}
 
-          <View style={styles.receiptDivider} />
+          <View
+            style={
+              styles.receiptDivider
+            }
+          />
 
-          {/* BILL SUMMARY */}
-          <View style={styles.billBreakdown}>
-            <View style={styles.billRow}>
-              <Text style={styles.billLabel}>Item Subtotal</Text>
-              <Text style={styles.billValue}>₹{subtotal.toFixed(2)}</Text>
+          <View
+            style={
+              styles.billBreakdown
+            }
+          >
+            <View
+              style={styles.billRow}
+            >
+              <Text
+                style={styles.billLabel}
+              >
+                Item Subtotal
+              </Text>
+
+              <Text
+                style={styles.billValue}
+              >
+                ₹{subtotal.toFixed(2)}
+              </Text>
             </View>
 
-            <View style={styles.billRow}>
-              <Text style={styles.billLabel}>CGST (2.5%)</Text>
-              <Text style={styles.billValue}>₹{cgst.toFixed(2)}</Text>
+            <View
+              style={styles.billRow}
+            >
+              <Text
+                style={styles.billLabel}
+              >
+                CGST (2.5%)
+              </Text>
+
+              <Text
+                style={styles.billValue}
+              >
+                ₹{cgst.toFixed(2)}
+              </Text>
             </View>
 
-            <View style={styles.billRow}>
-              <Text style={styles.billLabel}>SGST (2.5%)</Text>
-              <Text style={styles.billValue}>₹{sgst.toFixed(2)}</Text>
+            <View
+              style={styles.billRow}
+            >
+              <Text
+                style={styles.billLabel}
+              >
+                SGST (2.5%)
+              </Text>
+
+              <Text
+                style={styles.billValue}
+              >
+                ₹{sgst.toFixed(2)}
+              </Text>
             </View>
 
-            <View style={styles.receiptDividerBold} />
+            <View
+              style={
+                styles.receiptDividerBold
+              }
+            />
 
-            <View style={styles.grandTotalRow}>
+            <View
+              style={
+                styles.grandTotalRow
+              }
+            >
               <View>
-                <Text style={styles.grandTotalLabel}>Grand Total Amount</Text>
-                <Text style={styles.grandTotalTaxesNote}>(Inclusive of all applicable taxes)</Text>
+                <Text
+                  style={
+                    styles.grandTotalLabel
+                  }
+                >
+                  Grand Total Amount
+                </Text>
+
+                <Text
+                  style={
+                    styles.grandTotalTaxesNote
+                  }
+                >
+                  (Inclusive of all
+                  applicable taxes)
+                </Text>
               </View>
-              <Text style={styles.grandTotalValue}>₹{grandTotal.toFixed(2)}</Text>
+
+              <Text
+                style={
+                  styles.grandTotalValue
+                }
+              >
+                ₹{grandTotal.toFixed(2)}
+              </Text>
             </View>
           </View>
         </View>
 
         {/* PAYMENT METHOD & STATUS CARD */}
-        <View style={styles.paymentCard}>
-          <View style={styles.paymentCardIconWrap}>
-            <CreditCard size={18} color="#D33401" />
+        <View
+          style={styles.paymentCard}
+        >
+          <View
+            style={
+              styles.paymentCardIconWrap
+            }
+          >
+            <CreditCard
+              size={18}
+              color="#D33401"
+            />
           </View>
-          <View style={styles.paymentCardContent}>
-            <View style={styles.paymentCardTopRow}>
-              <Text style={styles.paymentCardTitle}>
-                {isOnline ? 'Online Payment (Direct / Cashfree)' : 'Cash Payment (At Counter / Table)'}
+
+          <View
+            style={
+              styles.paymentCardContent
+            }
+          >
+            <View
+              style={
+                styles.paymentCardTopRow
+              }
+            >
+              <Text
+                style={
+                  styles.paymentCardTitle
+                }
+              >
+                {isOnline
+                  ? 'Online Payment (Direct / Cashfree)'
+                  : 'Cash Payment (At Counter / Table)'}
               </Text>
+
               <View
                 style={[
                   styles.paymentPill,
-                  (isPaid || isOnline) ? styles.paymentPillPaid : styles.paymentPillPending,
+                  (isPaid || isOnline)
+                    ? styles.paymentPillPaid
+                    : styles.paymentPillPending,
                 ]}
               >
                 <Text
                   style={[
                     styles.paymentPillText,
-                    (isPaid || isOnline) ? styles.paymentPillTextPaid : styles.paymentPillTextPending,
+                    (isPaid || isOnline)
+                      ? styles.paymentPillTextPaid
+                      : styles.paymentPillTextPending,
                   ]}
                 >
-                  {(isPaid || isOnline) ? '✓ PAID & SETTLED' : 'PENDING CASHIER CONFIRMATION'}
+                  {(isPaid || isOnline)
+                    ? '✓ PAID & SETTLED'
+                    : 'PENDING CASHIER CONFIRMATION'}
                 </Text>
               </View>
             </View>
 
-            <Text style={styles.paymentCardSubText}>
+            <Text
+              style={
+                styles.paymentCardSubText
+              }
+            >
               Delivery Type: {selectedOrder.deliveryType || (selectedOrder.tableId ? 'Dine-In' : 'Takeaway / Counter')} • Mode: {selectedOrder.paymentMode || (isOnline ? 'ONLINE' : 'CASH')}
             </Text>
 
@@ -723,9 +1345,16 @@ export default function OrderTrackerModal({
               </Text>
             </View>
 
-            {selectedOrder.paymentOrderId || selectedOrder.cashfreeOrderId ? (
-              <Text style={styles.paymentTxnText}>
-                Ref: {selectedOrder.paymentOrderId || selectedOrder.cashfreeOrderId}
+            {selectedOrder.paymentOrderId ||
+            selectedOrder.cashfreeOrderId ? (
+              <Text
+                style={
+                  styles.paymentTxnText
+                }
+              >
+                Ref:{' '}
+                {selectedOrder.paymentOrderId ||
+                  selectedOrder.cashfreeOrderId}
               </Text>
             ) : null}
           </View>
@@ -740,20 +1369,37 @@ export default function OrderTrackerModal({
   const renderListView = () => {
     return (
       <View style={styles.listContainer}>
-        {/* Search Bar & Refresh */}
-        <View style={styles.searchRow}>
-          <View style={styles.searchBar}>
-            <Search size={15} color="#94a3b8" />
+        <View
+          style={styles.searchRow}
+        >
+          <View
+            style={styles.searchBar}
+          >
+            <Search
+              size={15}
+              color="#94a3b8"
+            />
+
             <TextInput
               style={styles.searchInput}
               placeholder="Search by Order #, token, dish..."
               placeholderTextColor="#94a3b8"
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={
+                setSearchQuery
+              }
             />
+
             {searchQuery ? (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <X size={15} color="#94a3b8" />
+              <TouchableOpacity
+                onPress={() =>
+                  setSearchQuery('')
+                }
+              >
+                <X
+                  size={15}
+                  color="#94a3b8"
+                />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -764,26 +1410,39 @@ export default function OrderTrackerModal({
             disabled={loadingOrders}
           >
             {loadingOrders ? (
-              <ActivityIndicator size="small" color="#ffffff" />
+              <ActivityIndicator
+                size="small"
+                color="#ffffff"
+              />
             ) : (
-              <RefreshCw size={15} color="#ffffff" />
+              <RefreshCw
+                size={15}
+                color="#ffffff"
+              />
             )}
           </TouchableOpacity>
         </View>
 
-        {/* Filter Tabs */}
-        <View style={styles.filterTabsRow}>
+        <View
+          style={
+            styles.filterTabsRow
+          }
+        >
           <TouchableOpacity
             style={[
               styles.filterTab,
-              activeTab === 'all' && styles.filterTabActive,
+              activeTab === 'all' &&
+                styles.filterTabActive,
             ]}
-            onPress={() => setActiveTab('all')}
+            onPress={() =>
+              setActiveTab('all')
+            }
           >
             <Text
               style={[
                 styles.filterTabText,
-                activeTab === 'all' && styles.filterTabTextActive,
+                activeTab === 'all' &&
+                  styles.filterTabTextActive,
               ]}
             >
               All ({allOrdersList.length})
@@ -793,14 +1452,18 @@ export default function OrderTrackerModal({
           <TouchableOpacity
             style={[
               styles.filterTab,
-              activeTab === 'active' && styles.filterTabActive,
+              activeTab === 'active' &&
+                styles.filterTabActive,
             ]}
-            onPress={() => setActiveTab('active')}
+            onPress={() =>
+              setActiveTab('active')
+            }
           >
             <Text
               style={[
                 styles.filterTabText,
-                activeTab === 'active' && styles.filterTabTextActive,
+                activeTab === 'active' &&
+                  styles.filterTabTextActive,
               ]}
             >
               Active ({activeCount})
@@ -810,37 +1473,79 @@ export default function OrderTrackerModal({
           <TouchableOpacity
             style={[
               styles.filterTab,
-              activeTab === 'completed' && styles.filterTabActive,
+              activeTab === 'completed' &&
+                styles.filterTabActive,
             ]}
-            onPress={() => setActiveTab('completed')}
+            onPress={() =>
+              setActiveTab('completed')
+            }
           >
             <Text
               style={[
                 styles.filterTabText,
-                activeTab === 'completed' && styles.filterTabTextActive,
+                activeTab === 'completed' &&
+                  styles.filterTabTextActive,
               ]}
             >
-              Completed ({completedCount})
+              Completed (
+              {completedCount})
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Orders List */}
         <ScrollView
           style={styles.listScroll}
-          contentContainerStyle={styles.listScrollContent}
-          showsVerticalScrollIndicator={false}
+          contentContainerStyle={
+            styles.listScrollContent
+          }
+          showsVerticalScrollIndicator={
+            false
+          }
         >
-          {loadingOrders && allOrdersList.length === 0 ? (
-            <View style={styles.loadingBox}>
-              <ActivityIndicator size="large" color="#D33401" />
-              <Text style={styles.loadingText}>Loading restaurant orders...</Text>
+          {loadingOrders &&
+          allOrdersList.length === 0 ? (
+            <View
+              style={styles.loadingBox}
+            >
+              <ActivityIndicator
+                size="large"
+                color="#D33401"
+              />
+
+              <Text
+                style={
+                  styles.loadingText
+                }
+              >
+                Loading restaurant
+                orders...
+              </Text>
             </View>
-          ) : filteredOrders.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <ShoppingBag size={42} color="#cbd5e1" />
-              <Text style={styles.emptyTitle}>No Orders Found</Text>
-              <Text style={styles.emptySubtitle}>
+          ) : filteredOrders.length ===
+            0 ? (
+            <View
+              style={
+                styles.emptyContainer
+              }
+            >
+              <ShoppingBag
+                size={42}
+                color="#cbd5e1"
+              />
+
+              <Text
+                style={
+                  styles.emptyTitle
+                }
+              >
+                No Orders Found
+              </Text>
+
+              <Text
+                style={
+                  styles.emptySubtitle
+                }
+              >
                 {searchQuery
                   ? 'No orders match your search criteria.'
                   : activeTab === 'active'
@@ -849,131 +1554,329 @@ export default function OrderTrackerModal({
               </Text>
             </View>
           ) : (
-            filteredOrders.map((ord) => {
-              const {
-                normalizedStatus,
-                isPaid,
-                badgeColor,
-                badgeBg,
-                label,
-              } = getOrderStatusInfo(ord);
+            filteredOrders.map(
+              (ord) => {
+                const {
+                  badgeColor,
+                  badgeBg,
+                  label,
+                  isOnline,
+                  isPaid,
+                } =
+                  getOrderStatusInfo(
+                    ord
+                  );
 
-              const items = Array.isArray(ord.items) ? ord.items : [];
-              const tokenNumber =
-                ord.pickupToken ||
-                (ord.tokenNumber
-                  ? `TK-${String(ord.tokenNumber).padStart(3, '0')}`
-                  : `TK-${String(ord.id).padStart(3, '0')}`);
+                const items =
+                  Array.isArray(
+                    ord.items
+                  )
+                    ? ord.items
+                    : [];
 
-              const formattedDate = ord.createdDateUtc || ord.createdAt
-                ? new Date(ord.createdDateUtc || ord.createdAt).toLocaleString('en-IN', {
-                    dateStyle: 'medium',
-                    timeStyle: 'short',
-                  })
-                : 'Just now';
+                const tokenNumber =
+                  ord.pickupToken ||
+                  (ord.tokenNumber
+                    ? `TK-${String(
+                        ord.tokenNumber
+                      ).padStart(
+                        3,
+                        '0'
+                      )}`
+                    : `TK-${String(
+                        ord.id
+                      ).padStart(
+                        3,
+                        '0'
+                      )}`);
 
-              const channelText = ord.tableName
-                ? `Table ${ord.tableName}`
-                : ord.tableId
-                ? `Table #${ord.tableId}`
-                : 'Counter / Takeaway';
+                const formattedDate =
+                  ord.createdDateUtc ||
+                  ord.createdAt
+                    ? new Date(
+                        ord.createdDateUtc ||
+                          ord.createdAt
+                      ).toLocaleString(
+                        'en-IN',
+                        {
+                          dateStyle:
+                            'medium',
+                          timeStyle:
+                            'short',
+                        }
+                      )
+                    : 'Just now';
 
-              const totalAmount = Number(ord.totalAmount || 0);
+                const channelText =
+                  ord.tableName
+                    ? `Table ${ord.tableName}`
+                    : ord.tableId
+                    ? `Table #${ord.tableId}`
+                    : 'Counter / Takeaway';
 
-              return (
-                <TouchableOpacity
-                  key={ord.id || ord.orderId}
-                  style={styles.orderCard}
-                  onPress={() => {
-                    setSelectedOrder(ord);
-                    setViewMode('detail');
-                  }}
-                  activeOpacity={0.85}
-                >
-                  {/* Card Top Row */}
-                  <View style={styles.orderCardHeader}>
-                    <View style={styles.orderCardHeaderLeft}>
-                      <View style={styles.tokenPillSmall}>
-                        <Tag size={11} color="#D33401" />
-                        <Text style={styles.tokenPillSmallText}>{tokenNumber}</Text>
-                      </View>
-                      <Text style={styles.orderCardId}>Order #{ord.id}</Text>
-                    </View>
+                const totalAmount =
+                  Number(
+                    ord.totalAmount ||
+                      0
+                  );
 
-                    <View style={[styles.cardStatusBadge, { backgroundColor: badgeBg }]}>
-                      <Text style={[styles.cardStatusBadgeText, { color: badgeColor }]}>
-                        {label}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Channel & Time */}
-                  <View style={styles.cardMetaRow}>
-                    <Text style={styles.cardChannelText}>🍽️ {ord.deliveryType || channelText}</Text>
-                    <View style={{
-                      marginHorizontal: 4,
-                      paddingHorizontal: 6,
-                      paddingVertical: 2,
-                      borderRadius: 4,
-                      backgroundColor: (isPaid || isOnline) ? '#f0fdf4' : '#fffbeb',
-                      borderWidth: 1,
-                      borderColor: (isPaid || isOnline) ? '#bbf7d0' : '#fde68a'
-                    }}>
-                      <Text style={{
-                        fontSize: 10,
-                        fontWeight: '700',
-                        color: (isPaid || isOnline) ? '#166534' : '#92400e'
-                      }}>
-                        {(isPaid || isOnline) ? '✓ Online Paid' : '💵 Cash (Pending)'}
-                      </Text>
-                    </View>
-                    <Text style={styles.cardDateText}>• {formattedDate}</Text>
-                  </View>
-
-                  {/* Items List with Quantity and Unit Name */}
-                  <View style={styles.cardItemsBox}>
-                    {items.slice(0, 3).map((item, i) => {
-                      const qty = Number(item.quantity || 1);
-                      const unitName =
-                        item.unitName ||
-                        item.unitDescription ||
-                        (item.unit ? `Unit #${item.unit}` : '') ||
-                        'Plate';
-
-                      return (
-                        <View key={i} style={styles.cardItemLine}>
-                          <Text style={styles.cardItemBullet}>•</Text>
-                          <Text style={styles.cardItemQtyText}>{qty}×</Text>
-                          <Text style={styles.cardItemNameText} numberOfLines={1}>
-                            {item.itemName || item.name || 'Dish Item'}
-                          </Text>
-                          <Text style={styles.cardItemUnitText}>({unitName})</Text>
-                        </View>
+                return (
+                  <TouchableOpacity
+                    key={
+                      ord.id ||
+                      ord.orderId
+                    }
+                    style={
+                      styles.orderCard
+                    }
+                    onPress={() => {
+                      setSelectedOrder(
+                        ord
                       );
-                    })}
+                      setViewMode(
+                        'detail'
+                      );
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <View
+                      style={
+                        styles.orderCardHeader
+                      }
+                    >
+                      <View
+                        style={
+                          styles.orderCardHeaderLeft
+                        }
+                      >
+                        <View
+                          style={
+                            styles.tokenPillSmall
+                          }
+                        >
+                          <Tag
+                            size={11}
+                            color="#D33401"
+                          />
 
-                    {items.length > 3 && (
-                      <Text style={styles.cardMoreItemsText}>
-                        +{items.length - 3} more dishes...
+                          <Text
+                            style={
+                              styles.tokenPillSmallText
+                            }
+                          >
+                            {tokenNumber}
+                          </Text>
+                        </View>
+                        <Text style={styles.orderCardId}>Order #{ord.id}</Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.cardStatusBadge,
+                          {
+                            backgroundColor:
+                              badgeBg,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.cardStatusBadgeText,
+                            {
+                              color:
+                                badgeColor,
+                            },
+                          ]}
+                        >
+                          {label}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Channel & Time */}
+                    <View
+                      style={
+                        styles.cardMetaRow
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.cardChannelText
+                        }
+                      >
+                        🍽️ {ord.deliveryType || channelText}
                       </Text>
-                    )}
-                  </View>
 
-                  {/* Card Footer */}
-                  <View style={styles.orderCardFooter}>
-                    <View style={styles.cardFooterLeft}>
-                      <Text style={styles.cardTotalLabel}>Total Amount</Text>
-                      <Text style={styles.cardTotalValue}>₹{totalAmount.toFixed(2)}</Text>
+                      <View style={{
+                        marginHorizontal: 4,
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                        borderRadius: 4,
+                        backgroundColor: (isPaid || isOnline) ? '#f0fdf4' : '#fffbeb',
+                        borderWidth: 1,
+                        borderColor: (isPaid || isOnline) ? '#bbf7d0' : '#fde68a'
+                      }}>
+                        <Text style={{
+                          fontSize: 10,
+                          fontWeight: '700',
+                          color: (isPaid || isOnline) ? '#166534' : '#92400e'
+                        }}>
+                          {(isPaid || isOnline) ? '✓ Online Paid' : '💵 Cash (Pending)'}
+                        </Text>
+                      </View>
+
+                      <Text
+                        style={
+                          styles.cardDateText
+                        }
+                      >
+                        • {formattedDate}
+                      </Text>
                     </View>
 
-                    <View style={styles.cardActionBtn}>
-                      <Text style={styles.cardActionBtnText}>Track & Receipt</Text>
-                      <ChevronRight size={14} color="#D33401" />
+                    {/* Items List with Quantity and Unit Name */}
+                    <View
+                      style={
+                        styles.cardItemsBox
+                      }
+                    >
+                      {items
+                        .slice(0, 3)
+                        .map(
+                          (
+                            item,
+                            i
+                          ) => {
+                            const qty =
+                              Number(
+                                item.quantity ||
+                                  1
+                              );
+
+                            const unitName =
+                              item.unitName ||
+                              item.unitDescription ||
+                              (item.unit
+                                ? `Unit #${item.unit}`
+                                : '') ||
+                              'Plate';
+
+                            return (
+                              <View
+                                key={i}
+                                style={
+                                  styles.cardItemLine
+                                }
+                              >
+                                <Text
+                                  style={
+                                    styles.cardItemBullet
+                                  }
+                                >
+                                  •
+                                </Text>
+
+                                <Text
+                                  style={
+                                    styles.cardItemQtyText
+                                  }
+                                >
+                                  {qty}×
+                                </Text>
+
+                                <Text
+                                  style={
+                                    styles.cardItemNameText
+                                  }
+                                  numberOfLines={
+                                    1
+                                  }
+                                >
+                                  {item.itemName ||
+                                    item.name ||
+                                    'Dish Item'}
+                                </Text>
+
+                                <Text
+                                  style={
+                                    styles.cardItemUnitText
+                                  }
+                                >
+                                  ({unitName})
+                                </Text>
+                              </View>
+                            );
+                          }
+                        )}
+
+                      {items.length >
+                      3 ? (
+                        <Text
+                          style={
+                            styles.cardMoreItemsText
+                          }
+                        >
+                          +
+                          {items.length -
+                            3}{' '}
+                          more dishes...
+                        </Text>
+                      ) : null}
                     </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            })
+
+                    <View
+                      style={
+                        styles.orderCardFooter
+                      }
+                    >
+                      <View
+                        style={
+                          styles.cardFooterLeft
+                        }
+                      >
+                        <Text
+                          style={
+                            styles.cardTotalLabel
+                          }
+                        >
+                          Total Amount
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.cardTotalValue
+                          }
+                        >
+                          ₹
+                          {totalAmount.toFixed(
+                            2
+                          )}
+                        </Text>
+                      </View>
+
+                      <View
+                        style={
+                          styles.cardActionBtn
+                        }
+                      >
+                        <Text
+                          style={
+                            styles.cardActionBtnText
+                          }
+                        >
+                          Track & Receipt
+                        </Text>
+
+                        <ChevronRight
+                          size={14}
+                          color="#D33401"
+                        />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }
+            )
           )}
         </ScrollView>
       </View>
@@ -988,62 +1891,132 @@ export default function OrderTrackerModal({
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.sheetContainer}>
-          {/* TOP MODAL HEADER */}
-          <View style={styles.modalHeader}>
-            <View style={styles.modalHeaderLeft}>
-              <View style={styles.headerIconWrap}>
-                <Receipt size={18} color="#D33401" />
+        <View
+          style={
+            styles.sheetContainer
+          }
+        >
+          <View
+            style={styles.modalHeader}
+          >
+            <View
+              style={
+                styles.modalHeaderLeft
+              }
+            >
+              <View
+                style={
+                  styles.headerIconWrap
+                }
+              >
+                <Receipt
+                  size={18}
+                  color="#D33401"
+                />
               </View>
+
               <View>
-                <Text style={styles.modalHeaderTitle}>
-                  {viewMode === 'detail' ? 'Order Live Tracking' : 'Restaurant Orders'}
+                <Text
+                  style={
+                    styles.modalHeaderTitle
+                  }
+                >
+                  {viewMode ===
+                  'detail'
+                    ? 'Order Live Tracking'
+                    : 'Restaurant Orders'}
                 </Text>
-                <Text style={styles.modalHeaderSubtitle}>
-                  {catalog?.restaurantName || 'Menza Smart Dining'}
+
+                <Text
+                  style={
+                    styles.modalHeaderSubtitle
+                  }
+                >
+                  {catalog?.restaurantName ||
+                    'Menza Smart Dining'}
                 </Text>
               </View>
             </View>
 
             <TouchableOpacity
               onPress={onClose}
-              style={styles.modalCloseBtn}
+              style={
+                styles.modalCloseBtn
+              }
               accessibilityLabel="Close Orders Modal"
             >
-              <X size={20} color="#64748b" />
+              <X
+                size={20}
+                color="#64748b"
+              />
             </TouchableOpacity>
           </View>
 
-          {/* VIEW SWITCHER CONTENT */}
-          {viewMode === 'detail' ? renderDetailView() : renderListView()}
+          {viewMode === 'detail'
+            ? renderDetailView()
+            : renderListView()}
 
-          {/* FOOTER */}
-          <View style={styles.footer}>
+          <View
+            style={styles.footer}
+          >
             {viewMode === 'detail' ? (
-              <View style={styles.detailFooterRow}>
+              <View
+                style={
+                  styles.detailFooterRow
+                }
+              >
                 <TouchableOpacity
-                  style={styles.switchToListBtn}
-                  onPress={() => setViewMode('list')}
+                  style={
+                    styles.switchToListBtn
+                  }
+                  onPress={() =>
+                    setViewMode('list')
+                  }
                 >
-                  <Layers size={15} color="#1B1C1C" />
-                  <Text style={styles.switchToListBtnText}>
-                    All Orders ({allOrdersList.length})
+                  <Layers
+                    size={15}
+                    color="#1B1C1C"
+                  />
+
+                  <Text
+                    style={
+                      styles.switchToListBtnText
+                    }
+                  >
+                    All Orders (
+                    {allOrdersList.length})
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.closeDoneBtn}
+                  style={
+                    styles.closeDoneBtn
+                  }
                   onPress={onClose}
                 >
-                  <Text style={styles.closeDoneBtnText}>Done</Text>
+                  <Text
+                    style={
+                      styles.closeDoneBtnText
+                    }
+                  >
+                    Done
+                  </Text>
                 </TouchableOpacity>
               </View>
             ) : (
               <TouchableOpacity
-                style={styles.closeDoneBtnFull}
+                style={
+                  styles.closeDoneBtnFull
+                }
                 onPress={onClose}
               >
-                <Text style={styles.closeDoneBtnText}>Back to Menu</Text>
+                <Text
+                  style={
+                    styles.closeDoneBtnText
+                  }
+                >
+                  Back to Menu
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -1056,7 +2029,8 @@ export default function OrderTrackerModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    backgroundColor:
+      'rgba(15, 23, 42, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 12,
@@ -1070,7 +2044,10 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
     shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 10,
@@ -1125,7 +2102,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  /* List View Styles */
   listContainer: {
     flex: 1,
   },
@@ -1248,7 +2224,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
@@ -1267,6 +2246,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 
+  orderCardId: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1B1C1C',
+  },
+
   tokenPillSmall: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1281,12 +2266,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     color: '#D33401',
-  },
-
-  orderCardId: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#1B1C1C',
   },
 
   cardStatusBadge: {
@@ -1404,7 +2383,6 @@ const styles = StyleSheet.create({
     color: '#D33401',
   },
 
-  /* Detail & Receipt View Styles */
   scrollBody: {
     flex: 1,
   },
@@ -1469,6 +2447,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 
+  orderIdHeroText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1B1C1C',
+  },
+
   tokenPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1485,12 +2469,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#D33401',
-  },
-
-  orderIdHeroText: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: '#1B1C1C',
   },
 
   statusBadgePill: {
@@ -1545,12 +2523,12 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
 
-  /* Stepper */
   stepperContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
   },
 
   stepperStep: {
@@ -1560,31 +2538,31 @@ const styles = StyleSheet.create({
   },
 
   stepCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: '#F1F5F9',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#CBD5E1',
     zIndex: 2,
   },
 
   stepCircleDone: {
-    backgroundColor: '#15803d',
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
   },
 
   stepCircleCurrent: {
     backgroundColor: '#D33401',
-    shadowColor: '#D33401',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
+    borderColor: '#D33401',
   },
 
   stepNumText: {
     fontSize: 11,
-    fontWeight: '800',
-    color: '#94a3b8',
+    fontWeight: '700',
+    color: '#64748b',
   },
 
   stepLabelText: {
@@ -1596,7 +2574,7 @@ const styles = StyleSheet.create({
   },
 
   stepLabelTextDone: {
-    color: '#15803d',
+    color: '#10b981',
     fontWeight: '700',
   },
 
@@ -1616,18 +2594,18 @@ const styles = StyleSheet.create({
   },
 
   stepConnectorDone: {
-    backgroundColor: '#15803d',
+    backgroundColor: '#10b981',
   },
 
   statusMessageCallout: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     backgroundColor: '#FFFBEB',
+    padding: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#FDE68A',
-    borderRadius: 12,
-    padding: 10,
   },
 
   statusMessageTextWrap: {
@@ -1636,17 +2614,16 @@ const styles = StyleSheet.create({
 
   statusMessageTitle: {
     fontSize: 12,
-    fontWeight: '800',
-    color: '#92400E',
+    fontWeight: '700',
+    color: '#B45309',
   },
 
   statusMessageSub: {
     fontSize: 11,
-    color: '#B45309',
+    color: '#92400E',
     marginTop: 1,
   },
 
-  /* Info Table */
   infoTable: {
     gap: 6,
   },
@@ -1685,7 +2662,6 @@ const styles = StyleSheet.create({
     color: '#92400E',
   },
 
-  /* Receipt Table */
   receiptTableHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1818,7 +2794,6 @@ const styles = StyleSheet.create({
     color: '#D33401',
   },
 
-  /* Payment Card */
   paymentCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1878,28 +2853,29 @@ const styles = StyleSheet.create({
   },
 
   paymentPillTextPaid: {
-    color: '#15803d',
+    color: '#16A34A',
   },
 
   paymentPillTextPending: {
-    color: '#b45309',
+    color: '#D97706',
   },
 
   paymentCardSubText: {
     fontSize: 11,
     color: '#64748b',
+    fontWeight: '500',
+    marginTop: 2,
   },
 
   paymentTxnText: {
     fontSize: 10,
     color: '#94a3b8',
     fontFamily: 'monospace',
+    marginTop: 2,
   },
 
-  /* Footer */
   footer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    padding: 14,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
@@ -1917,30 +2893,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#F1F5F9',
-    paddingVertical: 11,
+    paddingVertical: 12,
     borderRadius: 12,
+    backgroundColor: '#F1F5F9',
   },
 
   switchToListBtnText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
     color: '#1B1C1C',
   },
 
   closeDoneBtn: {
-    backgroundColor: '#D33401',
-    paddingHorizontal: 24,
-    paddingVertical: 11,
+    flex: 1,
+    paddingVertical: 12,
     borderRadius: 12,
+    backgroundColor: '#D33401',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   closeDoneBtnFull: {
-    backgroundColor: '#D33401',
+    width: '100%',
     paddingVertical: 12,
     borderRadius: 12,
+    backgroundColor: '#D33401',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1960,8 +2937,8 @@ const styles = StyleSheet.create({
   },
 
   backToListBtnText: {
-    color: '#ffffff',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
+    color: '#ffffff',
   },
 });

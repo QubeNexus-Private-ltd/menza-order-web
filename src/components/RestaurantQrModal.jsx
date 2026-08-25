@@ -15,7 +15,7 @@ import {
   Copy,
   Check,
   Store,
-  ExternalLink,
+  Share2,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { encryptRestaurantId } from '../services/api';
@@ -42,27 +42,23 @@ export function downloadQrCodeImage({
   const img = new Image();
 
   img.onload = () => {
-    const scale = 2; // 2x resolution for crisp high-density print/display
+    const scale = 2;
     const width = 360 * scale;
     const height = 470 * scale;
     canvas.width = width;
     canvas.height = height;
 
-    // 1. Background
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, width, height);
 
-    // 2. Top accent bar
     ctx.fillStyle = '#D33401';
     ctx.fillRect(0, 0, width, 8 * scale);
 
-    // 3. Header title
     ctx.fillStyle = '#1B1C1C';
     ctx.font = `bold ${18 * scale}px 'Plus Jakarta Sans', -apple-system, sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(title, width / 2, 42 * scale);
 
-    // 4. Subtitle / Table Badge
     if (tableNumber) {
       ctx.fillStyle = '#FFF1EC';
       const badgeW = 130 * scale;
@@ -77,7 +73,6 @@ export function downloadQrCodeImage({
       ctx.fillText(subtitle, width / 2, 64 * scale);
     }
 
-    // 5. Draw QR code with white backing & frame
     const qrSize = 220 * scale;
     const qrX = (width - qrSize) / 2;
     const qrY = 90 * scale;
@@ -85,33 +80,43 @@ export function downloadQrCodeImage({
     ctx.fillStyle = '#FBF9F9';
     ctx.strokeStyle = '#E0DDD8';
     ctx.lineWidth = 1 * scale;
-    ctx.fillRect(qrX - 10 * scale, qrY - 10 * scale, qrSize + 20 * scale, qrSize + 20 * scale);
-    ctx.strokeRect(qrX - 10 * scale, qrY - 10 * scale, qrSize + 20 * scale, qrSize + 20 * scale);
+    ctx.fillRect(
+      qrX - 10 * scale,
+      qrY - 10 * scale,
+      qrSize + 20 * scale,
+      qrSize + 20 * scale
+    );
+    ctx.strokeRect(
+      qrX - 10 * scale,
+      qrY - 10 * scale,
+      qrSize + 20 * scale,
+      qrSize + 20 * scale
+    );
 
     ctx.drawImage(img, qrX, qrY, qrSize, qrSize);
 
-    // 6. Scan prompt
     ctx.fillStyle = '#1B1C1C';
     ctx.font = `bold ${13 * scale}px 'Plus Jakarta Sans', sans-serif`;
     ctx.fillText('📱 Scan with Camera to Order', width / 2, 345 * scale);
 
     ctx.fillStyle = '#747878';
     ctx.font = `500 ${11 * scale}px 'Plus Jakarta Sans', sans-serif`;
-    ctx.fillText('No App Download Required • Instant Ordering', width / 2, 368 * scale);
+    ctx.fillText(
+      'No App Download Required • Instant Ordering',
+      width / 2,
+      368 * scale
+    );
 
-    // 7. Divider line
     ctx.strokeStyle = '#EFEDED';
     ctx.beginPath();
     ctx.moveTo(30 * scale, 395 * scale);
     ctx.lineTo(width - 30 * scale, 395 * scale);
     ctx.stroke();
 
-    // 8. Footer Brand
     ctx.fillStyle = '#D33401';
     ctx.font = `bold ${12 * scale}px 'Plus Jakarta Sans', sans-serif`;
     ctx.fillText('⚡ MenzaOrder Digital Dining', width / 2, 430 * scale);
 
-    // 9. Download trigger
     try {
       const pngFile = canvas.toDataURL('image/png');
       const downloadLink = document.createElement('a');
@@ -125,19 +130,28 @@ export function downloadQrCodeImage({
     }
   };
 
-  img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  img.src =
+    'data:image/svg+xml;base64,' +
+    btoa(unescape(encodeURIComponent(svgData)));
 }
 
 /**
  * Utility to download QR code as vector SVG file
  */
-export function downloadQrCodeSvg({ svgElementId, fileName = 'restaurant-qr.svg' }) {
+export function downloadQrCodeSvg({
+  svgElementId,
+  fileName = 'restaurant-qr.svg',
+}) {
   const svg = document.getElementById(svgElementId);
   if (!svg) return;
+
   const svgData = new XMLSerializer().serializeToString(svg);
-  const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const blob = new Blob([svgData], {
+    type: 'image/svg+xml;charset=utf-8',
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
+
   link.href = url;
   link.download = fileName;
   document.body.appendChild(link);
@@ -159,13 +173,16 @@ export default function RestaurantQrModal({
   );
   const [copied, setCopied] = useState(false);
   const [qrReady, setQrReady] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     if (!visible) {
       setQrReady(false);
       return;
     }
+
     const frame = requestAnimationFrame(() => setQrReady(true));
+
     return () => cancelAnimationFrame(frame);
   }, [visible]);
 
@@ -182,17 +199,65 @@ export default function RestaurantQrModal({
 
   const qrElementId = `modal-qr-code-${selectedTableId || 'main'}`;
 
-  const handleCopyLink = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(targetUrl);
+  const handleCopyLink = async () => {
+    try {
+      if (!navigator.clipboard) {
+        console.warn('Clipboard API is not available.');
+        return;
+      }
+
+      await navigator.clipboard.writeText(targetUrl);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+
+      setTimeout(() => {
+        setCopied(false);
+      }, 2500);
+    } catch (error) {
+      console.error('Copy QR link error:', error);
+    }
+  };
+
+  const handleShare = async () => {
+    if (sharing) return;
+
+    try {
+      setSharing(true);
+
+      if (navigator.share) {
+        await navigator.share({
+          title: `${restName} - Digital Menu`,
+          text: selectedTableId
+            ? `Scan or open this link to view the menu and order from Table #${selectedTableId}.`
+            : `View the ${restName} digital menu and place your order.`,
+          url: targetUrl,
+        });
+      } else {
+        await handleCopyLink();
+      }
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        console.error('QR share error:', error);
+
+        try {
+          await handleCopyLink();
+        } catch (copyError) {
+          console.error('QR share fallback error:', copyError);
+        }
+      }
+    } finally {
+      setSharing(false);
     }
   };
 
   const handleDownloadPng = () => {
-    const tableLabel = selectedTableId ? `table-${selectedTableId}` : 'main';
-    const cleanRestName = restName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const tableLabel = selectedTableId
+      ? `table-${selectedTableId}`
+      : 'main';
+
+    const cleanRestName = restName
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '-');
+
     const fileName = `${cleanRestName}-qr-${tableLabel}.png`;
 
     downloadQrCodeImage({
@@ -205,8 +270,14 @@ export default function RestaurantQrModal({
   };
 
   const handleDownloadSvg = () => {
-    const tableLabel = selectedTableId ? `table-${selectedTableId}` : 'main';
-    const cleanRestName = restName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const tableLabel = selectedTableId
+      ? `table-${selectedTableId}`
+      : 'main';
+
+    const cleanRestName = restName
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '-');
+
     const fileName = `${cleanRestName}-qr-${tableLabel}.svg`;
 
     downloadQrCodeSvg({
@@ -228,12 +299,12 @@ export default function RestaurantQrModal({
     >
       <View style={styles.overlay} className="responsive-modal-overlay">
         <View style={styles.modalBox} className="responsive-modal-sheet">
-          {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
               <View style={styles.headerIconBox}>
                 <QrCode size={18} color="#D33401" />
               </View>
+
               <View>
                 <Text style={styles.title}>Restaurant QR Code</Text>
                 <Text style={styles.subTitle} numberOfLines={1}>
@@ -252,9 +323,11 @@ export default function RestaurantQrModal({
             contentContainerStyle={styles.bodyContent}
             showsVerticalScrollIndicator={false}
           >
-            {/* Table Selector Pills */}
             <View style={styles.selectorSection}>
-              <Text style={styles.selectorLabel}>Select QR Destination:</Text>
+              <Text style={styles.selectorLabel}>
+                Select QR Destination:
+              </Text>
+
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -269,12 +342,18 @@ export default function RestaurantQrModal({
                 >
                   <Store
                     size={13}
-                    color={selectedTableId === null ? '#ffffff' : '#444748'}
+                    color={
+                      selectedTableId === null
+                        ? '#ffffff'
+                        : '#444748'
+                    }
                   />
+
                   <Text
                     style={[
                       styles.pillText,
-                      selectedTableId === null && styles.pillTextActive,
+                      selectedTableId === null &&
+                        styles.pillTextActive,
                     ]}
                   >
                     Main Outlet (All)
@@ -286,14 +365,16 @@ export default function RestaurantQrModal({
                     key={t.id}
                     style={[
                       styles.pill,
-                      selectedTableId === t.id && styles.pillActive,
+                      selectedTableId === t.id &&
+                        styles.pillActive,
                     ]}
                     onPress={() => setSelectedTableId(t.id)}
                   >
                     <Text
                       style={[
                         styles.pillText,
-                        selectedTableId === t.id && styles.pillTextActive,
+                        selectedTableId === t.id &&
+                          styles.pillTextActive,
                       ]}
                     >
                       {t.tableName || `Table #${t.id}`}
@@ -303,10 +384,10 @@ export default function RestaurantQrModal({
               </ScrollView>
             </View>
 
-            {/* QR Code Preview Card */}
             <View style={styles.qrCardPreview}>
               <View style={styles.qrCardHeader}>
                 <Text style={styles.qrCardTitle}>{restName}</Text>
+
                 <Text style={styles.qrCardSub}>
                   {selectedTableId
                     ? `Table #${selectedTableId} • Dine-In Ordering`
@@ -326,8 +407,15 @@ export default function RestaurantQrModal({
                   />
                 ) : (
                   <View style={styles.qrPlaceholder}>
-                    <QrCode size={54} color="#D33401" strokeWidth={1.8} />
-                    <Text style={styles.qrLoadingText}>Preparing QR...</Text>
+                    <QrCode
+                      size={54}
+                      color="#D33401"
+                      strokeWidth={1.8}
+                    />
+
+                    <Text style={styles.qrLoadingText}>
+                      Preparing QR...
+                    </Text>
                   </View>
                 )}
               </View>
@@ -336,11 +424,11 @@ export default function RestaurantQrModal({
                 📱 Scan with camera to browse menu & place orders
               </Text>
 
-              {/* URL snippet */}
               <View style={styles.urlBox}>
                 <Text style={styles.urlText} numberOfLines={1}>
                   {targetUrl}
                 </Text>
+
                 <TouchableOpacity
                   style={styles.copyBtn}
                   onPress={handleCopyLink}
@@ -350,6 +438,7 @@ export default function RestaurantQrModal({
                   ) : (
                     <Copy size={14} color="#747878" />
                   )}
+
                   <Text
                     style={[
                       styles.copyBtnText,
@@ -362,7 +451,6 @@ export default function RestaurantQrModal({
               </View>
             </View>
 
-            {/* Action Buttons */}
             <View style={styles.actionsGrid}>
               <TouchableOpacity
                 style={styles.downloadPrimaryBtn}
@@ -370,6 +458,7 @@ export default function RestaurantQrModal({
                 activeOpacity={0.85}
               >
                 <Download size={18} color="#ffffff" />
+
                 <Text style={styles.downloadPrimaryBtnText}>
                   DOWNLOAD QR IMAGE (PNG)
                 </Text>
@@ -378,9 +467,26 @@ export default function RestaurantQrModal({
               <View style={styles.secondaryActionsRow}>
                 <TouchableOpacity
                   style={styles.secondaryActionBtn}
+                  onPress={handleShare}
+                  disabled={sharing}
+                >
+                  {sharing ? (
+                    <Share2 size={15} color="#D33401" />
+                  ) : (
+                    <Share2 size={15} color="#1B1C1C" />
+                  )}
+
+                  <Text style={styles.secondaryActionBtnText}>
+                    {sharing ? 'Sharing...' : 'Share QR'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.secondaryActionBtn}
                   onPress={handleDownloadSvg}
                 >
                   <Download size={15} color="#1B1C1C" />
+
                   <Text style={styles.secondaryActionBtnText}>
                     Download Vector (SVG)
                   </Text>
@@ -391,6 +497,7 @@ export default function RestaurantQrModal({
                   onPress={handlePrint}
                 >
                   <Printer size={15} color="#1B1C1C" />
+
                   <Text style={styles.secondaryActionBtnText}>
                     Print QR Card
                   </Text>
@@ -663,10 +770,12 @@ const styles = StyleSheet.create({
   secondaryActionsRow: {
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
   },
 
   secondaryActionBtn: {
     flex: 1,
+    minWidth: 130,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
