@@ -469,82 +469,118 @@ export default function StaffView({
                   <Text style={styles.emptyOrdersText}>No orders match filter "{orderStatusFilter}".</Text>
                 </View>
               ) : (
-                filteredOrders.map((ord) => (
-                  <View key={ord.id} style={styles.orderManageCard}>
-                    <View style={styles.orderManageHeader}>
-                      <View>
-                        <Text style={styles.orderIdText}>ORDER #{ord.id}</Text>
-                        <Text style={styles.orderMetaText}>{ord.tableName || 'Takeaway'} • {ord.name} ({ord.mobileNumber || 'No mobile'})</Text>
-                      </View>
+                filteredOrders.map((ord) => {
+                  const rawMode = (ord.paymentMode || ord.paymentMethod || 'CASH').toString().toUpperCase();
+                  const isOnline = rawMode.includes('ONLINE') || rawMode.includes('CASHFREE') || rawMode.includes('UPI') || ord.isOnline === true;
+                  const isPaid = String(ord.paymentStatus || '').toUpperCase() === 'PAID' || isOnline;
+                  const isSettled = isPaid || isOnline || Boolean(ord.settledDateUtc);
+                  const deliveryType = ord.deliveryType || (ord.tableName || ord.tableId ? 'Dine-In' : 'Takeaway / Counter');
+                  const isQr = String(ord.source || '').toUpperCase().includes('QR') || !ord.source;
 
-                      <View style={styles.orderStatusBadge}>
-                        <Text style={styles.orderStatusBadgeText}>{ord.orderStatus}</Text>
-                      </View>
-                    </View>
-
-                    {/* Items List */}
-                    <View style={styles.orderItemsBox}>
-                      {ord.items && ord.items.map((it, idx) => (
-                        <View key={idx} style={styles.orderItemLine}>
-                          <Text style={styles.orderItemQty}>{it.quantity}x</Text>
-                          <Text style={styles.orderItemName}>{it.itemName}</Text>
-                          <Text style={styles.orderItemPrice}>₹{it.amount * it.quantity}</Text>
+                  return (
+                    <View key={ord.id} style={styles.orderManageCard}>
+                      <View style={styles.orderManageHeader}>
+                        <View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                            <Text style={styles.orderIdText}>ORDER #{ord.id}</Text>
+                            {isQr && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#f1f5f9' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569' }}>📱 QR SCAN</Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={styles.orderMetaText}>
+                            🍽️ {deliveryType} ({ord.tableName || 'Counter'}) • {ord.name || 'Guest'} ({ord.mobileNumber || 'No mobile'})
+                          </Text>
                         </View>
-                      ))}
-                    </View>
 
-                    {/* Order Action Buttons */}
-                    <View style={styles.orderManageFooter}>
-                      <Text style={styles.orderTotalText}>Total: ₹{ord.totalAmount}</Text>
+                        <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                          <View style={styles.orderStatusBadge}>
+                            <Text style={styles.orderStatusBadgeText}>{ord.orderStatus}</Text>
+                          </View>
+                          <View style={{
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 4,
+                            backgroundColor: isSettled ? '#f0fdf4' : '#fffbeb',
+                            borderWidth: 1,
+                            borderColor: isSettled ? '#bbf7d0' : '#fde68a'
+                          }}>
+                            <Text style={{
+                              fontSize: 10,
+                              fontWeight: '700',
+                              color: isSettled ? '#166534' : '#92400e'
+                            }}>
+                              {isSettled ? '✓ Online Paid & Settled' : '⏳ Cash (Needs Confirm)'}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
 
-                      <View style={styles.orderActionGroup}>
-                        <TouchableOpacity
-                          style={styles.addMoreBtn}
-                          onPress={() => setSelectedOrderForAdd(ord)}
-                        >
-                          <Plus size={14} color="#ffffff" />
-                          <Text style={styles.addMoreBtnText}>+ Add Dish</Text>
-                        </TouchableOpacity>
+                      {/* Items List */}
+                      <View style={styles.orderItemsBox}>
+                        {ord.items && ord.items.map((it, idx) => (
+                          <View key={idx} style={styles.orderItemLine}>
+                            <Text style={styles.orderItemQty}>{it.quantity}x</Text>
+                            <Text style={styles.orderItemName}>{it.itemName}{it.unitName ? ` (${it.unitName})` : ''}</Text>
+                            <Text style={styles.orderItemPrice}>₹{it.amount * it.quantity}</Text>
+                          </View>
+                        ))}
+                      </View>
 
-                        {ord.orderStatus === 'Pending' && (
+                      {/* Order Action Buttons */}
+                      <View style={styles.orderManageFooter}>
+                        <Text style={styles.orderTotalText}>Total: ₹{ord.totalAmount}</Text>
+
+                        <View style={styles.orderActionGroup}>
                           <TouchableOpacity
-                            style={styles.statusUpdateBtnConfirm}
-                            onPress={() => onUpdateOrderStatus(ord.id, 'Confirmed')}
+                            style={styles.addMoreBtn}
+                            onPress={() => setSelectedOrderForAdd(ord)}
                           >
-                            <Text style={styles.statusUpdateBtnText}>Confirm Order</Text>
+                            <Plus size={14} color="#ffffff" />
+                            <Text style={styles.addMoreBtnText}>+ Add Dish</Text>
                           </TouchableOpacity>
-                        )}
 
-                        {ord.orderStatus === 'Confirmed' && (
-                          <TouchableOpacity
-                            style={styles.statusUpdateBtnPrep}
-                            onPress={() => onUpdateOrderStatus(ord.id, 'Preparing')}
-                          >
-                            <Text style={styles.statusUpdateBtnText}>Start Cooking</Text>
-                          </TouchableOpacity>
-                        )}
+                          {(ord.orderStatus === 'Pending' || ord.orderStatus === 'Placed') && (
+                            <TouchableOpacity
+                              style={styles.statusUpdateBtnConfirm}
+                              onPress={() => onUpdateOrderStatus(ord.id, 'Confirmed')}
+                            >
+                              <Text style={styles.statusUpdateBtnText}>✓ Confirm Order</Text>
+                            </TouchableOpacity>
+                          )}
 
-                        {ord.orderStatus === 'Preparing' && (
-                          <TouchableOpacity
-                            style={styles.statusUpdateBtnReady}
-                            onPress={() => onUpdateOrderStatus(ord.id, 'Ready')}
-                          >
-                            <Text style={styles.statusUpdateBtnText}>Mark Ready</Text>
-                          </TouchableOpacity>
-                        )}
+                          {ord.orderStatus === 'Confirmed' && (
+                            <TouchableOpacity
+                              style={styles.statusUpdateBtnPrep}
+                              onPress={() => onUpdateOrderStatus(ord.id, 'Preparing')}
+                            >
+                              <Text style={styles.statusUpdateBtnText}>Start Cooking</Text>
+                            </TouchableOpacity>
+                          )}
 
-                        {ord.orderStatus === 'Ready' && (
-                          <TouchableOpacity
-                            style={styles.statusUpdateBtnServe}
-                            onPress={() => onUpdateOrderStatus(ord.id, 'Delivered')}
-                          >
-                            <Text style={styles.statusUpdateBtnText}>Serve Table</Text>
-                          </TouchableOpacity>
-                        )}
+                          {ord.orderStatus === 'Preparing' && (
+                            <TouchableOpacity
+                              style={styles.statusUpdateBtnReady}
+                              onPress={() => onUpdateOrderStatus(ord.id, 'Ready')}
+                            >
+                              <Text style={styles.statusUpdateBtnText}>Mark Ready</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {ord.orderStatus === 'Ready' && (
+                            <TouchableOpacity
+                              style={styles.statusUpdateBtnServe}
+                              onPress={() => onUpdateOrderStatus(ord.id, 'Delivered')}
+                            >
+                              <Text style={styles.statusUpdateBtnText}>Serve Table</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
                       </View>
                     </View>
-                  </View>
-                ))
+                  );
+                })
               )}
             </View>
           </View>

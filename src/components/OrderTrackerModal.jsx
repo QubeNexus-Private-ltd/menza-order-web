@@ -537,8 +537,29 @@ export default function OrderTrackerModal({
             </View>
 
             <View style={styles.infoTableRow}>
+              <Text style={styles.infoTableLabel}>Delivery / Dining Type:</Text>
+              <Text style={styles.infoTableValue}>
+                {selectedOrder.deliveryType || (selectedOrder.tableId ? 'Dine-In' : 'Takeaway / Counter')}
+              </Text>
+            </View>
+
+            <View style={styles.infoTableRow}>
               <Text style={styles.infoTableLabel}>Dining Channel:</Text>
               <Text style={styles.infoTableValue}>{channelText}</Text>
+            </View>
+
+            <View style={styles.infoTableRow}>
+              <Text style={styles.infoTableLabel}>Payment Mode & Type:</Text>
+              <Text style={styles.infoTableValue}>
+                {isOnline ? 'Online (Cashfree / UPI)' : 'Cash (Counter / Table)'}
+              </Text>
+            </View>
+
+            <View style={styles.infoTableRow}>
+              <Text style={styles.infoTableLabel}>Settlement Status:</Text>
+              <Text style={[styles.infoTableValue, { color: (isPaid || isOnline) ? '#16a34a' : '#ea580c', fontWeight: '700' }]}>
+                {(isPaid || isOnline) ? '✓ Settled & Auto-Confirmed' : '⏳ Awaiting Cashier Confirmation'}
+              </Text>
             </View>
 
             {selectedOrder.remarks ? (
@@ -671,28 +692,37 @@ export default function OrderTrackerModal({
           <View style={styles.paymentCardContent}>
             <View style={styles.paymentCardTopRow}>
               <Text style={styles.paymentCardTitle}>
-                {isOnline ? 'Cashfree Direct Online Payment' : 'Pay at Counter / Table (Cash)'}
+                {isOnline ? 'Online Payment (Direct / Cashfree)' : 'Cash Payment (At Counter / Table)'}
               </Text>
               <View
                 style={[
                   styles.paymentPill,
-                  isPaid ? styles.paymentPillPaid : styles.paymentPillPending,
+                  (isPaid || isOnline) ? styles.paymentPillPaid : styles.paymentPillPending,
                 ]}
               >
                 <Text
                   style={[
                     styles.paymentPillText,
-                    isPaid ? styles.paymentPillTextPaid : styles.paymentPillTextPending,
+                    (isPaid || isOnline) ? styles.paymentPillTextPaid : styles.paymentPillTextPending,
                   ]}
                 >
-                  {isPaid ? '✓ PAID' : 'PENDING'}
+                  {(isPaid || isOnline) ? '✓ PAID & SETTLED' : 'PENDING CASHIER CONFIRMATION'}
                 </Text>
               </View>
             </View>
 
             <Text style={styles.paymentCardSubText}>
-              Mode: {selectedOrder.paymentMode || (isOnline ? 'ONLINE_UPI' : 'CASH')}
+              Delivery Type: {selectedOrder.deliveryType || (selectedOrder.tableId ? 'Dine-In' : 'Takeaway / Counter')} • Mode: {selectedOrder.paymentMode || (isOnline ? 'ONLINE' : 'CASH')}
             </Text>
+
+            <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: (isPaid || isOnline) ? '#f0fdf4' : '#fffbeb' }}>
+              <Text style={{ fontSize: 11, color: (isPaid || isOnline) ? '#166534' : '#92400e', fontWeight: '500', lineHeight: 15 }}>
+                {(isPaid || isOnline)
+                  ? '✓ This online order is settled and confirmed directly to kitchen for preparation.'
+                  : '⏳ This cash order requires manual acceptance & confirmation by the cashier or restaurant owner before kitchen prep.'}
+              </Text>
+            </View>
+
             {selectedOrder.paymentOrderId || selectedOrder.cashfreeOrderId ? (
               <Text style={styles.paymentTxnText}>
                 Ref: {selectedOrder.paymentOrderId || selectedOrder.cashfreeOrderId}
@@ -879,7 +909,24 @@ export default function OrderTrackerModal({
 
                   {/* Channel & Time */}
                   <View style={styles.cardMetaRow}>
-                    <Text style={styles.cardChannelText}>🍽️ {channelText}</Text>
+                    <Text style={styles.cardChannelText}>🍽️ {ord.deliveryType || channelText}</Text>
+                    <View style={{
+                      marginHorizontal: 4,
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                      borderRadius: 4,
+                      backgroundColor: (isPaid || isOnline) ? '#f0fdf4' : '#fffbeb',
+                      borderWidth: 1,
+                      borderColor: (isPaid || isOnline) ? '#bbf7d0' : '#fde68a'
+                    }}>
+                      <Text style={{
+                        fontSize: 10,
+                        fontWeight: '700',
+                        color: (isPaid || isOnline) ? '#166534' : '#92400e'
+                      }}>
+                        {(isPaid || isOnline) ? '✓ Online Paid' : '💵 Cash (Pending)'}
+                      </Text>
+                    </View>
                     <Text style={styles.cardDateText}>• {formattedDate}</Text>
                   </View>
 

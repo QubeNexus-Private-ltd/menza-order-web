@@ -582,19 +582,30 @@ export default function CartModal({
         ? String(activeTable.id)
         : '1',
       items: orderItems,
+      deliveryType: activeTable ? 'Dine-In' : 'Takeaway / Counter',
       paymentMode:
         paymentMethod === 'cashfree'
           ? 'ONLINE'
           : 'CASH',
+      paymentType:
+        paymentMethod === 'cashfree'
+          ? 'ONLINE_CASHFREE'
+          : 'COUNTER_CASH',
       paymentMethod:
         paymentMethod === 'cashfree'
           ? 'CASHFREE_SPLIT'
           : 'COUNTER_CASH',
-      paymentStatus: 'Pending',
+      paymentStatus:
+        paymentMethod === 'cashfree'
+          ? 'Paid'
+          : 'Pending',
       orderStatus:
         paymentMethod === 'cashfree'
-          ? 'PendingPayment'
+          ? 'Confirmed'
           : 'Placed',
+      isOnline: paymentMethod === 'cashfree',
+      isSettled: paymentMethod === 'cashfree',
+      requiresCashierConfirmation: paymentMethod !== 'cashfree',
       source: 'QR_DINEIN',
       gstNumber: gstNumber || null,
       cgstPercentage,
@@ -1618,7 +1629,7 @@ export default function CartModal({
                         }
                       />
 
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text
                           style={[
                             styles.paymentCardTitle,
@@ -1627,7 +1638,7 @@ export default function CartModal({
                               styles.paymentCardTitleActive,
                           ]}
                         >
-                          Cashfree Direct Pay
+                          Online Direct Pay
                         </Text>
 
                         <Text
@@ -1636,6 +1647,9 @@ export default function CartModal({
                           }
                         >
                           UPI • Cards • NetBanking
+                        </Text>
+                        <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '700', marginTop: 3 }}>
+                          ⚡ Instant Auto-Confirmed & Settled
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -1663,7 +1677,7 @@ export default function CartModal({
                         }
                       />
 
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text
                           style={[
                             styles.paymentCardTitle,
@@ -1672,7 +1686,7 @@ export default function CartModal({
                               styles.paymentCardTitleActive,
                           ]}
                         >
-                          Pay at Counter / Table
+                          Pay with Cash
                         </Text>
 
                         <Text
@@ -1680,10 +1694,34 @@ export default function CartModal({
                             styles.paymentCardSub
                           }
                         >
-                          Cash / POS at Table
+                          Pay at Counter / Table
+                        </Text>
+                        <Text style={{ fontSize: 10, color: '#f59e0b', fontWeight: '700', marginTop: 3 }}>
+                          ⏳ Needs Cashier Confirmation
                         </Text>
                       </View>
                     </TouchableOpacity>
+                  </View>
+
+                  {/* Payment Mode Callout Box */}
+                  <View style={{
+                    marginTop: 10,
+                    padding: 10,
+                    borderRadius: 8,
+                    backgroundColor: paymentMethod === 'cashfree' ? '#f0fdf4' : '#fffbeb',
+                    borderWidth: 1,
+                    borderColor: paymentMethod === 'cashfree' ? '#bbf7d0' : '#fde68a',
+                  }}>
+                    <Text style={{
+                      fontSize: 11,
+                      color: paymentMethod === 'cashfree' ? '#166534' : '#92400e',
+                      lineHeight: 16,
+                      fontWeight: '500'
+                    }}>
+                      {paymentMethod === 'cashfree'
+                        ? '✓ Online payment is immediately settled and confirmed. Order is dispatched directly to the kitchen for preparation.'
+                        : 'ℹ️ Cash orders are placed in queue and must be confirmed/accepted by the Cashier or Restaurant Owner before cooking.'}
+                    </Text>
                   </View>
                 </View>
 

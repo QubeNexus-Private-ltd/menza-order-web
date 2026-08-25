@@ -1911,6 +1911,11 @@ export const normalizeOrder = (
           unitPrice:
             amount,
 
+          unitName:
+            item.unitName ||
+            item.unit ||
+            null,
+
           totalAmount:
             Number(
               item.totalAmount ??
@@ -1956,6 +1961,15 @@ export const normalizeOrder = (
         100
     ) / 100;
 
+  const rawPaymentMode = (order.paymentMode || order.paymentMethod || 'CASH').toString().toUpperCase();
+  const isOnline = rawPaymentMode.includes('ONLINE') || rawPaymentMode.includes('CASHFREE') || rawPaymentMode.includes('UPI') || order.isOnline === true;
+  const paymentStatus = order.paymentStatus || (isOnline ? 'Paid' : 'Pending');
+  const isSettled = isOnline || String(paymentStatus).toLowerCase() === 'paid' || order.isSettled === true || Boolean(order.settledDateUtc);
+  const paymentType = order.paymentType || (isOnline ? 'Cashfree Online' : 'Counter Cash');
+  const deliveryType = order.deliveryType || (order.tableId ? 'Dine-In' : 'Takeaway / Counter');
+  const orderStatus = order.orderStatus || order.status || (isOnline ? 'Confirmed' : 'Placed');
+  const requiresCashierConfirmation = !isOnline && !isSettled && (orderStatus === 'Placed' || orderStatus === 'Pending');
+
   return {
     ...order,
 
@@ -1966,10 +1980,22 @@ export const normalizeOrder = (
       order.orderId ||
       Number(order.id),
 
-    orderStatus:
-      order.orderStatus ||
-      order.status ||
-      'Pending',
+    orderStatus,
+
+    paymentStatus,
+
+    paymentMode:
+      isOnline ? 'ONLINE' : 'CASH',
+
+    paymentType,
+
+    deliveryType,
+
+    isOnline,
+
+    isSettled,
+
+    requiresCashierConfirmation,
 
     tableName:
       order.tableName ||
@@ -2189,9 +2215,17 @@ export const placeOrder =
       otpCode: orderPayload.otpCode || null,
       customerUserId: orderPayload.customerUserId || null,
       orderTypeId: Number(orderPayload.orderTypeId || 1),
+      deliveryType:
+        orderPayload.deliveryType ||
+        (orderPayload.tableId ? 'Dine-In' : 'Takeaway / Counter'),
       paymentMode:
         orderPayload.paymentMode ||
         (orderPayload.paymentMethod === 'cashfree' ? 'ONLINE' : 'CASH'),
+      paymentType:
+        orderPayload.paymentType ||
+        ((orderPayload.paymentMode === 'ONLINE' || orderPayload.paymentMethod === 'cashfree')
+          ? 'ONLINE_CASHFREE'
+          : 'COUNTER_CASH'),
       remarks: orderPayload.remarks || '',
       source: orderPayload.source || 'QR_DINEIN',
       returnUrl,
