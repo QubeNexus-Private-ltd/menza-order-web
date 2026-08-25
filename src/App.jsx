@@ -114,6 +114,16 @@ export default function App() {
   };
 
   /* =========================
+     RATE LIMIT EVENT LISTENER
+  ========================= */
+  useEffect(() => {
+    const unsubscribe = api.onRateLimitExceeded((event) => {
+      showToast(`⏳ ${event.message}`);
+    });
+    return unsubscribe;
+  }, []);
+
+  /* =========================
      CART
   ========================= */
 
@@ -820,9 +830,17 @@ export default function App() {
           err
         );
 
-        showToast(
-          'Failed to create order.'
-        );
+        if (err?.isRateLimited) {
+          showToast(
+            `⏳ ${err.message}`
+          );
+        } else {
+          showToast(
+            err?.response?.data?.message ||
+              err?.message ||
+              'Failed to create order. Please try again.'
+          );
+        }
 
         throw err;
       } finally {
@@ -838,30 +856,46 @@ export default function App() {
     async () => {
       if (!activeTable) return;
 
-      const res =
-        await api.callWaiter(
-          activeTable.id
-        );
+      try {
+        const res =
+          await api.callWaiter(
+            activeTable.id
+          );
 
-      showToast(
-        res.message ||
-          'Waiter has been notified.'
-      );
+        showToast(
+          res.message ||
+            'Waiter has been notified.'
+        );
+      } catch (err) {
+        if (err?.isRateLimited) {
+          showToast(`⏳ ${err.message}`);
+        } else {
+          showToast('Failed to notify waiter. Please try again.');
+        }
+      }
     };
 
   const handleRequestBill =
     async () => {
       if (!activeTable) return;
 
-      const res =
-        await api.requestBill(
-          activeTable.id
-        );
+      try {
+        const res =
+          await api.requestBill(
+            activeTable.id
+          );
 
-      showToast(
-        res.message ||
-          'Bill requested.'
-      );
+        showToast(
+          res.message ||
+            'Bill requested.'
+        );
+      } catch (err) {
+        if (err?.isRateLimited) {
+          showToast(`⏳ ${err.message}`);
+        } else {
+          showToast('Failed to request bill. Please try again.');
+        }
+      }
     };
 
   /* =========================
@@ -1321,6 +1355,9 @@ export default function App() {
           )
         }
         order={activeOrder}
+        orders={orders}
+        catalog={catalog}
+        activeTable={activeTable}
         onRefreshOrder={handleRefreshOrder}
       />
 

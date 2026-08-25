@@ -1173,213 +1173,211 @@ export default function CustomerView({
                           PRICE + CART BUTTON
                       ================================== */}
 
-                      <View
-                        style={
-                          styles.cardBottomRow
-                        }
-                      >
+                      {(() => {
+                        const unitName =
+                          item.unitName ||
+                          item.unitDescription ||
+                          (typeof getUnitDescription === 'function'
+                            ? getUnitDescription(item)
+                            : '') ||
+                          '';
 
-                        <View
-                          style={
-                            styles.priceContainer
-                          }
-                        >
-
-                          <Text
-                            style={
-                              styles.priceCurrency
-                            }
-                          >
-                            INR
-                          </Text>
-
-                          <Text
-                            style={
-                              styles.itemPrice
-                            }
-                          >
-                            ₹
-                            {
-                              Math.round(
-                                unitPrice
-                              ) ===
-                              unitPrice
-                                ? unitPrice
-                                : unitPrice.toFixed(
-                                    0
-                                  )
-                            }
-                          </Text>
-
-                        </View>
-
-
-                        {/* =================================
-                            SOLD OUT
-                        ================================== */}
-
-                        {!item.isAvailable ? (
-
+                        return (
                           <View
                             style={
-                              styles.soldOutBadge
+                              styles.cardBottomRow
                             }
                           >
-
-                            <Text
+                            <View
                               style={
-                                styles.soldOutText
-                            }
+                                styles.priceContainer
+                              }
                             >
-                              Sold Out
-                            </Text>
+                              <Text
+                                style={
+                                  styles.priceCurrency
+                                }
+                              >
+                                INR {unitName ? `• ${unitName}` : ''}
+                              </Text>
 
-                          </View>
+                              <View style={styles.priceWithUnitRow}>
+                                <Text
+                                  style={
+                                    styles.itemPrice
+                                  }
+                                >
+                                  ₹
+                                  {
+                                    Math.round(
+                                      unitPrice
+                                    ) ===
+                                    unitPrice
+                                      ? unitPrice
+                                      : unitPrice.toFixed(
+                                          0
+                                        )
+                                  }
+                                </Text>
 
-                        ) : qty > 0 ? (
+                                {unitName ? (
+                                  <Text style={styles.unitPerText}>
+                                    /{unitName}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            </View>
 
-                          /* =================================
-                             QUANTITY CONTROL
-                          ================================== */
-
-                          <View
-                            style={
-                              styles.qtyControlRow
-                            }
-                          >
-
-                            <TouchableOpacity
-                              style={[
-                                styles.qtyActionBtn,
-
-                                itemBusy &&
-                                  styles.qtyBtnBusy,
-                              ]}
-                              onPress={() =>
-                                runItemAction(
-                                  item.itemId,
-
-                                  () =>
-                                    onUpdateCartQuantity(
+                            {/* =================================
+                                SOLD OUT
+                            ================================== */}
+                            {!item.isAvailable ? (
+                              <View
+                                style={
+                                  styles.soldOutBadge
+                                }
+                              >
+                                <Text
+                                  style={
+                                    styles.soldOutText
+                                  }
+                                >
+                                  Sold Out
+                                </Text>
+                              </View>
+                            ) : qty > 0 ? (
+                              /* =================================
+                                 QUANTITY CONTROL
+                              ================================== */
+                              <View
+                                style={
+                                  styles.qtyControlRow
+                                }
+                              >
+                                <TouchableOpacity
+                                  style={[
+                                    styles.qtyActionBtn,
+                                    itemBusy &&
+                                      styles.qtyBtnBusy,
+                                  ]}
+                                  onPress={() =>
+                                    runItemAction(
                                       item.itemId,
-                                      qty - 1
+                                      () =>
+                                        onUpdateCartQuantity(
+                                          item.itemId,
+                                          qty - 1
+                                        )
                                     )
-                                )
-                              }
-                              disabled={
-                                itemBusy
-                              }
-                            >
+                                  }
+                                  disabled={
+                                    itemBusy
+                                  }
+                                >
+                                  <Minus
+                                    size={13}
+                                    color={
+                                      COLORS.text
+                                    }
+                                  />
+                                </TouchableOpacity>
 
-                              <Minus
-                                size={13}
-                                color={
-                                  COLORS.text
-                                }
-                              />
+                                <View style={styles.qtyLabelWrap}>
+                                  <Text
+                                    style={
+                                      styles.qtyActionText
+                                    }
+                                  >
+                                    {
+                                      itemBusy
+                                        ? '…'
+                                        : qty
+                                    }
+                                  </Text>
 
-                            </TouchableOpacity>
+                                  {unitName ? (
+                                    <Text
+                                      style={
+                                        styles.qtyUnitSubText
+                                      }
+                                      numberOfLines={1}
+                                    >
+                                      {unitName}
+                                    </Text>
+                                  ) : null}
+                                </View>
 
-
-                            <Text
-                              style={
-                                styles.qtyActionText
-                              }
-                            >
-                              {
-                                itemBusy
-                                  ? '…'
-                                  : qty
-                              }
-                            </Text>
-
-
-                            <TouchableOpacity
-                              style={[
-                                styles.qtyActionBtn,
-
-                                itemBusy &&
-                                  styles.qtyBtnBusy,
-                              ]}
-                              onPress={() =>
-                                runItemAction(
-                                  item.itemId,
-
-                                  () =>
-                                    onUpdateCartQuantity(
+                                <TouchableOpacity
+                                  style={[
+                                    styles.qtyActionBtn,
+                                    itemBusy &&
+                                      styles.qtyBtnBusy,
+                                  ]}
+                                  onPress={() =>
+                                    runItemAction(
                                       item.itemId,
-                                      qty + 1
+                                      () =>
+                                        onUpdateCartQuantity(
+                                          item.itemId,
+                                          qty + 1
+                                        )
                                     )
-                                )
-                              }
-                              disabled={
-                                itemBusy
-                              }
-                            >
-
-                              <Plus
-                                size={13}
-                                color={
-                                  COLORS.text
-                                }
-                              />
-
-                            </TouchableOpacity>
-
-                          </View>
-
-                        ) : (
-
-                          /* =================================
-                             ADD BUTTON
-                          ================================== */
-
-                          <TouchableOpacity
-                            style={
-                              styles.addBtn
-                            }
-                            onPress={() =>
-                              runItemAction(
-                                item.itemId,
-
-                                () =>
-                                  onAddToCart(
-                                    item.itemId,
-                                    1,
-                                    item
-                                  )
-                              )
-                            }
-                            disabled={
-                              itemBusy
-                            }
-                          >
-
-                            {itemBusy ? (
-
-                              <ActivityIndicator
-                                size="small"
-                                color={
-                                  COLORS.white
-                                }
-                              />
-
+                                  }
+                                  disabled={
+                                    itemBusy
+                                  }
+                                >
+                                  <Plus
+                                    size={13}
+                                    color={
+                                      COLORS.text
+                                    }
+                                  />
+                                </TouchableOpacity>
+                              </View>
                             ) : (
-
-                              <Plus
-                                size={16}
-                                color={
-                                  COLORS.white
+                              /* =================================
+                                 ADD BUTTON
+                              ================================== */
+                              <TouchableOpacity
+                                style={
+                                  styles.addBtn
                                 }
-                              />
-
+                                onPress={() =>
+                                  runItemAction(
+                                    item.itemId,
+                                    () =>
+                                      onAddToCart(
+                                        item.itemId,
+                                        1,
+                                        item
+                                      )
+                                  )
+                                }
+                                disabled={
+                                  itemBusy
+                                }
+                              >
+                                {itemBusy ? (
+                                  <ActivityIndicator
+                                    size="small"
+                                    color={
+                                      COLORS.white
+                                    }
+                                  />
+                                ) : (
+                                  <Plus
+                                    size={16}
+                                    color={
+                                      COLORS.white
+                                    }
+                                  />
+                                )}
+                              </TouchableOpacity>
                             )}
-
-                          </TouchableOpacity>
-
-                        )}
-
-                      </View>
+                          </View>
+                        );
+                      })()}
 
                     </TouchableOpacity>
 
@@ -1841,6 +1839,18 @@ const styles =
       textTransform: 'uppercase',
     },
 
+    priceWithUnitRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 3,
+    },
+
+    unitPerText: {
+      color: COLORS.textSecondary,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+
     itemPrice: {
       color: COLORS.text,
       fontSize: 16,
@@ -1895,12 +1905,27 @@ const styles =
       opacity: 0.5,
     },
 
+    qtyLabelWrap: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+      minWidth: 24,
+    },
+
     qtyActionText: {
       color: COLORS.text,
       fontWeight: '800',
       fontSize: 12,
-      minWidth: 14,
       textAlign: 'center',
+      lineHeight: 14,
+    },
+
+    qtyUnitSubText: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: COLORS.orangeDark,
+      textTransform: 'capitalize',
+      marginTop: 1,
     },
 
     /* =====================================================

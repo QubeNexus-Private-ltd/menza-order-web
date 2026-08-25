@@ -177,15 +177,22 @@ export default function CartModal({
 
       await api.generateCustomerOtp(cleanMobile, restId, encRestId);
       setIsOtpSent(true);
-      setOtpCountdown(30);
+      setOtpCountdown(60);
       setOtpSuccessMsg(`OTP sent to +91 ${cleanMobile}`);
     } catch (err) {
       console.error('Send OTP error:', err);
-      setErrorMsg(
-        err?.response?.data?.message ||
-          err?.message ||
-          'Failed to send OTP. Please try again.'
-      );
+      if (err?.isRateLimited) {
+        if (err.retryAfterSeconds) {
+          setOtpCountdown(err.retryAfterSeconds);
+        }
+        setErrorMsg(err.message);
+      } else {
+        setErrorMsg(
+          err?.response?.data?.message ||
+            err?.message ||
+            'Failed to send OTP. Please try again.'
+        );
+      }
     } finally {
       setIsSendingOtp(false);
     }
@@ -235,11 +242,15 @@ export default function CartModal({
       }
     } catch (err) {
       console.error('Verify OTP error:', err);
-      setErrorMsg(
-        err?.response?.data?.message ||
-          err?.message ||
-          'OTP verification failed. Please try again.'
-      );
+      if (err?.isRateLimited) {
+        setErrorMsg(err.message);
+      } else {
+        setErrorMsg(
+          err?.response?.data?.message ||
+            err?.message ||
+            'OTP verification failed. Please try again.'
+        );
+      }
     } finally {
       setIsVerifyingOtp(false);
     }

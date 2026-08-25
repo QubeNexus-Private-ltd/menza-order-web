@@ -72,7 +72,7 @@ export default function Header({
             </Pressable>
           )}
 
-          {activeOrder && typeof openOrderTracker === 'function' && (
+          {typeof openOrderTracker === 'function' && (
             <Pressable
               style={({ pressed }) => [
                 styles.orderButton,
@@ -83,11 +83,11 @@ export default function Header({
               pressRetentionOffset={{ top: 10, bottom: 10, left: 10, right: 10 }}
               android_ripple={{ color: '#F3C8BA', borderless: false }}
               accessibilityRole="button"
-              accessibilityLabel="View Active Order"
+              accessibilityLabel="View Restaurant Orders"
             >
               <OrderIcon size={17} color="#D33401" strokeWidth={2.3} />
-              <Text style={styles.orderButtonText}>Order</Text>
-              <View style={styles.orderDot} />
+              <Text style={styles.orderButtonText}>Orders</Text>
+              {activeOrder && <View style={styles.orderDot} />}
             </Pressable>
           )}
 

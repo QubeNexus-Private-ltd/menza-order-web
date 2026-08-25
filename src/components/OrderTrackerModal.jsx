@@ -3,9 +3,11 @@ import {
   View,
   Text,
   TouchableOpacity,
+  TextInput,
   ScrollView,
   Modal,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import {
   X,
@@ -20,38 +22,99 @@ import {
   Tag,
   MessageSquare,
   Building,
+  ArrowLeft,
+  RefreshCw,
+  Search,
+  ChevronRight,
+  UtensilsCrossed,
+  ShoppingBag,
+  Sparkles,
+  Layers,
+  ChefHat,
+  Bell,
+  Check,
 } from 'lucide-react';
+import * as api from '../services/api';
+
+const STATUSES = [
+  'Pending',
+  'Confirmed',
+  'Preparing',
+  'Ready',
+  'Delivered',
+];
 
 export default function OrderTrackerModal({
   visible,
   onClose,
   order,
+  orders = [],
+  catalog,
+  activeTable,
   onRefreshOrder,
 }) {
-  const STATUSES = [
-    'Pending',
-    'Confirmed',
-    'Preparing',
-    'Ready',
-    'Delivered',
-  ];
+  const [selectedOrder, setSelectedOrder] = useState(order || null);
+  const [viewMode, setViewMode] = useState(order ? 'detail' : 'list');
+  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'active' | 'completed'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allOrdersList, setAllOrdersList] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
 
-  // Keep a local copy so the tracker changes immediately when the parent
-  // supplies a refreshed order object.
-  const [liveOrder, setLiveOrder] = useState(order);
-
+  // Sync selectedOrder when order prop changes
   useEffect(() => {
-    setLiveOrder(order);
+    if (order) {
+      setSelectedOrder(order);
+      setViewMode('detail');
+    }
   }, [order]);
 
-  // IMPORTANT:
-  // The tracker cannot know that the kitchen changed "Confirmed" -> "Preparing"
-  // unless the latest order is fetched again. The parent should pass:
-  // onRefreshOrder={yourRefreshFunction}
-  //
-  // We poll every 3 seconds while the tracker is open.
+  // Load orders on open
   useEffect(() => {
-    if (!visible || !order?.id || typeof onRefreshOrder !== 'function') {
+    if (!visible) return;
+    loadOrders();
+  }, [visible, catalog?.restaurantId]);
+
+  const loadOrders = async () => {
+    try {
+      setLoadingOrders(true);
+      const restId = catalog?.restaurantId || null;
+      const savedUser = api.getSavedCustomer();
+      const phone = savedUser?.mobile || '';
+
+      const ords = await api.getRestaurantOrders(restId, phone);
+      
+      // Combine with props.orders if available
+      const combined = [...(ords || []), ...(orders || [])];
+      const uniqueMap = new Map();
+      for (const o of combined) {
+        const id = Number(o?.orderId || o?.id);
+        if (id && !uniqueMap.has(id)) {
+          uniqueMap.set(id, api.normalizeOrder ? api.normalizeOrder(o) : o);
+        }
+      }
+
+      const list = Array.from(uniqueMap.values()).sort(
+        (a, b) => new Date(b?.createdAt || b?.createdDateUtc || 0) - new Date(a?.createdAt || a?.createdDateUtc || 0)
+      );
+
+      setAllOrdersList(list);
+
+      // If user opened with no specific order selected
+      if (!order && (!selectedOrder || !list.some((o) => Number(o.id) === Number(selectedOrder.id)))) {
+        if (list.length === 1) {
+          setSelectedOrder(list[0]);
+        }
+      }
+    } catch (err) {
+      console.log('Load orders error:', err);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  // Poll active selected order
+  useEffect(() => {
+    if (!visible || viewMode !== 'detail' || !selectedOrder?.id) {
       return undefined;
     }
 
@@ -59,10 +122,15 @@ export default function OrderTrackerModal({
 
     const refresh = async () => {
       try {
-        const latest = await onRefreshOrder(order.id);
+        let latest = null;
+        if (typeof onRefreshOrder === 'function') {
+          latest = await onRefreshOrder(selectedOrder.id);
+        } else {
+          latest = await api.getOrder(selectedOrder.id);
+        }
 
         if (!cancelled && latest) {
-          setLiveOrder(latest);
+          setSelectedOrder(latest);
         }
       } catch (error) {
         console.log('Order tracker refresh error:', error?.message || error);
@@ -76,11 +144,9 @@ export default function OrderTrackerModal({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [visible, order?.id, onRefreshOrder]);
+  }, [visible, viewMode, selectedOrder?.id, onRefreshOrder]);
 
-  if (!visible || !liveOrder) return null;
-
-  const currentOrder = liveOrder;
+  if (!visible) return null;
 
   const normalizeStatus = (value) => {
     const valueLower = String(value ?? '').trim().toLowerCase();
@@ -88,11 +154,9 @@ export default function OrderTrackerModal({
     if (['pending', 'placed', 'created', 'new', 'received'].includes(valueLower)) {
       return 'Pending';
     }
-
     if (['confirmed', 'accepted', 'approved', 'order confirmed'].includes(valueLower)) {
       return 'Confirmed';
     }
-
     if (
       [
         'preparing',
@@ -106,11 +170,9 @@ export default function OrderTrackerModal({
     ) {
       return 'Preparing';
     }
-
     if (['ready', 'prepared', 'ready to serve', 'ready for pickup'].includes(valueLower)) {
       return 'Ready';
     }
-
     if (
       ['delivered', 'completed', 'served', 'picked up', 'pickedup', 'closed'].includes(
         valueLower
@@ -118,616 +180,826 @@ export default function OrderTrackerModal({
     ) {
       return 'Delivered';
     }
+    if (['cancelled', 'rejected', 'canceled', 'declined'].includes(valueLower)) {
+      return 'Cancelled';
+    }
 
     return 'Pending';
   };
 
-  // Different backend screens can expose the same progress under different
-  // property names. Use the furthest valid status so a stale "Confirmed"
-  // field cannot hide a newer "Preparing"/"Ready" status.
-  const statusCandidates = [
-    currentOrder.kitchenStatus,
-    currentOrder.kitchenOrderStatus,
-    currentOrder.orderStatus,
-    currentOrder.orderStatusName,
-    currentOrder.status,
-    currentOrder.statusName,
-    currentOrder.orderState,
-  ]
-    .filter((value) => value !== null && value !== undefined && value !== '')
-    .map(normalizeStatus);
+  const getOrderStatusInfo = (ord) => {
+    const statusCandidates = [
+      ord?.kitchenStatus,
+      ord?.kitchenOrderStatus,
+      ord?.orderStatus,
+      ord?.orderStatusName,
+      ord?.status,
+      ord?.statusName,
+      ord?.orderState,
+    ]
+      .filter((v) => v !== null && v !== undefined && v !== '')
+      .map(normalizeStatus);
 
-  const rawStatus =
-    statusCandidates.length > 0
-      ? statusCandidates.reduce((best, value) =>
-          STATUSES.indexOf(value) > STATUSES.indexOf(best) ? value : best
-        )
-      : 'Pending';
+    const rawStatus =
+      statusCandidates.length > 0
+        ? statusCandidates.reduce((best, value) =>
+            STATUSES.indexOf(value) > STATUSES.indexOf(best) ? value : best
+          )
+        : 'Pending';
 
-  const paymentMode = String(currentOrder.paymentMode ?? '').trim().toUpperCase();
-  const paymentMethod = String(currentOrder.paymentMethod ?? '').trim().toUpperCase();
-  const paymentState = String(currentOrder.paymentStatus ?? '').trim().toUpperCase();
+    const paymentMode = String(ord?.paymentMode ?? '').trim().toUpperCase();
+    const paymentMethod = String(ord?.paymentMethod ?? '').trim().toUpperCase();
+    const paymentState = String(ord?.paymentStatus ?? '').trim().toUpperCase();
 
-  const isOnline =
-    ['ONLINE', 'CASHFREE', 'UPI'].includes(paymentMode) ||
-    ['CASHFREE', 'CASHFREE_SPLIT', 'ONLINE', 'UPI'].includes(paymentMethod);
+    const isOnline =
+      ['ONLINE', 'CASHFREE', 'UPI'].includes(paymentMode) ||
+      ['CASHFREE', 'CASHFREE_SPLIT', 'ONLINE', 'UPI'].includes(paymentMethod);
+    const isPaid = ['PAID', 'SUCCESS', 'COMPLETED', 'CAPTURED'].includes(paymentState);
+    const isAwaitingPayment = isOnline && !isPaid;
 
-  const isPaid = ['PAID', 'SUCCESS', 'COMPLETED', 'CAPTURED'].includes(paymentState);
+    const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
 
-  const isAwaitingPayment = isOnline && !isPaid;
+    let badgeColor = '#0284c7';
+    let badgeBg = '#e0f2fe';
+    let label = 'Placed';
 
-  // Payment should block kitchen progress only while payment is actually pending.
-  // Once payment is successful, show the real kitchen/order status.
-  const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
+    if (normalizedStatus === 'Confirmed') {
+      badgeColor = '#0d9488';
+      badgeBg = '#ccfbf1';
+      label = 'Confirmed';
+    } else if (normalizedStatus === 'Preparing') {
+      badgeColor = '#ea580c';
+      badgeBg = '#ffedd5';
+      label = 'In Kitchen';
+    } else if (normalizedStatus === 'Ready') {
+      badgeColor = '#7c3aed';
+      badgeBg = '#ede9fe';
+      label = 'Ready to Serve';
+    } else if (normalizedStatus === 'Delivered') {
+      badgeColor = '#15803d';
+      badgeBg = '#dcfce7';
+      label = 'Served / Done';
+    } else if (normalizedStatus === 'Cancelled') {
+      badgeColor = '#dc2626';
+      badgeBg = '#fee2e2';
+      label = 'Cancelled';
+    }
 
-  const currentIdx =
-    STATUSES.indexOf(normalizedStatus) >= 0
-      ? STATUSES.indexOf(normalizedStatus)
-      : 0;
+    return {
+      rawStatus,
+      normalizedStatus,
+      isOnline,
+      isPaid,
+      isAwaitingPayment,
+      badgeColor,
+      badgeBg,
+      label,
+    };
+  };
 
-  const items = Array.isArray(currentOrder.items)
-    ? currentOrder.items
-    : [];
+  // Filtered orders list
+  const filteredOrders = allOrdersList.filter((ord) => {
+    const { normalizedStatus } = getOrderStatusInfo(ord);
 
-  const subtotal =
-    Number(
-      currentOrder.subTotal ??
-        currentOrder.itemTotal ??
-        items.reduce(
-          (sum, item) =>
-            sum +
-            Number(
-              item.amount ??
-                item.unitPrice ??
-                item.price ??
-                0
-            ) *
-              Number(item.quantity || 1),
-          0
-        )
-    ) || 0;
+    if (activeTab === 'active') {
+      if (['Delivered', 'Cancelled'].includes(normalizedStatus)) return false;
+    } else if (activeTab === 'completed') {
+      if (!['Delivered', 'Cancelled'].includes(normalizedStatus)) return false;
+    }
 
-  const cgst =
-    Number(currentOrder.cgstAmount ?? 0) ||
-    Math.round(subtotal * 0.025 * 100) / 100;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const idStr = String(ord.id || ord.orderId || '');
+      const tokenStr = String(ord.pickupToken || ord.tokenNumber || '').toLowerCase();
+      const dinerName = String(ord.customerName || ord.name || '').toLowerCase();
+      const tableStr = String(ord.tableName || ord.tableNumber || '').toLowerCase();
+      const itemsMatch = Array.isArray(ord.items) && ord.items.some((i) =>
+        String(i.itemName || i.name || '').toLowerCase().includes(q)
+      );
 
-  const sgst =
-    Number(currentOrder.sgstAmount ?? 0) ||
-    Math.round(subtotal * 0.025 * 100) / 100;
+      return (
+        idStr.includes(q) ||
+        tokenStr.includes(q) ||
+        dinerName.includes(q) ||
+        tableStr.includes(q) ||
+        itemsMatch
+      );
+    }
 
-  const total =
-    Number(
-      currentOrder.totalAmount ??
-        subtotal + cgst + sgst
-    ) || 0;
+    return true;
+  });
 
-  const paymentStatus =
-    currentOrder.paymentStatus ||
-    currentOrder.paymentMethod ||
-    'Pending';
+  const activeCount = allOrdersList.filter((o) => {
+    const { normalizedStatus } = getOrderStatusInfo(o);
+    return !['Delivered', 'Cancelled'].includes(normalizedStatus);
+  }).length;
 
-  const tokenNumber =
-    currentOrder.pickupToken ||
-    (currentOrder.tokenNumber ? `TK-${String(currentOrder.tokenNumber).padStart(3, '0')}` : `TK-${String(currentOrder.id).padStart(3, '0')}`);
+  const completedCount = allOrdersList.filter((o) => {
+    const { normalizedStatus } = getOrderStatusInfo(o);
+    return ['Delivered', 'Cancelled'].includes(normalizedStatus);
+  }).length;
 
-  const formattedDate = currentOrder.createdDateUtc
-    ? new Date(currentOrder.createdDateUtc).toLocaleString('en-IN', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      })
-    : new Date().toLocaleString('en-IN', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      });
+  /* =========================================================
+     RENDER: ORDER DETAIL & RECEIPT VIEW
+  ========================================================= */
+  const renderDetailView = () => {
+    if (!selectedOrder) {
+      return (
+        <View style={styles.emptyContainer}>
+          <UtensilsCrossed size={36} color="#cbd5e1" />
+          <Text style={styles.emptyTitle}>No Order Selected</Text>
+          <TouchableOpacity
+            style={styles.backToListBtn}
+            onPress={() => setViewMode('list')}
+          >
+            <Text style={styles.backToListBtnText}>View All Orders</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
 
-  const channelText = currentOrder.tableName
-    ? `Dine-In • ${currentOrder.tableName}`
-    : currentOrder.tableId
-    ? `Dine-In • Table #${currentOrder.tableId}`
-    : 'Direct Quick QR Order (Counter / Takeaway)';
+    const {
+      normalizedStatus,
+      isOnline,
+      isPaid,
+      isAwaitingPayment,
+      badgeColor,
+      badgeBg,
+      label,
+    } = getOrderStatusInfo(selectedOrder);
+
+    const currentIdx =
+      STATUSES.indexOf(normalizedStatus) >= 0
+        ? STATUSES.indexOf(normalizedStatus)
+        : 0;
+
+    const items = Array.isArray(selectedOrder.items) ? selectedOrder.items : [];
+
+    const subtotal =
+      Number(
+        selectedOrder.subTotal ??
+          selectedOrder.itemTotal ??
+          items.reduce(
+            (sum, item) =>
+              sum +
+              Number(item.amount ?? item.unitPrice ?? item.price ?? 0) *
+                Number(item.quantity || 1),
+            0
+          )
+      ) || 0;
+
+    const cgst =
+      Number(selectedOrder.cgstAmount ?? 0) ||
+      Math.round(subtotal * 0.025 * 100) / 100;
+
+    const sgst =
+      Number(selectedOrder.sgstAmount ?? 0) ||
+      Math.round(subtotal * 0.025 * 100) / 100;
+
+    const grandTotal =
+      Number(
+        selectedOrder.totalAmount ?? subtotal + cgst + sgst
+      ) || 0;
+
+    const tokenNumber =
+      selectedOrder.pickupToken ||
+      (selectedOrder.tokenNumber
+        ? `TK-${String(selectedOrder.tokenNumber).padStart(3, '0')}`
+        : `TK-${String(selectedOrder.id).padStart(3, '0')}`);
+
+    const formattedDate = selectedOrder.createdDateUtc || selectedOrder.createdAt
+      ? new Date(selectedOrder.createdDateUtc || selectedOrder.createdAt).toLocaleString('en-IN', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        })
+      : new Date().toLocaleString('en-IN', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        });
+
+    const channelText = selectedOrder.tableName
+      ? `Dine-In • ${selectedOrder.tableName}`
+      : selectedOrder.tableId
+      ? `Dine-In • Table #${selectedOrder.tableId}`
+      : 'Quick Order (Counter / Takeaway)';
+
+    return (
+      <ScrollView
+        style={styles.scrollBody}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Navigation & Header */}
+        <View style={styles.detailNavRow}>
+          <TouchableOpacity
+            style={styles.backNavBtn}
+            onPress={() => setViewMode('list')}
+          >
+            <ArrowLeft size={16} color="#D33401" />
+            <Text style={styles.backNavBtnText}>All Orders ({allOrdersList.length})</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.refreshIconBtn}
+            onPress={loadOrders}
+            disabled={loadingOrders}
+          >
+            {loadingOrders ? (
+              <ActivityIndicator size="small" color="#747878" />
+            ) : (
+              <RefreshCw size={15} color="#747878" />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* ORDER STATUS HERO CARD */}
+        <View
+          style={[
+            styles.statusHeroCard,
+            { borderColor: badgeColor, backgroundColor: badgeBg },
+          ]}
+        >
+          <View style={styles.statusHeroTop}>
+            <View style={styles.statusHeroLeft}>
+              <View style={styles.tokenPill}>
+                <Tag size={13} color="#D33401" />
+                <Text style={styles.tokenPillText}>{tokenNumber}</Text>
+              </View>
+              <Text style={styles.orderIdHeroText}>Order #{selectedOrder.id}</Text>
+            </View>
+
+            <View style={[styles.statusBadgePill, { backgroundColor: badgeColor }]}>
+              <Text style={styles.statusBadgePillText}>{label}</Text>
+            </View>
+          </View>
+
+          <Text style={styles.channelHeroText}>{channelText}</Text>
+
+          <View style={styles.heroTimeRow}>
+            <Calendar size={12} color="#64748b" />
+            <Text style={styles.heroTimeText}>{formattedDate}</Text>
+          </View>
+        </View>
+
+        {/* LIVE KITCHEN PROGRESS STEPPER */}
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <ChefHat size={16} color="#D33401" />
+            <Text style={styles.cardTitle}>Live Kitchen Progress</Text>
+          </View>
+
+          <View style={styles.stepperContainer}>
+            {STATUSES.map((step, idx) => {
+              const isDone = idx <= currentIdx;
+              const isCurrent = idx === currentIdx;
+
+              return (
+                <View key={step} style={styles.stepperStep}>
+                  <View
+                    style={[
+                      styles.stepCircle,
+                      isDone && styles.stepCircleDone,
+                      isCurrent && styles.stepCircleCurrent,
+                    ]}
+                  >
+                    {isDone ? (
+                      <Check size={12} color="#ffffff" strokeWidth={3} />
+                    ) : (
+                      <Text style={styles.stepNumText}>{idx + 1}</Text>
+                    )}
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.stepLabelText,
+                      isDone && styles.stepLabelTextDone,
+                      isCurrent && styles.stepLabelTextCurrent,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {step === 'Delivered' ? 'Served' : step}
+                  </Text>
+
+                  {idx < STATUSES.length - 1 && (
+                    <View
+                      style={[
+                        styles.stepConnector,
+                        idx < currentIdx && styles.stepConnectorDone,
+                      ]}
+                    />
+                  )}
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.statusMessageCallout}>
+            <Flame size={18} color="#f59e0b" />
+            <View style={styles.statusMessageTextWrap}>
+              <Text style={styles.statusMessageTitle}>
+                {normalizedStatus === 'Preparing'
+                  ? 'Chef is cooking your dishes!'
+                  : normalizedStatus === 'Ready'
+                  ? 'Your order is ready for serving!'
+                  : normalizedStatus === 'Delivered'
+                  ? 'Order served. Enjoy your meal!'
+                  : isAwaitingPayment
+                  ? 'Awaiting payment confirmation.'
+                  : 'Order queued in kitchen.'}
+              </Text>
+              <Text style={styles.statusMessageSub}>
+                Estimated preparation: ~15 to 20 mins
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* CUSTOMER & DINER INFO */}
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <User size={16} color="#10b981" />
+            <Text style={styles.cardTitle}>Customer & Dining Info</Text>
+          </View>
+
+          <View style={styles.infoTable}>
+            <View style={styles.infoTableRow}>
+              <Text style={styles.infoTableLabel}>Customer Name:</Text>
+              <Text style={styles.infoTableValue}>
+                {selectedOrder.customerName || selectedOrder.name || 'Guest Diner'}
+              </Text>
+            </View>
+
+            <View style={styles.infoTableRow}>
+              <Text style={styles.infoTableLabel}>Mobile Number:</Text>
+              <Text style={styles.infoTableValue}>
+                {selectedOrder.mobileNumber || selectedOrder.customerPhone || 'N/A'}
+              </Text>
+            </View>
+
+            <View style={styles.infoTableRow}>
+              <Text style={styles.infoTableLabel}>Dining Channel:</Text>
+              <Text style={styles.infoTableValue}>{channelText}</Text>
+            </View>
+
+            {selectedOrder.remarks ? (
+              <View style={styles.remarksBanner}>
+                <MessageSquare size={13} color="#f59e0b" />
+                <Text style={styles.remarksBannerText}>
+                  Special Note: {selectedOrder.remarks}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        {/* DETAILED RECEIPT / ORDERED ITEMS BREAKDOWN */}
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <Receipt size={16} color="#D33401" />
+            <Text style={styles.cardTitle}>
+              Official Receipt Breakdown ({items.reduce((s, i) => s + (Number(i.quantity) || 1), 0)} items)
+            </Text>
+          </View>
+
+          {/* Receipt Table Header */}
+          <View style={styles.receiptTableHeader}>
+            <Text style={[styles.receiptHeaderCol, { flex: 2 }]}>Dish Item</Text>
+            <Text style={[styles.receiptHeaderCol, { flex: 1.2, textAlign: 'center' }]}>
+              Qty & Unit
+            </Text>
+            <Text style={[styles.receiptHeaderCol, { flex: 1, textAlign: 'right' }]}>
+              Price
+            </Text>
+            <Text style={[styles.receiptHeaderCol, { flex: 1, textAlign: 'right' }]}>
+              Total
+            </Text>
+          </View>
+
+          {items.length === 0 ? (
+            <View style={styles.emptyItems}>
+              <Text style={styles.emptyText}>No items found for this order.</Text>
+            </View>
+          ) : (
+            items.map((item, idx) => {
+              const qty = Number(item.quantity || 1);
+              const unitPrice = Number(item.unitPrice ?? item.amount ?? item.price ?? 0);
+              const lineTotal = Number(item.totalAmount ?? unitPrice * qty);
+              const unitName =
+                item.unitName ||
+                item.unitDescription ||
+                (item.unit ? `Unit #${item.unit}` : '') ||
+                'Plate';
+
+              return (
+                <View key={item.itemId ?? idx} style={styles.receiptItemRow}>
+                  {/* Item Description */}
+                  <View style={{ flex: 2, paddingRight: 6 }}>
+                    <Text style={styles.receiptItemName}>
+                      {item.itemName || item.name || 'Menu Dish'}
+                    </Text>
+                    {item.cookingInstruction ? (
+                      <Text style={styles.receiptItemNote}>
+                        Note: {item.cookingInstruction}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* Quantity & Unit Name Badge */}
+                  <View style={{ flex: 1.2, alignItems: 'center' }}>
+                    <View style={styles.qtyUnitBadge}>
+                      <Text style={styles.qtyUnitBadgeNumber}>{qty}×</Text>
+                      <Text style={styles.qtyUnitBadgeName} numberOfLines={1}>
+                        {unitName}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Unit Price */}
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={styles.receiptUnitPriceText}>
+                      ₹{unitPrice.toFixed(2)}
+                    </Text>
+                  </View>
+
+                  {/* Total Price */}
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={styles.receiptLineTotalText}>
+                      ₹{lineTotal.toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })
+          )}
+
+          <View style={styles.receiptDivider} />
+
+          {/* BILL SUMMARY */}
+          <View style={styles.billBreakdown}>
+            <View style={styles.billRow}>
+              <Text style={styles.billLabel}>Item Subtotal</Text>
+              <Text style={styles.billValue}>₹{subtotal.toFixed(2)}</Text>
+            </View>
+
+            <View style={styles.billRow}>
+              <Text style={styles.billLabel}>CGST (2.5%)</Text>
+              <Text style={styles.billValue}>₹{cgst.toFixed(2)}</Text>
+            </View>
+
+            <View style={styles.billRow}>
+              <Text style={styles.billLabel}>SGST (2.5%)</Text>
+              <Text style={styles.billValue}>₹{sgst.toFixed(2)}</Text>
+            </View>
+
+            <View style={styles.receiptDividerBold} />
+
+            <View style={styles.grandTotalRow}>
+              <View>
+                <Text style={styles.grandTotalLabel}>Grand Total Amount</Text>
+                <Text style={styles.grandTotalTaxesNote}>(Inclusive of all applicable taxes)</Text>
+              </View>
+              <Text style={styles.grandTotalValue}>₹{grandTotal.toFixed(2)}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* PAYMENT METHOD & STATUS CARD */}
+        <View style={styles.paymentCard}>
+          <View style={styles.paymentCardIconWrap}>
+            <CreditCard size={18} color="#D33401" />
+          </View>
+          <View style={styles.paymentCardContent}>
+            <View style={styles.paymentCardTopRow}>
+              <Text style={styles.paymentCardTitle}>
+                {isOnline ? 'Cashfree Direct Online Payment' : 'Pay at Counter / Table (Cash)'}
+              </Text>
+              <View
+                style={[
+                  styles.paymentPill,
+                  isPaid ? styles.paymentPillPaid : styles.paymentPillPending,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.paymentPillText,
+                    isPaid ? styles.paymentPillTextPaid : styles.paymentPillTextPending,
+                  ]}
+                >
+                  {isPaid ? '✓ PAID' : 'PENDING'}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.paymentCardSubText}>
+              Mode: {selectedOrder.paymentMode || (isOnline ? 'ONLINE_UPI' : 'CASH')}
+            </Text>
+            {selectedOrder.paymentOrderId || selectedOrder.cashfreeOrderId ? (
+              <Text style={styles.paymentTxnText}>
+                Ref: {selectedOrder.paymentOrderId || selectedOrder.cashfreeOrderId}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      </ScrollView>
+    );
+  };
+
+  /* =========================================================
+     RENDER: ALL ORDERS LIST VIEW
+  ========================================================= */
+  const renderListView = () => {
+    return (
+      <View style={styles.listContainer}>
+        {/* Search Bar & Refresh */}
+        <View style={styles.searchRow}>
+          <View style={styles.searchBar}>
+            <Search size={15} color="#94a3b8" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by Order #, token, dish..."
+              placeholderTextColor="#94a3b8"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <X size={15} color="#94a3b8" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <TouchableOpacity
+            style={styles.refreshBtn}
+            onPress={loadOrders}
+            disabled={loadingOrders}
+          >
+            {loadingOrders ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <RefreshCw size={15} color="#ffffff" />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Filter Tabs */}
+        <View style={styles.filterTabsRow}>
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              activeTab === 'all' && styles.filterTabActive,
+            ]}
+            onPress={() => setActiveTab('all')}
+          >
+            <Text
+              style={[
+                styles.filterTabText,
+                activeTab === 'all' && styles.filterTabTextActive,
+              ]}
+            >
+              All ({allOrdersList.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              activeTab === 'active' && styles.filterTabActive,
+            ]}
+            onPress={() => setActiveTab('active')}
+          >
+            <Text
+              style={[
+                styles.filterTabText,
+                activeTab === 'active' && styles.filterTabTextActive,
+              ]}
+            >
+              Active ({activeCount})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              activeTab === 'completed' && styles.filterTabActive,
+            ]}
+            onPress={() => setActiveTab('completed')}
+          >
+            <Text
+              style={[
+                styles.filterTabText,
+                activeTab === 'completed' && styles.filterTabTextActive,
+              ]}
+            >
+              Completed ({completedCount})
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Orders List */}
+        <ScrollView
+          style={styles.listScroll}
+          contentContainerStyle={styles.listScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {loadingOrders && allOrdersList.length === 0 ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="large" color="#D33401" />
+              <Text style={styles.loadingText}>Loading restaurant orders...</Text>
+            </View>
+          ) : filteredOrders.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <ShoppingBag size={42} color="#cbd5e1" />
+              <Text style={styles.emptyTitle}>No Orders Found</Text>
+              <Text style={styles.emptySubtitle}>
+                {searchQuery
+                  ? 'No orders match your search criteria.'
+                  : activeTab === 'active'
+                  ? 'There are no active kitchen orders right now.'
+                  : 'Place your order from the menu catalog to track it here.'}
+              </Text>
+            </View>
+          ) : (
+            filteredOrders.map((ord) => {
+              const {
+                normalizedStatus,
+                isPaid,
+                badgeColor,
+                badgeBg,
+                label,
+              } = getOrderStatusInfo(ord);
+
+              const items = Array.isArray(ord.items) ? ord.items : [];
+              const tokenNumber =
+                ord.pickupToken ||
+                (ord.tokenNumber
+                  ? `TK-${String(ord.tokenNumber).padStart(3, '0')}`
+                  : `TK-${String(ord.id).padStart(3, '0')}`);
+
+              const formattedDate = ord.createdDateUtc || ord.createdAt
+                ? new Date(ord.createdDateUtc || ord.createdAt).toLocaleString('en-IN', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })
+                : 'Just now';
+
+              const channelText = ord.tableName
+                ? `Table ${ord.tableName}`
+                : ord.tableId
+                ? `Table #${ord.tableId}`
+                : 'Counter / Takeaway';
+
+              const totalAmount = Number(ord.totalAmount || 0);
+
+              return (
+                <TouchableOpacity
+                  key={ord.id || ord.orderId}
+                  style={styles.orderCard}
+                  onPress={() => {
+                    setSelectedOrder(ord);
+                    setViewMode('detail');
+                  }}
+                  activeOpacity={0.85}
+                >
+                  {/* Card Top Row */}
+                  <View style={styles.orderCardHeader}>
+                    <View style={styles.orderCardHeaderLeft}>
+                      <View style={styles.tokenPillSmall}>
+                        <Tag size={11} color="#D33401" />
+                        <Text style={styles.tokenPillSmallText}>{tokenNumber}</Text>
+                      </View>
+                      <Text style={styles.orderCardId}>Order #{ord.id}</Text>
+                    </View>
+
+                    <View style={[styles.cardStatusBadge, { backgroundColor: badgeBg }]}>
+                      <Text style={[styles.cardStatusBadgeText, { color: badgeColor }]}>
+                        {label}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Channel & Time */}
+                  <View style={styles.cardMetaRow}>
+                    <Text style={styles.cardChannelText}>🍽️ {channelText}</Text>
+                    <Text style={styles.cardDateText}>• {formattedDate}</Text>
+                  </View>
+
+                  {/* Items List with Quantity and Unit Name */}
+                  <View style={styles.cardItemsBox}>
+                    {items.slice(0, 3).map((item, i) => {
+                      const qty = Number(item.quantity || 1);
+                      const unitName =
+                        item.unitName ||
+                        item.unitDescription ||
+                        (item.unit ? `Unit #${item.unit}` : '') ||
+                        'Plate';
+
+                      return (
+                        <View key={i} style={styles.cardItemLine}>
+                          <Text style={styles.cardItemBullet}>•</Text>
+                          <Text style={styles.cardItemQtyText}>{qty}×</Text>
+                          <Text style={styles.cardItemNameText} numberOfLines={1}>
+                            {item.itemName || item.name || 'Dish Item'}
+                          </Text>
+                          <Text style={styles.cardItemUnitText}>({unitName})</Text>
+                        </View>
+                      );
+                    })}
+
+                    {items.length > 3 && (
+                      <Text style={styles.cardMoreItemsText}>
+                        +{items.length - 3} more dishes...
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Card Footer */}
+                  <View style={styles.orderCardFooter}>
+                    <View style={styles.cardFooterLeft}>
+                      <Text style={styles.cardTotalLabel}>Total Amount</Text>
+                      <Text style={styles.cardTotalValue}>₹{totalAmount.toFixed(2)}</Text>
+                    </View>
+
+                    <View style={styles.cardActionBtn}>
+                      <Text style={styles.cardActionBtnText}>Track & Receipt</Text>
+                      <ChevronRight size={14} color="#D33401" />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </ScrollView>
+      </View>
+    );
+  };
 
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={styles.overlay} className="responsive-modal-overlay">
-        <View style={styles.sheetContainer} className="responsive-modal-sheet">
-
-          {/* HEADER */}
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <View style={styles.headerTopRow}>
-                <Text style={styles.orderIdText}>
-                  ORDER #{currentOrder.id}
-                </Text>
-                <View style={styles.tokenBadge}>
-                  <Tag size={12} color="#10b981" />
-                  <Text style={styles.tokenBadgeText}>{tokenNumber}</Text>
-                </View>
+      <View style={styles.overlay}>
+        <View style={styles.sheetContainer}>
+          {/* TOP MODAL HEADER */}
+          <View style={styles.modalHeader}>
+            <View style={styles.modalHeaderLeft}>
+              <View style={styles.headerIconWrap}>
+                <Receipt size={18} color="#D33401" />
               </View>
-
-              <Text style={styles.tableNameText}>
-                {channelText}
-              </Text>
+              <View>
+                <Text style={styles.modalHeaderTitle}>
+                  {viewMode === 'detail' ? 'Order Live Tracking' : 'Restaurant Orders'}
+                </Text>
+                <Text style={styles.modalHeaderSubtitle}>
+                  {catalog?.restaurantName || 'Menza Smart Dining'}
+                </Text>
+              </View>
             </View>
 
             <TouchableOpacity
               onPress={onClose}
-              style={styles.closeBtn}
+              style={styles.modalCloseBtn}
+              accessibilityLabel="Close Orders Modal"
             >
-              <X
-                size={21}
-                color="#94a3b8"
-              />
+              <X size={20} color="#64748b" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView
-            style={styles.scrollBody}
-            contentContainerStyle={
-              styles.scrollContent
-            }
-            showsVerticalScrollIndicator={false}
-          >
-
-            {/* ORDER STATUS BANNER */}
-            <View style={[styles.successCard, isAwaitingPayment && { borderColor: 'rgba(245, 158, 11, 0.3)', backgroundColor: 'rgba(245, 158, 11, 0.08)' }]}>
-              <View style={[styles.successIcon, isAwaitingPayment && { backgroundColor: 'rgba(245, 158, 11, 0.2)' }]}>
-                {isAwaitingPayment ? (
-                  <Clock
-                    size={28}
-                    color="#f59e0b"
-                  />
-                ) : (
-                  <CheckCircle2
-                    size={28}
-                    color="#10b981"
-                  />
-                )}
-              </View>
-
-              <View style={styles.successTextBox}>
-                <Text style={[styles.successTitle, isAwaitingPayment && { color: '#f59e0b' }]}>
-                  {isAwaitingPayment
-                    ? 'Payment Pending'
-                    : isPaid
-                    ? 'Payment Confirmed & Order Confirmed'
-                    : 'Order Placed (Pay at Counter)'}
-                </Text>
-
-                <Text style={styles.successSubtitle}>
-                  {isAwaitingPayment
-                    ? 'Awaiting online payment. Your order will be sent to the kitchen once payment is marked PAID.'
-                    : 'Your order has been confirmed and dispatched to the restaurant kitchen.'}
-                </Text>
-              </View>
-            </View>
-
-            {/* CUSTOMER & ORDER INFO CARD */}
-            <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIcon}>
-                  <User size={16} color="#10b981" />
-                </View>
-                <Text style={styles.cardTitle}>Order & Customer Details</Text>
-              </View>
-
-              <View style={styles.infoGrid}>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Customer Name:</Text>
-                  <Text style={styles.infoValue}>
-                    {currentOrder.customerName || currentOrder.name || 'Guest Diner'}
-                  </Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Mobile Number:</Text>
-                  <Text style={styles.infoValue}>
-                    {currentOrder.mobileNumber || currentOrder.customerPhone || 'N/A'}
-                  </Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Order Time:</Text>
-                  <Text style={styles.infoValue}>{formattedDate}</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Dining Channel:</Text>
-                  <Text style={styles.infoValue}>{channelText}</Text>
-                </View>
-
-                {currentOrder.remarks ? (
-                  <View style={styles.remarksBox}>
-                    <MessageSquare size={13} color="#f59e0b" />
-                    <Text style={styles.remarksText}>
-                      Special Request: {currentOrder.remarks}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-
-            {/* STATUS TIMELINE */}
-            {/* <View style={styles.card}>
-              <Text style={styles.cardTitle}>
-                Live Kitchen Status
-              </Text>
-
-              <View style={styles.timeline}>
-                {STATUSES.map(
-                  (status, index) => {
-                    const isDone =
-                      index <= currentIdx;
-
-                    const isCurrent =
-                      index === currentIdx;
-
-                    return (
-                      <View
-                        key={status}
-                        style={styles.timelineStep}
-                      >
-                        <View
-                          style={[
-                            styles.dot,
-                            isDone &&
-                              styles.dotDone,
-                            isCurrent &&
-                              styles.dotCurrent,
-                          ]}
-                        >
-                          {isDone ? (
-                            <CheckCircle2
-                              size={14}
-                              color="#07130f"
-                            />
-                          ) : (
-                            <Text
-                              style={
-                                styles.stepNum
-                              }
-                            >
-                              {index + 1}
-                            </Text>
-                          )}
-                        </View>
-
-                        <Text
-                          style={[
-                            styles.stepLabel,
-                            isDone &&
-                              styles.stepLabelDone,
-                          ]}
-                        >
-                          {status}
-                        </Text>
-
-                        {index <
-                          STATUSES.length - 1 && (
-                          <View
-                            style={[
-                              styles.line,
-                              index <
-                                currentIdx &&
-                                styles.lineDone,
-                            ]}
-                          />
-                        )}
-                      </View>
-                    );
-                  }
-                )}
-              </View>
-
-              <View style={styles.statusCallout}>
-                <Flame
-                  size={20}
-                  color="#f59e0b"
-                />
-
-                <View
-                  style={
-                    styles.calloutTextBox
-                  }
-                >
-                  <Text
-                    style={
-                      styles.calloutTitle
-                    }
-                  >
-                    {normalizedStatus ===
-                    'Preparing'
-                      ? 'Chef is cooking your order!'
-                      : normalizedStatus ===
-                        'Ready'
-                      ? 'Order is ready for serving!'
-                      : normalizedStatus ===
-                        'Delivered'
-                      ? 'Enjoy your meal!'
-                      : isAwaitingPayment
-                      ? 'Awaiting payment confirmation before kitchen prep.'
-                      : 'Order confirmed and queued in kitchen.'}
-                  </Text>
-
-                  <Text
-                    style={
-                      styles.calloutSub
-                    }
-                  >
-                    Estimated preparation time ~ 15 to 20 mins
-                  </Text>
-                </View>
-              </View>
-            </View> */}
-
-            {/* ORDER ITEMS */}
-            <View style={styles.card}>
-              <View
-                style={styles.sectionHeader}
-              >
-                <View
-                  style={styles.sectionIcon}
-                >
-                  <Receipt
-                    size={17}
-                    color="#10b981"
-                  />
-                </View>
-
-                <Text
-                  style={styles.cardTitle}
-                >
-                  Ordered Items ({items.reduce((s, i) => s + (Number(i.quantity) || 1), 0)})
-                </Text>
-              </View>
-
-              {items.length === 0 ? (
-                <View
-                  style={styles.emptyItems}
-                >
-                  <Text
-                    style={styles.emptyText}
-                  >
-                    No item details available
-                  </Text>
-                </View>
-              ) : (
-                items.map((item, index) => {
-                  const quantity =
-                    Number(
-                      item.quantity || 1
-                    );
-
-                  const unitPrice =
-                    Number(
-                      item.unitPrice ??
-                        item.amount ??
-                        item.price ??
-                        0
-                    );
-
-                  const itemTotal =
-                    Number(
-                      item.totalAmount ??
-                        unitPrice *
-                          quantity
-                    );
-
-                  const unitDesc = item.unitName || item.unitDescription || (item.unit ? `Unit #${item.unit}` : '');
-
-                  return (
-                    <View
-                      key={
-                        item.itemId ??
-                        index
-                      }
-                      style={styles.itemRow}
-                    >
-                      <View
-                        style={
-                          styles.itemQtyBox
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.itemQty
-                          }
-                        >
-                          {quantity}x
-                        </Text>
-                      </View>
-
-                      <View
-                        style={
-                          styles.itemInfo
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.itemName
-                          }
-                        >
-                          {item.itemName ||
-                            item.name ||
-                            'Dish Item'}
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.unitPrice
-                          }
-                        >
-                          {unitDesc ? `${unitDesc} • ` : ''}₹{unitPrice.toFixed(2)} each
-                        </Text>
-
-                        {item.cookingInstruction ? (
-                          <Text style={styles.itemInstruction}>
-                            Note: {item.cookingInstruction}
-                          </Text>
-                        ) : null}
-                      </View>
-
-                      <Text
-                        style={
-                          styles.itemPrice
-                        }
-                      >
-                        ₹{itemTotal.toFixed(2)}
-                      </Text>
-                    </View>
-                  );
-                })
-              )}
-
-              <View
-                style={styles.divider}
-              />
-
-              {/* BILL */}
-              <View
-                style={styles.billRow}
-              >
-                <Text
-                  style={styles.billLabel}
-                >
-                  Subtotal
-                </Text>
-
-                <Text
-                  style={styles.billValue}
-                >
-                  ₹{subtotal.toFixed(2)}
-                </Text>
-              </View>
-
-              <View
-                style={styles.billRow}
-              >
-                <Text
-                  style={styles.billLabel}
-                >
-                  CGST (2.5%)
-                </Text>
-
-                <Text
-                  style={styles.billValue}
-                >
-                  ₹{cgst.toFixed(2)}
-                </Text>
-              </View>
-
-              <View
-                style={styles.billRow}
-              >
-                <Text
-                  style={styles.billLabel}
-                >
-                  SGST (2.5%)
-                </Text>
-
-                <Text
-                  style={styles.billValue}
-                >
-                  ₹{sgst.toFixed(2)}
-                </Text>
-              </View>
-
-              {currentOrder.gstNumber ? (
-                <View
-                  style={styles.billRow}
-                >
-                  <Text
-                    style={[styles.billLabel, { fontStyle: 'italic', color: '#64748b' }]}
-                  >
-                    GSTIN
-                  </Text>
-
-                  <Text
-                    style={[styles.billValue, { color: '#94a3b8', fontSize: 12, fontWeight: '700' }]}
-                  >
-                    {currentOrder.gstNumber}
-                  </Text>
-                </View>
-              ) : null}
-
-              <View
-                style={styles.divider}
-              />
-
-              <View
-                style={styles.totalRow}
-              >
-                <Text
-                  style={styles.totalLabel}
-                >
-                  Total Amount {isPaid ? 'Paid' : 'Payable'}
-                </Text>
-
-                <Text
-                  style={styles.totalValue}
-                >
-                  ₹{total.toFixed(2)}
-                </Text>
-              </View>
-            </View>
-
-            {/* PAYMENT DETAILS CARD */}
-            <View style={styles.paymentCard}>
-              <View
-                style={styles.paymentIcon}
-              >
-                <CreditCard
-                  size={18}
-                  color="#10b981"
-                />
-              </View>
-
-              <View style={styles.paymentTextBox}>
-                <View style={styles.paymentHeaderRow}>
-                  <Text
-                    style={styles.paymentTitle}
-                  >
-                    Payment Method
-                  </Text>
-                  <View style={[styles.paymentBadge, isPaid ? styles.paymentBadgePaid : styles.paymentBadgePending]}>
-                    <Text style={[styles.paymentBadgeText, isPaid ? { color: '#10b981' } : { color: '#f59e0b' }]}>
-                      {isPaid ? 'PAID VIA CASHFREE' : isOnline ? 'PAYMENT PENDING' : 'PAY AT COUNTER'}
-                    </Text>
-                  </View>
-                </View>
-
-                <Text style={styles.paymentDetailsSub}>
-                  Mode: {isOnline ? 'Online Gateway (Cashfree)' : 'Cash / Counter Settlement'}
-                </Text>
-
-                {currentOrder.cashfreeOrderId || currentOrder.paymentOrderId ? (
-                  <Text style={styles.paymentTxnId}>
-                    Ref ID: {currentOrder.cashfreeOrderId || currentOrder.paymentOrderId}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-
-          </ScrollView>
+          {/* VIEW SWITCHER CONTENT */}
+          {viewMode === 'detail' ? renderDetailView() : renderListView()}
 
           {/* FOOTER */}
           <View style={styles.footer}>
-            <TouchableOpacity
-              style={styles.doneBtn}
-              onPress={onClose}
-            >
-              <Text
-                style={styles.doneBtnText}
-              >
-                Back to Menu
-              </Text>
-            </TouchableOpacity>
-          </View>
+            {viewMode === 'detail' ? (
+              <View style={styles.detailFooterRow}>
+                <TouchableOpacity
+                  style={styles.switchToListBtn}
+                  onPress={() => setViewMode('list')}
+                >
+                  <Layers size={15} color="#1B1C1C" />
+                  <Text style={styles.switchToListBtnText}>
+                    All Orders ({allOrdersList.length})
+                  </Text>
+                </TouchableOpacity>
 
+                <TouchableOpacity
+                  style={styles.closeDoneBtn}
+                  onPress={onClose}
+                >
+                  <Text style={styles.closeDoneBtnText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.closeDoneBtnFull}
+                onPress={onClose}
+              >
+                <Text style={styles.closeDoneBtnText}>Back to Menu</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </View>
     </Modal>
@@ -737,405 +1009,912 @@ export default function OrderTrackerModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(28, 25, 23, 0.65)',
-    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 12,
   },
 
   sheetContainer: {
     width: '100%',
     maxWidth: 620,
-    alignSelf: 'center',
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
     maxHeight: '92%',
-    minHeight: '60%',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
+    backgroundColor: '#FAF8F5',
+    borderRadius: 24,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+    flexDirection: 'column',
   },
 
-  header: {
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#E0DDD8',
-    backgroundColor: '#FBF9F9',
+    borderBottomColor: '#E2E8F0',
   },
 
-  headerLeft: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  headerTopRow: {
+  modalHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
+    gap: 10,
   },
 
-  orderIdText: {
-    color: '#1B1C1C',
+  headerIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FFF1EC',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  modalHeaderTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '800',
+    color: '#1B1C1C',
+    letterSpacing: -0.2,
   },
 
-  tokenBadge: {
+  modalHeaderSubtitle: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '500',
+  },
+
+  modalCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  /* List View Styles */
+  listContainer: {
+    flex: 1,
+  },
+
+  searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#EFEDED',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    gap: 8,
+    backgroundColor: '#FFFFFF',
   },
 
-  tokenBadgeText: {
-    color: '#1B1C1C',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-  },
-
-  tableNameText: {
-    marginTop: 2,
-    color: '#747878',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  closeBtn: {
-    padding: 6,
-    borderRadius: 8,
-  },
-
-  scrollBody: {
+  searchBar: {
     flex: 1,
-    backgroundColor: '#FBF9F9',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 40,
+    gap: 8,
   },
 
-  scrollContent: {
-    padding: 16,
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#1B1C1C',
+    paddingVertical: 0,
+  },
+
+  refreshBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#D33401',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  filterTabsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+
+  filterTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+  },
+
+  filterTabActive: {
+    backgroundColor: '#D33401',
+  },
+
+  filterTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+
+  filterTabTextActive: {
+    color: '#ffffff',
+  },
+
+  listScroll: {
+    flex: 1,
+  },
+
+  listScrollContent: {
+    padding: 14,
     gap: 12,
   },
 
-  successCard: {
-    flexDirection: 'row',
+  loadingBox: {
+    padding: 40,
     alignItems: 'center',
-    backgroundColor: '#EFEDED',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-    borderRadius: 16,
-    padding: 13,
+    gap: 10,
   },
 
-  successIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#1B1C1C',
+  loadingText: {
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+
+  emptyContainer: {
+    padding: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 11,
-    flexShrink: 0,
+    gap: 8,
   },
 
-  successTextBox: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  successTitle: {
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
     color: '#1B1C1C',
+    marginTop: 6,
+  },
+
+  emptySubtitle: {
+    fontSize: 12,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 280,
+  },
+
+  orderCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    gap: 8,
+  },
+
+  orderCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  orderCardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  tokenPillSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF1EC',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+
+  tokenPillSmallText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#D33401',
+  },
+
+  orderCardId: {
     fontSize: 14,
+    fontWeight: '800',
+    color: '#1B1C1C',
+  },
+
+  cardStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+
+  cardStatusBadgeText: {
+    fontSize: 11,
     fontWeight: '800',
   },
 
-  successSubtitle: {
-    color: '#747878',
+  cardMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+
+  cardChannelText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+  },
+
+  cardDateText: {
     fontSize: 11,
-    marginTop: 3,
-    lineHeight: 15,
+    color: '#64748b',
+    fontWeight: '500',
+  },
+
+  cardItemsBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 10,
+    gap: 4,
+  },
+
+  cardItemLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+
+  cardItemBullet: {
+    color: '#D33401',
+    fontWeight: '900',
+  },
+
+  cardItemQtyText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1B1C1C',
+  },
+
+  cardItemNameText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    flex: 1,
+  },
+
+  cardItemUnitText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+
+  cardMoreItemsText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#D33401',
+    marginTop: 2,
+  },
+
+  orderCardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+
+  cardFooterLeft: {
+    gap: 1,
+  },
+
+  cardTotalLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748b',
+    textTransform: 'uppercase',
+  },
+
+  cardTotalValue: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#1B1C1C',
+  },
+
+  cardActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF1EC',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+
+  cardActionBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#D33401',
+  },
+
+  /* Detail & Receipt View Styles */
+  scrollBody: {
+    flex: 1,
+  },
+
+  scrollContent: {
+    padding: 14,
+    gap: 12,
+  },
+
+  detailNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  backNavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+
+  backNavBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#D33401',
+  },
+
+  refreshIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  statusHeroCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1.5,
+    gap: 6,
+  },
+
+  statusHeroTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  statusHeroLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  tokenPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD6C9',
+  },
+
+  tokenPillText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#D33401',
+  },
+
+  orderIdHeroText: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#1B1C1C',
+  },
+
+  statusBadgePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+
+  statusBadgePillText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+
+  channelHeroText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+  },
+
+  heroTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  heroTimeText: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '500',
   },
 
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
     padding: 14,
-  },
-
-  cardTitle: {
-    color: '#1B1C1C',
-    fontSize: 14,
-    fontWeight: '800',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 10,
   },
 
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    gap: 6,
   },
 
-  sectionIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: '#EFEDED',
+  cardTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1B1C1C',
+    letterSpacing: -0.2,
+  },
+
+  /* Stepper */
+  stepperContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+
+  stepperStep: {
+    alignItems: 'center',
+    flex: 1,
+    position: 'relative',
+  },
+
+  stepCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#F1F5F9',
     justifyContent: 'center',
-    marginRight: 8,
-    flexShrink: 0,
+    alignItems: 'center',
+    zIndex: 2,
   },
 
-  infoGrid: {
+  stepCircleDone: {
+    backgroundColor: '#15803d',
+  },
+
+  stepCircleCurrent: {
+    backgroundColor: '#D33401',
+    shadowColor: '#D33401',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+  },
+
+  stepNumText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#94a3b8',
+  },
+
+  stepLabelText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#94a3b8',
     marginTop: 4,
-    gap: 7,
+    textAlign: 'center',
   },
 
-  infoRow: {
+  stepLabelTextDone: {
+    color: '#15803d',
+    fontWeight: '700',
+  },
+
+  stepLabelTextCurrent: {
+    color: '#D33401',
+    fontWeight: '800',
+  },
+
+  stepConnector: {
+    position: 'absolute',
+    top: 13,
+    left: '50%',
+    right: '-50%',
+    height: 2,
+    backgroundColor: '#E2E8F0',
+    zIndex: 1,
+  },
+
+  stepConnectorDone: {
+    backgroundColor: '#15803d',
+  },
+
+  statusMessageCallout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 12,
+    padding: 10,
+  },
+
+  statusMessageTextWrap: {
+    flex: 1,
+  },
+
+  statusMessageTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#92400E',
+  },
+
+  statusMessageSub: {
+    fontSize: 11,
+    color: '#B45309',
+    marginTop: 1,
+  },
+
+  /* Info Table */
+  infoTable: {
+    gap: 6,
+  },
+
+  infoTableRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
 
-  infoLabel: {
-    color: '#747878',
+  infoTableLabel: {
     fontSize: 12,
+    color: '#64748b',
     fontWeight: '500',
   },
 
-  infoValue: {
-    color: '#1B1C1C',
+  infoTableValue: {
     fontSize: 12,
     fontWeight: '700',
+    color: '#1B1C1C',
   },
 
-  remarksBox: {
+  remarksBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#EFEDED',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-    borderRadius: 8,
+    backgroundColor: '#FEF3C7',
     padding: 8,
+    borderRadius: 8,
     marginTop: 4,
   },
 
-  remarksText: {
-    color: '#1B1C1C',
+  remarksBannerText: {
     fontSize: 11,
     fontWeight: '600',
-    flex: 1,
+    color: '#92400E',
   },
 
-  itemRow: {
+  /* Receipt Table */
+  receiptTableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+
+  receiptHeaderCol: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748b',
+    textTransform: 'uppercase',
+  },
+
+  receiptItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
-    gap: 8,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
 
-  itemQtyBox: {
-    width: 32,
-    flexShrink: 0,
-  },
-
-  itemQty: {
-    color: '#1B1C1C',
-    fontWeight: '900',
-    fontSize: 12,
-  },
-
-  itemInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  itemName: {
-    color: '#1B1C1C',
+  receiptItemName: {
     fontSize: 13,
     fontWeight: '700',
-  },
-
-  unitPrice: {
-    color: '#747878',
-    fontSize: 10,
-    marginTop: 2,
-  },
-
-  itemInstruction: {
-    color: '#D33401',
-    fontSize: 10,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-
-  itemPrice: {
     color: '#1B1C1C',
+  },
+
+  receiptItemNote: {
+    fontSize: 10,
+    color: '#d97706',
+    fontStyle: 'italic',
+    marginTop: 1,
+  },
+
+  qtyUnitBadge: {
+    alignItems: 'center',
+    backgroundColor: '#FFF1EC',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    maxWidth: 90,
+  },
+
+  qtyUnitBadgeNumber: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#D33401',
+  },
+
+  qtyUnitBadgeName: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#D33401',
+    textTransform: 'capitalize',
+  },
+
+  receiptUnitPriceText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+
+  receiptLineTotalText: {
     fontSize: 13,
     fontWeight: '800',
-    flexShrink: 0,
+    color: '#1B1C1C',
   },
 
-  emptyItems: {
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-
-  emptyText: {
-    color: '#747878',
-    fontSize: 12,
-  },
-
-  divider: {
+  receiptDivider: {
     height: 1,
-    backgroundColor: '#E0DDD8',
+    backgroundColor: '#E2E8F0',
+    marginVertical: 4,
+  },
+
+  receiptDividerBold: {
+    height: 1.5,
+    backgroundColor: '#CBD5E1',
     marginVertical: 6,
+  },
+
+  billBreakdown: {
+    gap: 4,
+    paddingHorizontal: 4,
   },
 
   billRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 3,
+    alignItems: 'center',
   },
 
   billLabel: {
-    color: '#747878',
     fontSize: 12,
+    color: '#64748b',
+    fontWeight: '500',
   },
 
   billValue: {
-    color: '#1B1C1C',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
+    color: '#1B1C1C',
   },
 
-  totalRow: {
+  grandTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 3,
+    paddingTop: 2,
   },
 
-  totalLabel: {
-    color: '#1B1C1C',
+  grandTotalLabel: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '900',
+    color: '#1B1C1C',
   },
 
-  totalValue: {
-    color: '#1B1C1C',
+  grandTotalTaxesNote: {
+    fontSize: 10,
+    color: '#64748b',
+    fontWeight: '500',
+  },
+
+  grandTotalValue: {
     fontSize: 18,
     fontWeight: '900',
+    color: '#D33401',
   },
 
+  /* Payment Card */
   paymentCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E0DDD8',
-    borderRadius: 14,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
     padding: 12,
+    gap: 10,
   },
 
-  paymentIcon: {
-    width: 34,
-    height: 34,
+  paymentCardIconWrap: {
+    width: 36,
+    height: 36,
     borderRadius: 10,
-    backgroundColor: '#EFEDED',
-    alignItems: 'center',
+    backgroundColor: '#FFF1EC',
     justifyContent: 'center',
-    marginRight: 10,
-    flexShrink: 0,
-  },
-
-  paymentTextBox: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  paymentHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 6,
-    flexWrap: 'wrap',
   },
 
-  paymentTitle: {
-    color: '#1B1C1C',
+  paymentCardContent: {
+    flex: 1,
+    gap: 2,
+  },
+
+  paymentCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+
+  paymentCardTitle: {
     fontSize: 13,
     fontWeight: '800',
+    color: '#1B1C1C',
   },
 
-  paymentBadge: {
-    paddingHorizontal: 7,
+  paymentPill: {
+    paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
-    borderWidth: 1,
   },
 
-  paymentBadgePaid: {
-    backgroundColor: '#E7F5E9',
-    borderColor: '#B3E2B8',
+  paymentPillPaid: {
+    backgroundColor: '#DCFCE7',
   },
 
-  paymentBadgePending: {
-    backgroundColor: '#FDF1E7',
-    borderColor: '#FAD8BA',
+  paymentPillPending: {
+    backgroundColor: '#FEF3C7',
   },
 
-  paymentBadgeText: {
-    fontSize: 9,
+  paymentPillText: {
+    fontSize: 10,
     fontWeight: '800',
   },
 
-  paymentDetailsSub: {
-    color: '#747878',
+  paymentPillTextPaid: {
+    color: '#15803d',
+  },
+
+  paymentPillTextPending: {
+    color: '#b45309',
+  },
+
+  paymentCardSubText: {
     fontSize: 11,
-    marginTop: 3,
+    color: '#64748b',
   },
 
-  paymentTxnId: {
-    color: '#747878',
+  paymentTxnText: {
     fontSize: 10,
-    marginTop: 2,
+    color: '#94a3b8',
+    fontFamily: 'monospace',
   },
 
+  /* Footer */
   footer: {
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#E0DDD8',
-    backgroundColor: '#FBF9F9',
+    borderTopColor: '#E2E8F0',
   },
 
-  doneBtn: {
-    backgroundColor: '#D33401',
-    paddingVertical: 13,
-    borderRadius: 16,
+  detailFooterRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#D33401',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    minHeight: 48,
+    gap: 10,
+  },
+
+  switchToListBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 11,
+    borderRadius: 12,
+  },
+
+  switchToListBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1B1C1C',
+  },
+
+  closeDoneBtn: {
+    backgroundColor: '#D33401',
+    paddingHorizontal: 24,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: 'center',
     justifyContent: 'center',
   },
 
-  doneBtnText: {
-    color: '#ffffff',
+  closeDoneBtnFull: {
+    backgroundColor: '#D33401',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  closeDoneBtnText: {
     fontSize: 13,
     fontWeight: '800',
+    color: '#ffffff',
+  },
+
+  backToListBtn: {
+    backgroundColor: '#D33401',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+
+  backToListBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

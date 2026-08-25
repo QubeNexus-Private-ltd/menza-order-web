@@ -1,4 +1,23 @@
 import axios from 'axios';
+import {
+  consumeRateLimit,
+  checkRateLimit,
+  getCooldownSeconds,
+  resetRateLimit,
+  broadcastRateLimitExceeded,
+  onRateLimitExceeded,
+  RATE_LIMIT_RULES,
+} from './rateLimiter';
+
+export {
+  consumeRateLimit,
+  checkRateLimit,
+  getCooldownSeconds,
+  resetRateLimit,
+  broadcastRateLimitExceeded,
+  onRateLimitExceeded,
+  RATE_LIMIT_RULES,
+};
 
 /* =========================================================
    API CONFIG
@@ -21,7 +40,7 @@ const api = axios.create({
 });
 
 /* =========================================================
-   AXIOS INTERCEPTOR
+   AXIOS INTERCEPTORS (AUTH & RATE LIMITING)
 ========================================================= */
 
 api.interceptors.request.use(
@@ -34,6 +53,36 @@ api.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 429) {
+      const retryAfter =
+        Number(error.response.headers['retry-after']) ||
+        error.response.data?.retryAfterSeconds ||
+        30;
+      const message =
+        error.response.data?.message ||
+        `Rate limit exceeded. Please wait ${retryAfter}s before retrying.`;
+
+      broadcastRateLimitExceeded({
+        status: 429,
+        retryAfterSeconds: retryAfter,
+        message,
+        url: error.config?.url,
+      });
+
+      const rateLimitError = new Error(message);
+      rateLimitError.name = 'RateLimitError';
+      rateLimitError.status = 429;
+      rateLimitError.retryAfterSeconds = retryAfter;
+      rateLimitError.isRateLimited = true;
+      return Promise.reject(rateLimitError);
+    }
+    return Promise.reject(error);
+  }
 );
 
 /* =========================================================
@@ -161,17 +210,20 @@ export const decryptRestaurantId = (encryptedId) => {
 };
 
 /* =========================================================
-   AUTH
+   AUTH (STAFF)
 ========================================================= */
 
 export const generateOtp = async (
   mobile,
   deviceId
 ) => {
+  const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+  consumeRateLimit('OTP_GENERATE', cleanMobile || getDeviceId());
+
   const res = await api.post(
     '/api/Auth/GenerateOtp',
     {
-      mobile,
+      mobile: cleanMobile,
       deviceId: deviceId || getDeviceId(),
     }
   );
@@ -183,10 +235,13 @@ export const loginWithOtp = async (
   mobile,
   otpCode
 ) => {
+  const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+  consumeRateLimit('OTP_VERIFY', cleanMobile || getDeviceId());
+
   const res = await api.post(
     '/api/Auth/Login',
     {
-      mobile,
+      mobile: cleanMobile,
       otpCode,
       deviceId: getDeviceId(),
     }
@@ -212,12 +267,16 @@ export const generateCustomerOtp = async (
   restaurantId = null,
   encryptedRestaurantId = null
 ) => {
+  const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
   const deviceId = getDeviceId();
+
+  consumeRateLimit('OTP_GENERATE', cleanMobile || deviceId);
+
   try {
     const res = await api.post(
       '/api/public/store/auth/generate-otp',
       {
-        mobile,
+        mobile: cleanMobile,
         deviceId,
         restaurantId,
         encryptedRestaurantId,
@@ -225,11 +284,12 @@ export const generateCustomerOtp = async (
     );
     return res.data;
   } catch (err) {
+    if (err.isRateLimited) throw err;
     // Fallback to /api/Auth/GenerateOtp
     const res = await api.post(
       '/api/Auth/GenerateOtp',
       {
-        mobile,
+        mobile: cleanMobile,
         deviceId,
       }
     );
@@ -244,12 +304,16 @@ export const verifyCustomerOtpAndLogin = async (
   restaurantId = null,
   encryptedRestaurantId = null
 ) => {
+  const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
   const deviceId = getDeviceId();
+
+  consumeRateLimit('OTP_VERIFY', cleanMobile || deviceId);
+
   try {
     const res = await api.post(
       '/api/public/store/auth/verify-otp',
       {
-        mobile,
+        mobile: cleanMobile,
         otpCode,
         name,
         deviceId,
@@ -270,11 +334,12 @@ export const verifyCustomerOtpAndLogin = async (
 
     return res.data;
   } catch (err) {
+    if (err.isRateLimited) throw err;
     // Fallback to /api/Auth/Login
     const res = await api.post(
       '/api/Auth/Login',
       {
-        mobile,
+        mobile: cleanMobile,
         otpCode,
         name,
         deviceId,
@@ -1802,7 +1867,7 @@ const saveLocalOrders = (
    VERY IMPORTANT FOR TRACKER
 ========================================================= */
 
-const normalizeOrder = (
+export const normalizeOrder = (
   order
 ) => {
   if (!order) {
@@ -1994,6 +2059,12 @@ const normalizeOrder = (
 
 export const placeOrder =
   async (orderPayload) => {
+    const rateLimitIdentifier =
+      orderPayload?.tableId ||
+      orderPayload?.mobileNumber ||
+      getDeviceId();
+    consumeRateLimit('PLACE_ORDER', rateLimitIdentifier);
+
     const orders =
       getLocalOrders();
 
@@ -2423,6 +2494,49 @@ export const getAllOrders =
       normalizeOrder
     );
   };
+
+/* =========================================================
+   GET RESTAURANT ORDERS (Active & Past)
+========================================================= */
+
+export const getRestaurantOrders = async (restaurantId = null, phone = '') => {
+  const deviceId = getDeviceId();
+  let serverOrders = [];
+
+  try {
+    if (phone) {
+      const res = await api.get(
+        `/api/public/store/order/customer-orders?phone=${encodeURIComponent(phone)}`
+      );
+      if (Array.isArray(res?.data)) {
+        serverOrders = res.data;
+      }
+    }
+  } catch (e) {}
+
+  if (!serverOrders.length && restaurantId) {
+    try {
+      const res = await api.get(`/api/Order/Restaurant/${restaurantId}/active`);
+      if (Array.isArray(res?.data)) {
+        serverOrders = res.data;
+      }
+    } catch (e) {}
+  }
+
+  const localOrders = getLocalOrders();
+  const all = [...serverOrders, ...localOrders];
+  const uniqueMap = new Map();
+  for (const o of all) {
+    const id = Number(o.orderId || o.id);
+    if (id && !uniqueMap.has(id)) {
+      uniqueMap.set(id, normalizeOrder(o));
+    }
+  }
+
+  return Array.from(uniqueMap.values()).sort(
+    (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+  );
+};
 
 /* =========================================================
    KITCHEN ORDERS
@@ -3507,18 +3621,24 @@ export const updateTableStatus =
   };
 
 export const callWaiter =
-  async (tableId) => ({
-    success: true,
-    message:
-      `Waiter has been notified for Table #${tableId}.`,
-  });
+  async (tableId) => {
+    consumeRateLimit('CALL_WAITER', String(tableId || 'default'));
+    return {
+      success: true,
+      message:
+        `Waiter has been notified for Table #${tableId}.`,
+    };
+  };
 
 export const requestBill =
-  async (tableId) => ({
-    success: true,
-    message:
-      `Bill request received for Table #${tableId}.`,
-  });
+  async (tableId) => {
+    consumeRateLimit('REQUEST_BILL', String(tableId || 'default'));
+    return {
+      success: true,
+      message:
+        `Bill request received for Table #${tableId}.`,
+    };
+  };
 
 export const settleTable =
   async (tableId) => {

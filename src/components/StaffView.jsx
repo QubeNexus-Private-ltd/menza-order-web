@@ -65,6 +65,17 @@ export default function StaffView({
   const [otpSent, setOtpSent] = useState(false);
   const [devOtpHint, setDevOtpHint] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [otpCountdown, setOtpCountdown] = useState(0);
+
+  // OTP Countdown Timer
+  useEffect(() => {
+    if (otpCountdown <= 0) return;
+    const timer = setInterval(() => {
+      setOtpCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [otpCountdown]);
 
   // Dashboard Tabs
   const [activeTab, setActiveTab] = useState('tables'); // 'tables', 'orders', 'kds', 'qr'
@@ -86,13 +97,25 @@ export default function StaffView({
   // Handle OTP request
   const handleRequestOtp = async () => {
     if (!mobile.trim()) return;
+    if (otpCountdown > 0) return;
     setLoginLoading(true);
+    setLoginError('');
     try {
       const res = await onGenerateOtp(mobile);
       setOtpSent(true);
+      setOtpCountdown(30);
       if (res && res.otpCode) {
         setDevOtpHint(res.otpCode);
         setOtpCode(res.otpCode); // Pre-fill in dev mode for smooth experience!
+      }
+    } catch (err) {
+      if (err?.isRateLimited) {
+        if (err.retryAfterSeconds) {
+          setOtpCountdown(err.retryAfterSeconds);
+        }
+        setLoginError(err.message);
+      } else {
+        setLoginError(err?.response?.data?.message || err?.message || 'Failed to send OTP. Please try again.');
       }
     } finally {
       setLoginLoading(false);
@@ -103,8 +126,15 @@ export default function StaffView({
   const handleLoginSubmit = async () => {
     if (!mobile.trim() || !otpCode.trim()) return;
     setLoginLoading(true);
+    setLoginError('');
     try {
       await onLogin(mobile, otpCode);
+    } catch (err) {
+      if (err?.isRateLimited) {
+        setLoginError(err.message);
+      } else {
+        setLoginError(err?.response?.data?.message || err?.message || 'Login failed. Please check OTP.');
+      }
     } finally {
       setLoginLoading(false);
     }
