@@ -23,6 +23,8 @@ export {
    API CONFIG
 ========================================================= */
 
+export const getBaseUrl = () => API_BASE_URL;
+
 let API_BASE_URL =
   'https://restadmin20260810182511-b7gaaqbfesdxa3cu.centralindia-01.azurewebsites.net';
 

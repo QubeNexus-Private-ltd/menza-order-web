@@ -29,6 +29,7 @@ import {
   Flame,
 } from 'lucide-react';
 import * as api from '../services/api';
+import * as signalrService from '../services/signalr';
 
 const STATUSES = [
   'Pending',
@@ -121,6 +122,9 @@ export default function OrderTrackerModal({
 
     let cancelled = false;
 
+    // Join SignalR order group for instant push updates
+    signalrService.joinOrderGroup(selectedOrder.id);
+
     const refresh = async () => {
       try {
         let latest = null;
@@ -144,11 +148,22 @@ export default function OrderTrackerModal({
 
     refresh();
 
-    const interval = setInterval(refresh, 3000);
+    // Real-Time SignalR Listener: Instantly refresh on status change push from backend
+    const unsubscribeSignalR = signalrService.onOrderStatusChanged((data) => {
+      const changedOrderId = Number(data?.orderId || data?.id || 0);
+      if (changedOrderId === Number(selectedOrder.id) || !changedOrderId) {
+        console.log('⚡ [SignalR] Real-time order update for order #', selectedOrder.id);
+        refresh();
+      }
+    });
+
+    // Fallback polling interval (every 5 seconds) in case of network drops
+    const interval = setInterval(refresh, 5000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      unsubscribeSignalR();
     };
   }, [
     visible,

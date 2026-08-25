@@ -19,6 +19,7 @@ import QrScannerModal from './components/QrScannerModal';
 import RestaurantQrModal from './components/RestaurantQrModal';
 
 import * as api from './services/api';
+import * as signalrService from './services/signalr';
 
 export default function App() {
   const [mode, setMode] =
@@ -114,14 +115,12 @@ export default function App() {
   };
 
   /* =========================
-     RATE LIMIT EVENT LISTENER
+     SIGNALR REAL-TIME SYNC
   ========================= */
   useEffect(() => {
-    const unsubscribe = api.onRateLimitExceeded((event) => {
-      showToast(`⏳ ${event.message}`);
-    });
-    return unsubscribe;
-  }, []);
+    const restId = catalog?.restaurantId || selectedRestaurant?.id || 1;
+    signalrService.startSignalRConnection(restId);
+  }, [catalog?.restaurantId, selectedRestaurant?.id]);
 
   /* =========================
      CART
