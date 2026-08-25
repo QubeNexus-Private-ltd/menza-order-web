@@ -233,36 +233,57 @@ export default function StaffView({
               </View>
             )}
 
+            {loginError ? (
+              <View style={styles.loginErrorBox}>
+                <AlertTriangle size={15} color="#ef4444" />
+                <Text style={styles.loginErrorText}>{loginError}</Text>
+              </View>
+            ) : null}
+
             {!otpSent ? (
               <TouchableOpacity
-                style={styles.primaryLoginBtn}
+                style={[styles.primaryLoginBtn, otpCountdown > 0 && styles.primaryLoginBtnDisabled]}
                 onPress={handleRequestOtp}
-                disabled={loginLoading}
+                disabled={loginLoading || otpCountdown > 0}
               >
                 {loginLoading ? (
                   <ActivityIndicator size="small" color="#0f172a" />
                 ) : (
                   <>
-                    <Text style={styles.primaryLoginBtnText}>SEND OTP</Text>
+                    <Text style={styles.primaryLoginBtnText}>
+                      {otpCountdown > 0 ? `RESEND IN ${otpCountdown}s` : 'SEND OTP'}
+                    </Text>
                     <ArrowRight size={18} color="#0f172a" />
                   </>
                 )}
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity
-                style={styles.primaryLoginBtn}
-                onPress={handleLoginSubmit}
-                disabled={loginLoading}
-              >
-                {loginLoading ? (
-                  <ActivityIndicator size="small" color="#0f172a" />
-                ) : (
-                  <>
-                    <Text style={styles.primaryLoginBtnText}>VERIFY & LOGIN</Text>
-                    <CheckCircle size={18} color="#0f172a" />
-                  </>
-                )}
-              </TouchableOpacity>
+              <View style={{ gap: 10 }}>
+                <TouchableOpacity
+                  style={styles.primaryLoginBtn}
+                  onPress={handleLoginSubmit}
+                  disabled={loginLoading}
+                >
+                  {loginLoading ? (
+                    <ActivityIndicator size="small" color="#0f172a" />
+                  ) : (
+                    <>
+                      <Text style={styles.primaryLoginBtnText}>VERIFY & LOGIN</Text>
+                      <CheckCircle size={18} color="#0f172a" />
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.resendOtpBtn}
+                  onPress={handleRequestOtp}
+                  disabled={loginLoading || otpCountdown > 0}
+                >
+                  <Text style={[styles.resendOtpBtnText, otpCountdown > 0 && styles.resendOtpBtnTextDisabled]}>
+                    {otpCountdown > 0 ? `Resend OTP in ${otpCountdown}s` : 'Resend OTP Code'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         </View>
@@ -1007,6 +1028,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
   },
+  loginErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  loginErrorText: {
+    color: '#ef4444',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
+  },
   primaryLoginBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1015,12 +1053,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#10b981',
     height: 48,
     borderRadius: 12,
-    marginTop: 8,
+    marginTop: 4,
+  },
+  primaryLoginBtnDisabled: {
+    backgroundColor: '#334155',
+    opacity: 0.8,
   },
   primaryLoginBtnText: {
     color: '#0f172a',
     fontWeight: '800',
     fontSize: 14,
+  },
+  resendOtpBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+  },
+  resendOtpBtnText: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  resendOtpBtnTextDisabled: {
+    color: '#64748b',
   },
   subHeader: {
     backgroundColor: '#0f172a',
