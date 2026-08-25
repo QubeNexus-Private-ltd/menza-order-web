@@ -16,6 +16,7 @@ import StaffView from './components/StaffView';
 import CartModal from './components/CartModal';
 import OrderTrackerModal from './components/OrderTrackerModal';
 import QrScannerModal from './components/QrScannerModal';
+import RestaurantQrModal from './components/RestaurantQrModal';
 
 import * as api from './services/api';
 
@@ -90,6 +91,11 @@ export default function App() {
   const [
     scannerOpen,
     setScannerOpen,
+  ] = useState(false);
+
+  const [
+    qrModalOpen,
+    setQrModalOpen,
   ] = useState(false);
 
   const [loading, setLoading] =
@@ -1148,6 +1154,9 @@ export default function App() {
         openScanner={() =>
           setScannerOpen(true)
         }
+        openQrModal={() =>
+          setQrModalOpen(true)
+        }
         cartCount={cartItems.reduce(
           (acc, item) =>
             acc +
@@ -1197,6 +1206,9 @@ export default function App() {
           activeTable={activeTable}
           openScanner={() =>
             setScannerOpen(true)
+          }
+          openQrModal={() =>
+            setQrModalOpen(true)
           }
           cartItems={cartItems}
           openCart={() =>
@@ -1266,7 +1278,9 @@ export default function App() {
           onRefreshData={
             handleRefreshData
           }
-          onOpenQrGenerator={() => {}}
+          onOpenQrGenerator={() =>
+            setQrModalOpen(true)
+          }
         />
       )}
 
@@ -1324,6 +1338,21 @@ export default function App() {
             : 1
         }
       />
+
+      <RestaurantQrModal
+        visible={qrModalOpen}
+        onClose={() =>
+          setQrModalOpen(false)
+        }
+        catalog={catalog}
+        restaurantName={
+          catalog
+            ? catalog.restaurantName
+            : 'Menza Fine Dining'
+        }
+        activeTable={activeTable}
+        tables={tables}
+      />
     </View>
   );
 }
@@ -1337,22 +1366,25 @@ const styles = StyleSheet.create({
 
   toastBanner: {
     position: 'absolute',
-    top: 70,
+    top: 65,
     alignSelf: 'center',
+    maxWidth: '90%',
     zIndex: 9999,
     backgroundColor: '#78350f',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
     borderRadius: 24,
     shadowColor: '#78350f',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+    elevation: 8,
   },
 
   toastText: {
     color: '#ffffff',
     fontWeight: '800',
     fontSize: 13,
+    textAlign: 'center',
   },
 });

@@ -315,14 +315,14 @@ export const getDefaultItemImage = () => {
 };
 
 const AZURE_BLOB_BASE =
-  'https://sarestaurantdev.blob.core.windows.net/screstdev/';
+  'https://screstdev.blob.core.windows.net/sarest/';
 
 export const getOriginalImageUrl = (url) => {
   if (!url || typeof url !== 'string') {
     return '';
   }
 
-  const trimmed = url.trim();
+  const trimmed = url.trim().replace(/^["']|["']$/g, '');
 
   if (
     !trimmed ||
@@ -332,18 +332,33 @@ export const getOriginalImageUrl = (url) => {
     return '';
   }
 
+  // If already an absolute URL
   if (
     trimmed.startsWith('http://') ||
     trimmed.startsWith('https://') ||
     trimmed.startsWith('data:')
   ) {
+    // Correct legacy misspelled domain if present
+    if (trimmed.includes('sarestaurantdev.blob.core.windows.net')) {
+      return trimmed
+        .replace('sarestaurantdev.blob.core.windows.net/screstdev/', 'screstdev.blob.core.windows.net/sarest/')
+        .replace('sarestaurantdev.blob.core.windows.net/', 'screstdev.blob.core.windows.net/sarest/');
+    }
+
+    // Correct swapped storage account/container if present
+    if (trimmed.includes('screstdev.blob.core.windows.net/screstdev/')) {
+      return trimmed.replace('screstdev.blob.core.windows.net/screstdev/', 'screstdev.blob.core.windows.net/sarest/');
+    }
+
     return trimmed;
   }
 
-  const cleanPath = trimmed.replace(/^\/+/, '');
+  let cleanPath = trimmed.replace(/^\/+/, '');
 
-  if (cleanPath.startsWith('screstdev/')) {
-    return `https://sarestaurantdev.blob.core.windows.net/${cleanPath}`;
+  if (cleanPath.startsWith('sarest/')) {
+    cleanPath = cleanPath.substring('sarest/'.length);
+  } else if (cleanPath.startsWith('screstdev/')) {
+    cleanPath = cleanPath.substring('screstdev/'.length);
   }
 
   return `${AZURE_BLOB_BASE}${cleanPath}`;

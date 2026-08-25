@@ -233,8 +233,8 @@ export default function OrderTrackerModal({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
-        <View style={styles.sheetContainer}>
+      <View style={styles.overlay} className="responsive-modal-overlay">
+        <View style={styles.sheetContainer} className="responsive-modal-sheet">
 
           {/* HEADER */}
           <View style={styles.header}>
@@ -743,312 +743,45 @@ const styles = StyleSheet.create({
 
   sheetContainer: {
     width: '100%',
-    maxWidth: 640,
+    maxWidth: 620,
     alignSelf: 'center',
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '92%',
-    minHeight: '65%',
+    minHeight: '60%',
     borderWidth: 1,
     borderColor: '#E0DDD8',
+    overflow: 'hidden',
   },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#E0DDD8',
     backgroundColor: '#FBF9F9',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
   },
 
   headerLeft: {
     flex: 1,
-  },
-
-  orderIdText: {
-    color: '#1B1C1C',
-    fontSize: 17,
-    fontWeight: '900',
-  },
-
-  tableNameText: {
-    marginTop: 4,
-    color: '#747878',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
-  closeBtn: {
-    padding: 5,
-  },
-
-  scrollBody: {
-    flex: 1,
-    backgroundColor: '#FBF9F9',
-  },
-
-  scrollContent: {
-    padding: 18,
-    gap: 14,
-  },
-
-  successCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EFEDED',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-    borderRadius: 16,
-    padding: 15,
-  },
-
-  successIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#1B1C1C',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 13,
-  },
-
-  successTextBox: {
-    flex: 1,
-  },
-
-  successTitle: {
-    color: '#1B1C1C',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-
-  successSubtitle: {
-    color: '#747878',
-    fontSize: 11,
-    marginTop: 4,
-    lineHeight: 16,
-  },
-
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-    padding: 16,
-  },
-
-  cardTitle: {
-    color: '#1B1C1C',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-
-  sectionIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: '#EFEDED',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 9,
-  },
-
-  timeline: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginTop: 20,
-    marginBottom: 18,
-  },
-
-  timelineStep: {
-    flex: 1,
-    alignItems: 'center',
-    position: 'relative',
-  },
-
-  dot: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#EFEDED',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 2,
-  },
-
-  dotDone: {
-    backgroundColor: '#1B1C1C',
-  },
-
-  dotCurrent: {
-    borderWidth: 3,
-    borderColor: '#D33401',
-  },
-
-  stepNum: {
-    color: '#747878',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-
-  stepLabel: {
-    color: '#747878',
-    fontSize: 9,
-    fontWeight: '700',
-    marginTop: 7,
-    textAlign: 'center',
-  },
-
-  stepLabelDone: {
-    color: '#1B1C1C',
-  },
-
-  line: {
-    position: 'absolute',
-    top: 12,
-    left: '50%',
-    width: '100%',
-    height: 2,
-    backgroundColor: '#EFEDED',
-    zIndex: 1,
-  },
-
-  lineDone: {
-    backgroundColor: '#1B1C1C',
-  },
-
-  statusCallout: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EFEDED',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-    borderRadius: 12,
-    padding: 12,
-  },
-
-  calloutTextBox: {
-    flex: 1,
-    marginLeft: 10,
-  },
-
-  calloutTitle: {
-    color: '#D33401',
-    fontWeight: '800',
-    fontSize: 12,
-  },
-
-  calloutSub: {
-    color: '#747878',
-    fontSize: 10,
-    marginTop: 3,
-  },
-
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-
-  itemQtyBox: {
-    width: 42,
-  },
-
-  itemQty: {
-    color: '#1B1C1C',
-    fontWeight: '900',
-    fontSize: 13,
-  },
-
-  itemInfo: {
-    flex: 1,
-  },
-
-  itemName: {
-    color: '#1B1C1C',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-
-  unitPrice: {
-    color: '#747878',
-    fontSize: 10,
-    marginTop: 3,
-  },
-
-  itemPrice: {
-    color: '#1B1C1C',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-
-  emptyItems: {
-    paddingVertical: 20,
-    alignItems: 'center',
-  },
-
-  emptyText: {
-    color: '#747878',
-    fontSize: 12,
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: '#E0DDD8',
-    marginVertical: 8,
-  },
-
-  billRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-
-  billLabel: {
-    color: '#747878',
-    fontSize: 12,
-  },
-
-  billValue: {
-    color: '#1B1C1C',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 4,
-  },
-
-  totalLabel: {
-    color: '#1B1C1C',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-
-  totalValue: {
-    color: '#1B1C1C',
-    fontSize: 20,
-    fontWeight: '900',
+    minWidth: 0,
   },
 
   headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+
+  orderIdText: {
+    color: '#1B1C1C',
+    fontSize: 16,
+    fontWeight: '900',
   },
 
   tokenBadge: {
@@ -1058,7 +791,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#EFEDED',
     borderWidth: 1,
     borderColor: '#E0DDD8',
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
   },
@@ -1067,12 +800,104 @@ const styles = StyleSheet.create({
     color: '#1B1C1C',
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
+  },
+
+  tableNameText: {
+    marginTop: 2,
+    color: '#747878',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  closeBtn: {
+    padding: 6,
+    borderRadius: 8,
+  },
+
+  scrollBody: {
+    flex: 1,
+    backgroundColor: '#FBF9F9',
+  },
+
+  scrollContent: {
+    padding: 16,
+    gap: 12,
+  },
+
+  successCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFEDED',
+    borderWidth: 1,
+    borderColor: '#E0DDD8',
+    borderRadius: 16,
+    padding: 13,
+  },
+
+  successIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#1B1C1C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 11,
+    flexShrink: 0,
+  },
+
+  successTextBox: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  successTitle: {
+    color: '#1B1C1C',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  successSubtitle: {
+    color: '#747878',
+    fontSize: 11,
+    marginTop: 3,
+    lineHeight: 15,
+  },
+
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E0DDD8',
+    padding: 14,
+  },
+
+  cardTitle: {
+    color: '#1B1C1C',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  sectionIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#EFEDED',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    flexShrink: 0,
   },
 
   infoGrid: {
-    marginTop: 6,
-    gap: 8,
+    marginTop: 4,
+    gap: 7,
   },
 
   infoRow: {
@@ -1112,11 +937,105 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 8,
+  },
+
+  itemQtyBox: {
+    width: 32,
+    flexShrink: 0,
+  },
+
+  itemQty: {
+    color: '#1B1C1C',
+    fontWeight: '900',
+    fontSize: 12,
+  },
+
+  itemInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  itemName: {
+    color: '#1B1C1C',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  unitPrice: {
+    color: '#747878',
+    fontSize: 10,
+    marginTop: 2,
+  },
+
   itemInstruction: {
     color: '#D33401',
     fontSize: 10,
     fontStyle: 'italic',
     marginTop: 2,
+  },
+
+  itemPrice: {
+    color: '#1B1C1C',
+    fontSize: 13,
+    fontWeight: '800',
+    flexShrink: 0,
+  },
+
+  emptyItems: {
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+
+  emptyText: {
+    color: '#747878',
+    fontSize: 12,
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: '#E0DDD8',
+    marginVertical: 6,
+  },
+
+  billRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 3,
+  },
+
+  billLabel: {
+    color: '#747878',
+    fontSize: 12,
+  },
+
+  billValue: {
+    color: '#1B1C1C',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 3,
+  },
+
+  totalLabel: {
+    color: '#1B1C1C',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  totalValue: {
+    color: '#1B1C1C',
+    fontSize: 18,
+    fontWeight: '900',
   },
 
   paymentCard: {
@@ -1126,27 +1045,31 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0DDD8',
     borderRadius: 14,
-    padding: 14,
+    padding: 12,
   },
 
   paymentIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: '#EFEDED',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 11,
+    marginRight: 10,
+    flexShrink: 0,
   },
 
   paymentTextBox: {
     flex: 1,
+    minWidth: 0,
   },
 
   paymentHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
   },
 
   paymentTitle: {
@@ -1156,7 +1079,7 @@ const styles = StyleSheet.create({
   },
 
   paymentBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
     borderWidth: 1,
@@ -1173,14 +1096,14 @@ const styles = StyleSheet.create({
   },
 
   paymentBadgeText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '800',
   },
 
   paymentDetailsSub: {
     color: '#747878',
     fontSize: 11,
-    marginTop: 4,
+    marginTop: 3,
   },
 
   paymentTxnId: {
@@ -1190,7 +1113,8 @@ const styles = StyleSheet.create({
   },
 
   footer: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderTopWidth: 1,
     borderTopColor: '#E0DDD8',
     backgroundColor: '#FBF9F9',
@@ -1198,13 +1122,15 @@ const styles = StyleSheet.create({
 
   doneBtn: {
     backgroundColor: '#D33401',
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderRadius: 16,
     alignItems: 'center',
     shadowColor: '#D33401',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
+    minHeight: 48,
+    justifyContent: 'center',
   },
 
   doneBtnText: {

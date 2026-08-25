@@ -1,0 +1,132 @@
+/* =========================================================
+   MENZA ORDER - RESPONSIVE DESIGN SYSTEM
+   Supports Mobile (320px+), Tablets, Desktops, & 4K Screens
+========================================================= */
+
+:root {
+  --font-main: 'Hanken Grotesk', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --color-primary: #D33401;
+  --color-primary-dark: #b82d01;
+  --color-primary-light: #FFF1EC;
+  --color-bg: #FBF9F9;
+  --color-surface: #FFFFFF;
+  --color-text-main: #1B1C1C;
+  --color-text-muted: #747878;
+  --color-border: #E0DDD8;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Global Reset & Base */
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text-main);
+  font-family: var(--font-main);
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  width: 100%;
+}
+
+/* Category & Horizontal Scroll enhancements */
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+/* Touch targets and smooth scrolling */
+@media (pointer: coarse) {
+  button, a, [role="button"], input, select, textarea {
+    touch-action: manipulation;
+  }
+}
+
+/* Modal Desktop Centering Utility */
+@media (min-width: 768px) {
+  .responsive-modal-overlay {
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 24px !important;
+  }
+  
+  .responsive-modal-sheet {
+    border-radius: 24px !important;
+    max-height: 86vh !important;
+    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.25), 0 0 1px 1px rgba(0, 0, 0, 0.05) !important;
+  }
+}
+
+/* Mobile Adjustments */
+@media (max-width: 767px) {
+  .responsive-modal-overlay {
+    justify-content: flex-end !important;
+  }
+  
+  .responsive-modal-sheet {
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    max-height: 92vh !important;
+  }
+}
+
+/* Floating Cart Animation */
+@keyframes floatUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-float-in {
+  animation: floatUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Responsive Image Utilities */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Print Styles for QR Code generation */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-qr-section, .print-qr-section * {
+    visibility: visible;
+  }
+  .print-qr-section {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

@@ -593,8 +593,8 @@ export default function CartModal({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
-        <View style={styles.sheetContainer}>
+      <View style={styles.overlay} className="responsive-modal-overlay">
+        <View style={styles.sheetContainer} className="responsive-modal-sheet">
           {processingPayment && (
             <View
               style={
@@ -1700,45 +1700,46 @@ export default function CartModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor:
-      'rgba(27, 28, 28, 0.65)',
+    backgroundColor: 'rgba(27, 28, 28, 0.65)',
     justifyContent: 'flex-end',
   },
 
   sheetContainer: {
     width: '100%',
-    maxWidth: 640,
+    maxWidth: 620,
     alignSelf: 'center',
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '92%',
-    minHeight: '60%',
+    minHeight: '55%',
     borderWidth: 1,
     borderColor: '#E0DDD8',
+    overflow: 'hidden',
   },
 
   sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#E0DDD8',
     backgroundColor: '#FBF9F9',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
   },
 
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
+    minWidth: 0,
   },
 
   headerTitle: {
     color: '#1B1C1C',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
   },
 
@@ -1746,11 +1747,12 @@ const styles = StyleSheet.create({
     color: '#D33401',
     fontSize: 12,
     fontWeight: '600',
-    marginTop: 2,
+    marginTop: 1,
   },
 
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
   },
 
   bodyScroll: {
@@ -1759,21 +1761,21 @@ const styles = StyleSheet.create({
   },
 
   bodyContent: {
-    padding: 20,
-    gap: 16,
+    padding: 16,
+    gap: 14,
   },
 
   emptyCartBox: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
+    paddingVertical: 50,
   },
 
   emptyCartTitle: {
     color: '#1B1C1C',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    marginTop: 14,
+    marginTop: 12,
   },
 
   emptyCartSub: {
@@ -1786,12 +1788,11 @@ const styles = StyleSheet.create({
   outOfStockBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor:
-      'rgba(211, 52, 1, 0.1)',
+    gap: 8,
+    backgroundColor: 'rgba(211, 52, 1, 0.1)',
     borderWidth: 1,
     borderColor: '#D33401',
-    padding: 12,
+    padding: 10,
     borderRadius: 12,
   },
 
@@ -1807,15 +1808,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E0DDD8',
-    padding: 16,
-    gap: 12,
+    padding: 14,
+    gap: 10,
   },
 
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
 
   sectionTitle: {
@@ -1831,10 +1832,10 @@ const styles = StyleSheet.create({
   },
 
   cartRowWrapper: {
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#EFEDED',
-    gap: 8,
+    gap: 6,
   },
 
   cartRowUnavailable: {
@@ -1844,48 +1845,53 @@ const styles = StyleSheet.create({
   cartRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
+    gap: 10,
   },
 
   itemThumb: {
-    width: 56,
-    height: 56,
+    width: 52,
+    height: 52,
     borderRadius: 8,
     backgroundColor: '#EFEDED',
+    flexShrink: 0,
   },
 
   noImageThumb: {
-    width: 56,
-    height: 56,
+    width: 52,
+    height: 52,
     borderRadius: 8,
     backgroundColor: '#EFEDED',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E0DDD8',
+    flexShrink: 0,
   },
 
   itemInfo: {
     flex: 1,
-    gap: 3,
+    minWidth: 0,
+    gap: 2,
   },
 
   itemNameRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 6,
+    flexWrap: 'wrap',
   },
 
   itemName: {
     color: '#1B1C1C',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     flex: 1,
+    minWidth: 100,
   },
 
   unavailBadge: {
     backgroundColor: '#dc2626',
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 4,
   },
@@ -1904,7 +1910,7 @@ const styles = StyleSheet.create({
   quantityBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 3,
+    marginTop: 2,
     marginBottom: 2,
   },
 
@@ -1912,21 +1918,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#EFEDED',
     borderWidth: 1,
     borderColor: '#E0DDD8',
-    paddingHorizontal: 7,
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
   },
 
   quantityBadgeText: {
     color: '#1B1C1C',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '500',
   },
 
   quantityBadgeBold: {
     color: '#1B1C1C',
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 11,
   },
 
   modifierRow: {
@@ -1954,91 +1960,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#EFEDED',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
     borderRadius: 6,
-    marginTop: 3,
+    marginTop: 2,
     alignSelf: 'flex-start',
     maxWidth: '100%',
   },
 
   instructionText: {
     color: '#1B1C1C',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '500',
     flexShrink: 1,
   },
 
-  addNoteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 2,
-    alignSelf: 'flex-start',
-  },
-
-  addNoteBtnText: {
-    color: '#747878',
-    fontSize: 11,
-  },
-
-  inlineNoteBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-  },
-
-  inlineNoteInput: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E0DDD8',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    height: 34,
-    color: '#1B1C1C',
-    fontSize: 11,
-  },
-
-  saveNoteBtn: {
-    backgroundColor: '#1B1C1C',
-    paddingHorizontal: 10,
-    height: 34,
-    justifyContent: 'center',
-    borderRadius: 6,
-  },
-
-  saveNoteBtnText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-
-  cancelNoteBtn: {
-    paddingHorizontal: 6,
-    height: 34,
-    justifyContent: 'center',
-  },
-
-  cancelNoteBtnText: {
-    color: '#747878',
-    fontSize: 11,
-  },
-
   actionsRight: {
     alignItems: 'flex-end',
-    gap: 7,
-    minWidth: 82,
+    gap: 6,
+    flexShrink: 0,
   },
 
   qtyBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     backgroundColor: '#EFEDED',
     borderRadius: 6,
-    padding: 3,
+    padding: 2,
     borderWidth: 1,
     borderColor: '#E0DDD8',
   },
@@ -2047,7 +1996,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#D33401',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2055,7 +2004,7 @@ const styles = StyleSheet.create({
   qtyText: {
     color: '#1B1C1C',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
     minWidth: 14,
     textAlign: 'center',
   },
@@ -2074,11 +2023,11 @@ const styles = StyleSheet.create({
   itemSubtotal: {
     color: '#1B1C1C',
     fontWeight: '800',
-    fontSize: 14,
+    fontSize: 13,
   },
 
   trashBtn: {
-    padding: 2,
+    padding: 4,
   },
 
   formSection: {
@@ -2086,8 +2035,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E0DDD8',
-    padding: 16,
-    gap: 12,
+    padding: 14,
+    gap: 10,
   },
 
   orderTypeContainer: {
@@ -2095,7 +2044,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     backgroundColor: '#EFEDED',
     borderRadius: 10,
-    padding: 4,
+    padding: 3,
     gap: 4,
     borderWidth: 1,
     borderColor: '#E0DDD8',
@@ -2104,8 +2053,8 @@ const styles = StyleSheet.create({
   orderTypeTab: {
     flex: 1,
     minWidth: '46%',
-    paddingVertical: 9,
-    paddingHorizontal: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
@@ -2117,7 +2066,7 @@ const styles = StyleSheet.create({
 
   orderTypeText: {
     color: '#444748',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
 
@@ -2127,7 +2076,7 @@ const styles = StyleSheet.create({
   },
 
   inputGroup: {
-    gap: 6,
+    gap: 4,
   },
 
   inputLabel: {
@@ -2142,13 +2091,14 @@ const styles = StyleSheet.create({
     borderColor: '#E0DDD8',
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 9,
     color: '#1B1C1C',
     fontSize: 13,
+    outlineStyle: 'none',
   },
 
   multilineInput: {
-    minHeight: 80,
+    minHeight: 70,
     textAlignVertical: 'top',
   },
 
@@ -2159,8 +2109,8 @@ const styles = StyleSheet.create({
   paymentCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    padding: 14,
+    gap: 10,
+    padding: 12,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E0DDD8',
@@ -2168,8 +2118,8 @@ const styles = StyleSheet.create({
   },
 
   paymentCardActive: {
-    borderColor: '#1B1C1C',
-    backgroundColor: '#EFEDED',
+    borderColor: '#D33401',
+    backgroundColor: '#FFF1EC',
   },
 
   paymentCardTitle: {
@@ -2179,13 +2129,13 @@ const styles = StyleSheet.create({
   },
 
   paymentCardTitleActive: {
-    color: '#1B1C1C',
+    color: '#D33401',
   },
 
   paymentCardSub: {
     color: '#747878',
     fontSize: 11,
-    marginTop: 2,
+    marginTop: 1,
   },
 
   summarySection: {
@@ -2193,8 +2143,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E0DDD8',
-    padding: 16,
-    gap: 10,
+    padding: 14,
+    gap: 8,
   },
 
   summaryRow: {
@@ -2205,18 +2155,18 @@ const styles = StyleSheet.create({
 
   summaryLabel: {
     color: '#444748',
-    fontSize: 13,
+    fontSize: 12,
   },
 
   summaryValue: {
     color: '#1B1C1C',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
 
   discountValue: {
     color: '#15803d',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
 
@@ -2225,15 +2175,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#DCFCE7',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
     borderRadius: 8,
-    marginTop: 4,
+    marginTop: 2,
   },
 
   zeroFeeBadgeText: {
     color: '#15803d',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
 
@@ -2247,24 +2197,25 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: '#E0DDD8',
-    marginVertical: 4,
+    marginVertical: 3,
   },
 
   grandTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 2,
   },
 
   grandTotalLabel: {
     color: '#1B1C1C',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
 
   grandTotalValue: {
     color: '#1B1C1C',
-    fontSize: 21,
+    fontSize: 20,
     fontWeight: '800',
   },
 
@@ -2272,23 +2223,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor:
-      'rgba(239, 68, 68, 0.1)',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
     borderWidth: 1,
     borderColor: '#ef4444',
-    padding: 12,
+    padding: 10,
     borderRadius: 10,
   },
 
   errorText: {
     color: '#dc2626',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     flex: 1,
   },
 
   footerContainer: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderTopWidth: 1,
     borderTopColor: '#E0DDD8',
     backgroundColor: '#FBF9F9',
@@ -2298,9 +2249,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
+    gap: 8,
     backgroundColor: '#D33401',
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderRadius: 16,
     shadowColor: '#D33401',
     shadowOffset: {
@@ -2309,7 +2260,7 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    height: 54,
+    minHeight: 48,
   },
 
   checkoutBtnDisabled: {
@@ -2319,9 +2270,9 @@ const styles = StyleSheet.create({
 
   checkoutBtnText: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
 
   paymentProcessingOverlay: {
@@ -2330,28 +2281,27 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor:
-      'rgba(251, 249, 249, 0.95)',
+    backgroundColor: 'rgba(251, 249, 249, 0.95)',
     zIndex: 9999,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: 20,
     borderRadius: 24,
   },
 
   paymentProcessingTitle: {
     color: '#1B1C1C',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
-    marginTop: 16,
+    marginTop: 14,
     textAlign: 'center',
   },
 
   paymentProcessingSubtitle: {
     color: '#747878',
-    fontSize: 13,
-    marginTop: 8,
+    fontSize: 12,
+    marginTop: 6,
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: 17,
   },
 });

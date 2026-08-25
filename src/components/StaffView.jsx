@@ -28,9 +28,16 @@ import {
   AlertTriangle,
   Send,
   Building,
+  Download,
+  Printer,
+  Copy,
+  Check,
+  Store,
+  ExternalLink,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { encryptRestaurantId } from '../services/api';
+import { downloadQrCodeImage, downloadQrCodeSvg } from './RestaurantQrModal';
 
 export default function StaffView({
   staffUser,
@@ -62,6 +69,7 @@ export default function StaffView({
   // Dashboard Tabs
   const [activeTab, setActiveTab] = useState('tables'); // 'tables', 'orders', 'kds', 'qr'
   const [orderStatusFilter, setOrderStatusFilter] = useState('All');
+  const [copiedQrId, setCopiedQrId] = useState(null);
 
   // Modal State for Adding Items to Order
   const [selectedOrderForAdd, setSelectedOrderForAdd] = useState(null);
@@ -241,21 +249,33 @@ export default function StaffView({
     <View style={styles.container}>
       {/* Sub-Header Toolbar */}
       <View style={styles.subHeader}>
-        {/* Restaurant Switcher */}
-        <View style={styles.restaurantPicker}>
-          <Building size={16} color="#10b981" />
-          <Text style={styles.restaurantText}>
-            {selectedRestaurant ? selectedRestaurant.name : 'All Outlets'}
-          </Text>
+        <View style={styles.subHeaderTopRow}>
+          {/* Restaurant Switcher */}
+          <View style={styles.restaurantPicker}>
+            <Building size={15} color="#10b981" />
+            <Text style={styles.restaurantText} numberOfLines={1}>
+              {selectedRestaurant ? selectedRestaurant.name : 'All Outlets'}
+            </Text>
+          </View>
+
+          {/* Refresh button */}
+          <TouchableOpacity style={styles.refreshBtn} onPress={onRefreshData} accessibilityLabel="Refresh Staff Data">
+            <RefreshCw size={15} color="#94a3b8" />
+          </TouchableOpacity>
         </View>
 
         {/* Staff Dashboard Nav Tabs */}
-        <View style={styles.tabsRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.tabsScroll}
+          contentContainerStyle={styles.tabsRow}
+        >
           <TouchableOpacity
             style={[styles.tabBtn, activeTab === 'tables' && styles.tabBtnActive]}
             onPress={() => setActiveTab('tables')}
           >
-            <LayoutGrid size={16} color={activeTab === 'tables' ? '#0f172a' : '#94a3b8'} />
+            <LayoutGrid size={15} color={activeTab === 'tables' ? '#0f172a' : '#94a3b8'} />
             <Text style={[styles.tabText, activeTab === 'tables' && styles.tabTextActive]}>
               Tables POS ({tables.length})
             </Text>
@@ -265,7 +285,7 @@ export default function StaffView({
             style={[styles.tabBtn, activeTab === 'orders' && styles.tabBtnActive]}
             onPress={() => setActiveTab('orders')}
           >
-            <ClipboardList size={16} color={activeTab === 'orders' ? '#0f172a' : '#94a3b8'} />
+            <ClipboardList size={15} color={activeTab === 'orders' ? '#0f172a' : '#94a3b8'} />
             <Text style={[styles.tabText, activeTab === 'orders' && styles.tabTextActive]}>
               Active Orders ({orders.length})
             </Text>
@@ -275,7 +295,7 @@ export default function StaffView({
             style={[styles.tabBtn, activeTab === 'kds' && styles.tabBtnActive]}
             onPress={() => setActiveTab('kds')}
           >
-            <ChefHat size={16} color={activeTab === 'kds' ? '#0f172a' : '#94a3b8'} />
+            <ChefHat size={15} color={activeTab === 'kds' ? '#0f172a' : '#94a3b8'} />
             <Text style={[styles.tabText, activeTab === 'kds' && styles.tabTextActive]}>
               Kitchen KDS
             </Text>
@@ -285,17 +305,12 @@ export default function StaffView({
             style={[styles.tabBtn, activeTab === 'qr' && styles.tabBtnActive]}
             onPress={() => setActiveTab('qr')}
           >
-            <QrIcon size={16} color={activeTab === 'qr' ? '#0f172a' : '#94a3b8'} />
+            <QrIcon size={15} color={activeTab === 'qr' ? '#0f172a' : '#94a3b8'} />
             <Text style={[styles.tabText, activeTab === 'qr' && styles.tabTextActive]}>
               Table QR Codes
             </Text>
           </TouchableOpacity>
-        </View>
-
-        {/* Refresh button */}
-        <TouchableOpacity style={styles.refreshBtn} onPress={onRefreshData}>
-          <RefreshCw size={16} color="#94a3b8" />
-        </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {/* Main Content Area */}
@@ -530,39 +545,211 @@ export default function StaffView({
           </View>
         )}
 
-        {/* TAB 4: TABLE QR CODES GENERATOR */}
+        {/* TAB 4: RESTAURANT & TABLE QR CODES MANAGER */}
         {activeTab === 'qr' && (
           <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Table QR Code Manager</Text>
-              <Text style={styles.sectionSub}>Print QR codes for every table to allow seamless customer self-ordering</Text>
+            {/* Section Header */}
+            <View style={styles.sectionHeaderRow}>
+              <View>
+                <Text style={styles.sectionTitle}>Restaurant & Table QR Code Hub</Text>
+                <Text style={styles.sectionSub}>Download high-resolution QR codes for physical table displays, counters, and posters</Text>
+              </View>
+
+              {tables.length > 0 && (
+                <TouchableOpacity
+                  style={styles.downloadAllBtn}
+                  onPress={() => {
+                    // Download all table QRs sequentially
+                    tables.forEach((table, idx) => {
+                      setTimeout(() => {
+                        const rId = table.rId || table.restaurantId || (selectedRestaurant ? selectedRestaurant.id : 1);
+                        const restName = selectedRestaurant?.name || catalog?.restaurantName || 'Menza Fine Dining';
+                        const cleanName = restName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+                        downloadQrCodeImage({
+                          svgElementId: `staff-table-qr-svg-${table.id}`,
+                          title: restName,
+                          subtitle: 'Scan to view menu & order',
+                          fileName: `${cleanName}-table-${table.id}.png`,
+                          tableNumber: table.id,
+                        });
+                      }, idx * 300);
+                    });
+                  }}
+                >
+                  <Download size={15} color="#0f172a" />
+                  <Text style={styles.downloadAllBtnText}>Download All Table QRs</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
-            <View style={styles.qrGrid}>
-              {tables.map((table) => {
-                const rId = table.rId || table.restaurantId || (selectedRestaurant ? selectedRestaurant.id : 1);
-                const encId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || encryptRestaurantId(rId);
-                const qrTargetUrl = `${window.location.origin}/?encRestId=${encId}&tableId=${table.id}`;
-                return (
-                  <View key={table.id} style={styles.qrCard}>
-                    <Text style={styles.qrTableName}>{table.tableName}</Text>
+            {/* FEATURED: MAIN RESTAURANT QR CODE */}
+            {(() => {
+              const rId = selectedRestaurant ? selectedRestaurant.id : (catalog?.restaurantId || 1);
+              const encId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || encryptRestaurantId(rId);
+              const mainQrUrl = `${window.location.origin}/?encRestId=${encId}`;
+              const restName = selectedRestaurant?.name || catalog?.restaurantName || 'Menza Fine Dining';
+              const cleanName = restName.toLowerCase().replace(/[^a-z0-9]/g, '-');
 
-                    <View style={styles.qrCodeWrapper}>
-                      <QRCodeSVG value={qrTargetUrl} size={140} bgColor="#ffffff" fgColor="#0f172a" />
+              return (
+                <View style={styles.mainQrHeroCard}>
+                  <View style={styles.mainQrLeft}>
+                    <View style={styles.mainQrBadge}>
+                      <Store size={14} color="#10b981" />
+                      <Text style={styles.mainQrBadgeText}>MAIN OUTLET QR CODE</Text>
                     </View>
 
-                    <Text style={styles.qrUrlText} numberOfLines={1}>{qrTargetUrl}</Text>
+                    <Text style={styles.mainQrTitle}>{restName}</Text>
+                    <Text style={styles.mainQrDesc}>
+                      Universal QR code for general customer ordering, counter POS express checkout, and takeaway.
+                    </Text>
 
-                    <TouchableOpacity
-                      style={styles.printQrBtn}
-                      onPress={() => window.print()}
-                    >
-                      <QrIcon size={16} color="#0f172a" />
-                      <Text style={styles.printQrBtnText}>Print Table QR</Text>
-                    </TouchableOpacity>
+                    {/* URL Snippet */}
+                    <View style={styles.mainQrUrlBox}>
+                      <Text style={styles.mainQrUrlText} numberOfLines={1}>{mainQrUrl}</Text>
+                      <TouchableOpacity
+                        style={styles.qrCopyBtn}
+                        onPress={() => {
+                          if (navigator.clipboard) {
+                            navigator.clipboard.writeText(mainQrUrl);
+                            setCopiedQrId('main');
+                            setTimeout(() => setCopiedQrId(null), 2500);
+                          }
+                        }}
+                      >
+                        {copiedQrId === 'main' ? (
+                          <Check size={13} color="#10b981" />
+                        ) : (
+                          <Copy size={13} color="#94a3b8" />
+                        )}
+                        <Text style={[styles.qrCopyBtnText, copiedQrId === 'main' && { color: '#10b981' }]}>
+                          {copiedQrId === 'main' ? 'Copied' : 'Copy'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Action Buttons */}
+                    <View style={styles.mainQrActionRow}>
+                      <TouchableOpacity
+                        style={styles.mainDownloadBtnPrimary}
+                        onPress={() => {
+                          downloadQrCodeImage({
+                            svgElementId: 'staff-main-outlet-qr-svg',
+                            title: restName,
+                            subtitle: 'Scan to View Menu & Order',
+                            fileName: `${cleanName}-main-qr.png`,
+                          });
+                        }}
+                      >
+                        <Download size={15} color="#0f172a" />
+                        <Text style={styles.mainDownloadBtnPrimaryText}>DOWNLOAD PNG</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.mainDownloadBtnSecondary}
+                        onPress={() => {
+                          downloadQrCodeSvg({
+                            svgElementId: 'staff-main-outlet-qr-svg',
+                            fileName: `${cleanName}-main-qr.svg`,
+                          });
+                        }}
+                      >
+                        <Download size={14} color="#ffffff" />
+                        <Text style={styles.mainDownloadBtnSecondaryText}>SVG</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.mainDownloadBtnSecondary}
+                        onPress={() => window.print()}
+                      >
+                        <Printer size={14} color="#ffffff" />
+                        <Text style={styles.mainDownloadBtnSecondaryText}>Print</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                );
-              })}
+
+                  <View style={styles.mainQrRight}>
+                    <View style={styles.mainQrWrapper}>
+                      <QRCodeSVG
+                        id="staff-main-outlet-qr-svg"
+                        value={mainQrUrl}
+                        size={160}
+                        bgColor="#ffffff"
+                        fgColor="#0f172a"
+                        level="Q"
+                      />
+                    </View>
+                    <Text style={styles.mainQrScanCaption}>Scan with Camera</Text>
+                  </View>
+                </View>
+              );
+            })()}
+
+            {/* INDIVIDUAL TABLE QR CODES */}
+            <View style={styles.tableQrSection}>
+              <Text style={styles.tableQrSectionTitle}>Individual Table QR Codes ({tables.length})</Text>
+              
+              <View style={styles.qrGrid}>
+                {tables.map((table) => {
+                  const rId = table.rId || table.restaurantId || (selectedRestaurant ? selectedRestaurant.id : 1);
+                  const encId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || encryptRestaurantId(rId);
+                  const qrTargetUrl = `${window.location.origin}/?encRestId=${encId}&tableId=${table.id}`;
+                  const restName = selectedRestaurant?.name || catalog?.restaurantName || 'Menza Fine Dining';
+                  const cleanName = restName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+                  const svgId = `staff-table-qr-svg-${table.id}`;
+
+                  return (
+                    <View key={table.id} style={styles.qrCard}>
+                      <View style={styles.qrCardTop}>
+                        <Text style={styles.qrTableName}>{table.tableName || `Table #${table.id}`}</Text>
+                        <View style={styles.qrTableCapBadge}>
+                          <Text style={styles.qrTableCapText}>{table.capacity || 4} seats</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.qrCodeWrapper}>
+                        <QRCodeSVG
+                          id={svgId}
+                          value={qrTargetUrl}
+                          size={135}
+                          bgColor="#ffffff"
+                          fgColor="#0f172a"
+                          level="Q"
+                        />
+                      </View>
+
+                      <View style={styles.qrCardUrlBox}>
+                        <Text style={styles.qrUrlText} numberOfLines={1}>{qrTargetUrl}</Text>
+                      </View>
+
+                      {/* Card Actions */}
+                      <View style={styles.qrCardActions}>
+                        <TouchableOpacity
+                          style={styles.downloadTableQrBtn}
+                          onPress={() => {
+                            downloadQrCodeImage({
+                              svgElementId: svgId,
+                              title: restName,
+                              subtitle: 'Scan to View Menu & Order',
+                              fileName: `${cleanName}-table-${table.id}.png`,
+                              tableNumber: table.id,
+                            });
+                          }}
+                        >
+                          <Download size={13} color="#0f172a" />
+                          <Text style={styles.downloadTableQrBtnText}>Download PNG</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.printTableQrBtn}
+                          onPress={() => window.print()}
+                        >
+                          <Printer size={13} color="#ffffff" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
             </View>
           </View>
         )}
@@ -806,16 +993,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   subHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: '#0f172a',
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
+  },
+  subHeaderTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
   },
   restaurantPicker: {
     flexDirection: 'row',
@@ -825,31 +1014,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
+    maxWidth: '80%',
   },
   restaurantText: {
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 13,
   },
+  tabsScroll: {
+    width: '100%',
+  },
   tabsRow: {
     flexDirection: 'row',
     gap: 8,
+    paddingRight: 12,
   },
   tabBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#1e293b',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
     borderRadius: 16,
+    flexShrink: 0,
   },
   tabBtnActive: {
     backgroundColor: '#10b981',
   },
   tabText: {
     color: '#94a3b8',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   tabTextActive: {
@@ -865,13 +1060,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bodyContent: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    maxWidth: 1280,
+    width: '100%',
+    alignSelf: 'center',
   },
   sectionContainer: {
-    gap: 20,
+    gap: 18,
   },
   sectionHeader: {
-    marginBottom: 4,
+    marginBottom: 2,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -882,27 +1081,31 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#ffffff',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
   },
   sectionSub: {
     color: '#94a3b8',
-    fontSize: 13,
+    fontSize: 12,
+    marginTop: 2,
   },
   tableGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 16,
+    gap: 14,
   },
   tableCard: {
-    width: 'calc(25% - 12px)',
-    minWidth: 240,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 240,
+    minWidth: 200,
+    maxWidth: 380,
     backgroundColor: '#1e293b',
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#334155',
-    gap: 12,
+    gap: 10,
   },
   tableCardHeader: {
     flexDirection: 'row',
@@ -911,7 +1114,7 @@ const styles = StyleSheet.create({
   },
   tableName: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
   statusBadge: {
@@ -919,7 +1122,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
     borderRadius: 12,
     borderWidth: 1,
   },
@@ -929,7 +1132,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   statusBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
   },
   tableCap: {
@@ -940,21 +1143,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
     borderRadius: 10,
     padding: 10,
-    gap: 4,
+    gap: 3,
   },
   activeOrderTitle: {
     color: '#10b981',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
   },
   activeOrderGuest: {
     color: '#94a3b8',
-    fontSize: 12,
+    fontSize: 11,
   },
   activeOrderAmount: {
     color: '#ffffff',
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 12,
   },
   idleTableBox: {
     backgroundColor: '#0f172a',
@@ -964,7 +1167,7 @@ const styles = StyleSheet.create({
   },
   idleTableText: {
     color: '#64748b',
-    fontSize: 12,
+    fontSize: 11,
   },
   tableCardFooter: {
     flexDirection: 'row',
@@ -1003,6 +1206,7 @@ const styles = StyleSheet.create({
   },
   filterPillsContainer: {
     gap: 8,
+    paddingRight: 10,
   },
   filterPill: {
     backgroundColor: '#1e293b',
@@ -1026,48 +1230,50 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   ordersList: {
-    gap: 14,
+    gap: 12,
   },
   orderManageCard: {
     backgroundColor: '#1e293b',
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#334155',
-    gap: 12,
+    gap: 10,
   },
   orderManageHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
   },
   orderIdText: {
     color: '#10b981',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
   orderMetaText: {
     color: '#94a3b8',
-    fontSize: 12,
+    fontSize: 11,
   },
   orderStatusBadge: {
     backgroundColor: 'rgba(245, 158, 11, 0.15)',
     borderWidth: 1,
     borderColor: '#f59e0b',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
   orderStatusBadgeText: {
     color: '#f59e0b',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   orderItemsBox: {
     backgroundColor: '#0f172a',
     borderRadius: 10,
-    padding: 12,
-    gap: 6,
+    padding: 10,
+    gap: 4,
   },
   orderItemLine: {
     flexDirection: 'row',
@@ -1077,100 +1283,104 @@ const styles = StyleSheet.create({
   orderItemQty: {
     color: '#10b981',
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 12,
   },
   orderItemName: {
     flex: 1,
     color: '#ffffff',
-    fontSize: 13,
+    fontSize: 12,
   },
   orderItemPrice: {
     color: '#94a3b8',
-    fontSize: 13,
+    fontSize: 12,
   },
   orderManageFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
   },
   orderTotalText: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
   orderActionGroup: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
+    flexWrap: 'wrap',
   },
   addMoreBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#334155',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     borderRadius: 8,
   },
   addMoreBtnText: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   statusUpdateBtnConfirm: {
     backgroundColor: '#3b82f6',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
   },
   statusUpdateBtnPrep: {
     backgroundColor: '#f59e0b',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
   },
   statusUpdateBtnReady: {
     backgroundColor: '#10b981',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
   },
   statusUpdateBtnServe: {
     backgroundColor: '#8b5cf6',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
   },
   statusUpdateBtnText: {
     color: '#ffffff',
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 11,
   },
   emptyOrdersBox: {
-    padding: 30,
+    padding: 24,
     backgroundColor: '#1e293b',
     borderRadius: 16,
     alignItems: 'center',
   },
   emptyOrdersText: {
     color: '#64748b',
-    fontSize: 14,
+    fontSize: 13,
   },
   kdsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 16,
+    gap: 14,
   },
   kdsCard: {
-    width: 'calc(33.333% - 11px)',
-    minWidth: 280,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 280,
+    minWidth: 240,
+    maxWidth: 420,
     backgroundColor: '#1e293b',
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     borderWidth: 2,
     borderColor: '#f59e0b',
-    gap: 12,
+    gap: 10,
   },
   kdsHeader: {
     flexDirection: 'row',
@@ -1179,32 +1389,32 @@ const styles = StyleSheet.create({
   },
   kdsTicketNum: {
     color: '#f59e0b',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
   },
   kdsTable: {
     color: '#ffffff',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
   },
   kdsItemsList: {
     maxHeight: 180,
   },
   kdsItemLine: {
     flexDirection: 'row',
-    gap: 10,
-    paddingVertical: 6,
+    gap: 8,
+    paddingVertical: 5,
     borderBottomWidth: 1,
     borderBottomColor: '#334155',
   },
   kdsQty: {
     color: '#10b981',
     fontWeight: '800',
-    fontSize: 16,
+    fontSize: 14,
   },
   kdsItemName: {
     color: '#ffffff',
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
   },
   kdsNotesBox: {
@@ -1214,116 +1424,310 @@ const styles = StyleSheet.create({
   },
   kdsNotesText: {
     color: '#f59e0b',
-    fontSize: 12,
+    fontSize: 11,
   },
   kdsReadyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
     backgroundColor: '#10b981',
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: 10,
   },
   kdsReadyBtnText: {
     color: '#0f172a',
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 12,
   },
-  qrGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 20,
-  },
-  qrCard: {
-    width: 220,
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  qrTableName: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  qrCodeWrapper: {
-    backgroundColor: '#ffffff',
-    padding: 12,
-    borderRadius: 12,
-  },
-  qrUrlText: {
-    color: '#64748b',
-    fontSize: 10,
-    maxWidth: 180,
-  },
-  printQrBtn: {
+  downloadAllBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#10b981',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
   },
-  printQrBtnText: {
+  downloadAllBtnText: {
     color: '#0f172a',
     fontWeight: '800',
     fontSize: 12,
+  },
+  mainQrHeroCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+    padding: 20,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 20,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  mainQrLeft: {
+    flex: 1,
+    minWidth: 260,
+    gap: 10,
+  },
+  mainQrBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  mainQrBadgeText: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  mainQrTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  mainQrDesc: {
+    color: '#94a3b8',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  mainQrUrlBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  mainQrUrlText: {
+    flex: 1,
+    color: '#64748b',
+    fontSize: 11,
+  },
+  qrCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#1e293b',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  qrCopyBtnText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  mainQrActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  mainDownloadBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#10b981',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  mainDownloadBtnPrimaryText: {
+    color: '#0f172a',
+    fontWeight: '800',
+    fontSize: 12,
+    letterSpacing: 0.3,
+  },
+  mainDownloadBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#334155',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  mainDownloadBtnSecondaryText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  mainQrRight: {
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'center',
+  },
+  mainQrWrapper: {
+    backgroundColor: '#ffffff',
+    padding: 12,
+    borderRadius: 16,
+  },
+  mainQrScanCaption: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  tableQrSection: {
+    gap: 12,
+    marginTop: 10,
+  },
+  tableQrSectionTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  qrGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14,
+  },
+  qrCard: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 200,
+    minWidth: 180,
+    maxWidth: 280,
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 14,
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  qrCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  qrTableName: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  qrTableCapBadge: {
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  qrTableCapText: {
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  qrCodeWrapper: {
+    backgroundColor: '#ffffff',
+    padding: 8,
+    borderRadius: 12,
+  },
+  qrCardUrlBox: {
+    width: '100%',
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  qrUrlText: {
+    color: '#64748b',
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  qrCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    width: '100%',
+  },
+  downloadTableQrBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#10b981',
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  downloadTableQrBtnText: {
+    color: '#0f172a',
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  printTableQrBtn: {
+    padding: 7,
+    backgroundColor: '#334155',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 16,
   },
   posModalBox: {
     width: '100%',
     maxWidth: 520,
     backgroundColor: '#0f172a',
     borderRadius: 20,
-    padding: 24,
-    gap: 14,
+    padding: 20,
+    gap: 12,
     borderWidth: 1,
     borderColor: '#1e293b',
+    maxHeight: '90%',
   },
   posModalTitle: {
     color: '#ffffff',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
   },
   posInputsRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
+    flexWrap: 'wrap',
   },
   posInput: {
     flex: 1,
+    minWidth: 140,
     backgroundColor: '#1e293b',
     borderWidth: 1,
     borderColor: '#334155',
     borderRadius: 10,
     paddingHorizontal: 12,
-    height: 42,
+    height: 40,
     color: '#ffffff',
     fontSize: 13,
   },
   posSelectItemsTitle: {
     color: '#94a3b8',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   posItemListScroll: {
-    maxHeight: 240,
+    maxHeight: 220,
   },
   posItemRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b',
   },
@@ -1332,7 +1736,7 @@ const styles = StyleSheet.create({
   },
   posItemName: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 13,
   },
   posItemPrice: {
     color: '#10b981',
@@ -1341,7 +1745,7 @@ const styles = StyleSheet.create({
   posQtyBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   posQtyBtn: {
     width: 24,
@@ -1365,43 +1769,43 @@ const styles = StyleSheet.create({
   posModalFooter: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 10,
+    gap: 8,
+    marginTop: 8,
   },
   cancelPosBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 10,
     backgroundColor: '#334155',
   },
   cancelPosBtnText: {
     color: '#ffffff',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
   },
   submitPosBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 10,
     backgroundColor: '#10b981',
   },
   submitPosBtnText: {
     color: '#0f172a',
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 12,
   },
   staffOrderTypeSection: {
-    gap: 6,
+    gap: 4,
   },
   staffOrderTypeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   staffOrderTypePill: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
     backgroundColor: '#0f172a',
     borderWidth: 1,
@@ -1413,7 +1817,7 @@ const styles = StyleSheet.create({
   },
   staffOrderTypeText: {
     color: '#94a3b8',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   staffOrderTypeTextActive: {

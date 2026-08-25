@@ -512,26 +512,21 @@ export default function CustomerView({
         item?.imageUrl ||
         '';
 
-
       if (
         typeof directImageUrl === 'string' &&
         directImageUrl.trim() !== '' &&
         directImageUrl.trim() !== IMAGE_NOT_AVAILABLE
       ) {
-
         const cleanDirectUrl =
           directImageUrl.trim();
 
+        const resolved =
+          getItemImageUrl(
+            cleanDirectUrl,
+            item?.isVeg !== false
+          );
 
-        console.log(
-          'CUSTOMER API IMAGE:',
-          item?.itemName,
-          '=>',
-          cleanDirectUrl
-        );
-
-
-        return cleanDirectUrl;
+        return resolved || cleanDirectUrl;
       }
 
 
@@ -1509,832 +1504,483 @@ const styles =
 
     rootWrapper: {
       flex: 1,
-      backgroundColor:
-        COLORS.background,
+      backgroundColor: COLORS.background,
       position: 'relative',
     },
 
-
     container: {
       flex: 1,
-      backgroundColor:
-        COLORS.background,
+      backgroundColor: COLORS.background,
     },
-
 
     contentContainer: {
       maxWidth: 1280,
       width: '100%',
       alignSelf: 'center',
-      paddingHorizontal: 20,
-      paddingTop: 18,
-      paddingBottom: 115,
+      paddingHorizontal: 14,
+      paddingTop: 16,
+      paddingBottom: 110,
     },
-
 
     /* =====================================================
        CATEGORIES
     ===================================================== */
-
     categoriesScroll: {
-      marginBottom: 17,
+      marginBottom: 16,
     },
 
-
     categoriesContainer: {
-      gap: 10,
+      gap: 8,
       paddingRight: 10,
     },
 
-
     categoryChip: {
-      backgroundColor:
-        COLORS.orangeLight,
-
+      backgroundColor: COLORS.orangeLight,
       borderWidth: 1,
-
-      borderColor:
-        '#F8E1D2',
-
-      paddingHorizontal: 18,
-
-      paddingVertical: 9,
-
+      borderColor: '#F8E1D2',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
       borderRadius: 22,
-
-      minHeight: 38,
-
+      minHeight: 36,
       alignItems: 'center',
-
       justifyContent: 'center',
     },
 
-
     categoryChipActive: {
-      backgroundColor:
-        COLORS.orange,
-
-      borderColor:
-        COLORS.orange,
-
-      shadowColor:
-        COLORS.orange,
-
-      shadowOffset: {
-        width: 0,
-        height: 2,
-      },
-
-      shadowOpacity: 0.16,
-
+      backgroundColor: COLORS.orange,
+      borderColor: COLORS.orange,
+      shadowColor: COLORS.orange,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.18,
       shadowRadius: 5,
-
       elevation: 2,
     },
 
-
     categoryChipText: {
-      color:
-        COLORS.text,
-
+      color: COLORS.text,
       fontSize: 13,
-
       fontWeight: '600',
     },
 
-
     categoryChipTextActive: {
-      color:
-        COLORS.white,
-
+      color: COLORS.white,
       fontWeight: '700',
     },
 
-
     /* =====================================================
-       SEARCH
+       SEARCH & CONTROLS
     ===================================================== */
-
     controlsRow: {
       flexDirection: 'row',
-
       alignItems: 'center',
-
-      gap: 10,
-
-      marginBottom: 22,
-
+      gap: 8,
+      marginBottom: 18,
       maxWidth: 680,
-
       width: '100%',
     },
 
-
     searchBox: {
       flex: 1,
-
       flexDirection: 'row',
-
       alignItems: 'center',
-
-      gap: 9,
-
-      backgroundColor:
-        COLORS.white,
-
+      gap: 8,
+      backgroundColor: COLORS.white,
       borderWidth: 1,
-
-      borderColor:
-        COLORS.border,
-
-      borderRadius: 15,
-
-      paddingHorizontal: 13,
-
-      height: 46,
-
-      shadowColor:
-        '#000000',
-
-      shadowOffset: {
-        width: 0,
-        height: 1,
-      },
-
-      shadowOpacity: 0.025,
-
+      borderColor: COLORS.border,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      height: 44,
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.03,
       shadowRadius: 4,
     },
 
-
     searchInput: {
       flex: 1,
-
-      color:
-        COLORS.text,
-
+      color: COLORS.text,
       fontSize: 13,
-
       outlineStyle: 'none',
     },
 
-
     /* =====================================================
-       VEG
+       VEG TOGGLE
     ===================================================== */
-
     vegToggle: {
       flexDirection: 'row',
-
       alignItems: 'center',
-
       gap: 6,
-
-      backgroundColor:
-        COLORS.white,
-
+      backgroundColor: COLORS.white,
       borderWidth: 1,
-
-      borderColor:
-        COLORS.border,
-
-      paddingHorizontal: 13,
-
-      height: 46,
-
-      borderRadius: 15,
+      borderColor: COLORS.border,
+      paddingHorizontal: 12,
+      height: 44,
+      borderRadius: 14,
+      flexShrink: 0,
     },
-
 
     vegToggleActive: {
-      backgroundColor:
-        COLORS.greenLight,
-
-      borderColor:
-        '#86EFAC',
+      backgroundColor: COLORS.greenLight,
+      borderColor: '#86EFAC',
     },
-
 
     vegDot: {
       width: 8,
-
       height: 8,
-
       borderRadius: 4,
-
-      backgroundColor:
-        COLORS.green,
+      backgroundColor: COLORS.green,
     },
 
-
     vegText: {
-      color:
-        COLORS.textSecondary,
-
+      color: COLORS.textSecondary,
       fontSize: 12,
-
       fontWeight: '600',
     },
 
-
     vegTextActive: {
-      color:
-        COLORS.green,
-
+      color: COLORS.green,
       fontWeight: '700',
     },
-
 
     /* =====================================================
        SECTION HEADER
     ===================================================== */
-
     sectionHeaderRow: {
       flexDirection: 'row',
-
-      justifyContent:
-        'space-between',
-
+      justifyContent: 'space-between',
       alignItems: 'center',
-
-      marginBottom: 15,
+      marginBottom: 14,
     },
-
 
     sectionHeaderTitle: {
-      color:
-        COLORS.text,
-
-      fontSize: 20,
-
+      color: COLORS.text,
+      fontSize: 18,
       fontWeight: '800',
-
-      letterSpacing: -0.4,
+      letterSpacing: -0.3,
     },
 
-
     itemCountBadge: {
-      color:
-        COLORS.textSecondary,
-
+      color: COLORS.textSecondary,
       fontSize: 12,
-
       fontWeight: '600',
     },
 
-
     /* =====================================================
-       GRID
+       RESPONSIVE GRID
     ===================================================== */
-
     grid: {
       flexDirection: 'row',
-
       flexWrap: 'wrap',
-
-      gap: 16,
-
-      justifyContent:
-        'flex-start',
+      gap: 12,
+      justifyContent: 'flex-start',
     },
 
-
     /* =====================================================
-       ITEM CARD
+       RESPONSIVE ITEM CARD
     ===================================================== */
-
     card: {
       flexGrow: 1,
-
-      flexShrink: 0,
-
-      flexBasis: 220,
-
-      maxWidth: 290,
-
-      minWidth: 175,
-
-      minHeight: 340,
-
-      backgroundColor:
-        COLORS.white,
-
-      borderRadius: 18,
-
+      flexShrink: 1,
+      flexBasis: 155,
+      minWidth: 140,
+      maxWidth: 295,
+      minHeight: 310,
+      backgroundColor: COLORS.white,
+      borderRadius: 16,
       borderWidth: 1,
-
-      borderColor:
-        '#F0ECE9',
-
-      padding: 11,
-
-      justifyContent:
-        'space-between',
-
+      borderColor: '#F0ECE9',
+      padding: 10,
+      justifyContent: 'space-between',
       position: 'relative',
-
-      shadowColor:
-        '#000000',
-
-      shadowOffset: {
-        width: 0,
-
-        height: 2,
-      },
-
-      shadowOpacity: 0.045,
-
-      shadowRadius: 8,
-
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
       elevation: 2,
     },
 
-
     cardTouchable: {
       flex: 1,
-
-      justifyContent:
-        'space-between',
+      justifyContent: 'space-between',
     },
-
 
     /* =====================================================
-       REAL API IMAGE
+       ITEM IMAGE
     ===================================================== */
-
     itemImage: {
       width: '100%',
-
-      height: 165,
-
-      borderRadius: 14,
-
-      marginBottom: 12,
-
-      backgroundColor:
-        COLORS.placeholder,
+      height: 140,
+      borderRadius: 12,
+      marginBottom: 10,
+      backgroundColor: COLORS.placeholder,
     },
-
 
     imagePlaceholder: {
       width: '100%',
-
-      height: 165,
-
-      borderRadius: 14,
-
-      marginBottom: 12,
-
+      height: 140,
+      borderRadius: 12,
+      marginBottom: 10,
       alignItems: 'center',
-
-      justifyContent:
-        'center',
-
-      backgroundColor:
-        COLORS.placeholder,
+      justifyContent: 'center',
+      backgroundColor: COLORS.placeholder,
     },
-
 
     imagePlaceholderText: {
-      color:
-        COLORS.textMuted,
-
+      color: COLORS.textMuted,
       fontSize: 10,
-
       fontWeight: '600',
-
-      marginTop: 5,
+      marginTop: 4,
     },
-
 
     /* =====================================================
-       CARD HEADER
+       CARD HEADER (TAG / DIET)
     ===================================================== */
-
     cardHeaderRow: {
       flexDirection: 'row',
-
       alignItems: 'center',
-
-      gap: 7,
-
-      marginBottom: 8,
+      gap: 6,
+      marginBottom: 6,
+      flexWrap: 'nowrap',
     },
-
 
     dietBadge: {
       width: 14,
-
       height: 14,
-
       borderWidth: 1.5,
-
       borderRadius: 3,
-
       alignItems: 'center',
-
-      justifyContent:
-        'center',
-
-      backgroundColor:
-        COLORS.white,
+      justifyContent: 'center',
+      backgroundColor: COLORS.white,
+      flexShrink: 0,
     },
-
 
     vegBadgeBorder: {
-      borderColor:
-        COLORS.green,
+      borderColor: COLORS.green,
     },
-
 
     nonVegBadgeBorder: {
-      borderColor:
-        COLORS.red,
+      borderColor: COLORS.red,
     },
-
 
     dietDot: {
       width: 5,
-
       height: 5,
-
       borderRadius: 2.5,
     },
 
-
     itemTag: {
-      color:
-        COLORS.textSecondary,
-
+      color: COLORS.textSecondary,
       fontSize: 10,
-
       fontWeight: '600',
-
-      textTransform:
-        'uppercase',
-
-      letterSpacing: 0.5,
-
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
       flex: 1,
     },
 
-
     ratingPill: {
-      backgroundColor:
-        COLORS.orangeSoft,
-
-      paddingHorizontal: 7,
-
-      paddingVertical: 3,
-
-      borderRadius: 7,
+      backgroundColor: COLORS.orangeSoft,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 6,
+      flexShrink: 0,
     },
-
 
     ratingText: {
-      color:
-        COLORS.orangeDark,
-
-      fontSize: 10,
-
+      color: COLORS.orangeDark,
+      fontSize: 9,
       fontWeight: '700',
     },
-
 
     /* =====================================================
        CARD BODY
     ===================================================== */
-
     cardBody: {
       flex: 1,
-
-      justifyContent:
-        'center',
-
-      marginVertical: 4,
+      justifyContent: 'center',
+      marginVertical: 2,
     },
-
 
     itemName: {
-      color:
-        COLORS.text,
-
-      fontSize: 15,
-
+      color: COLORS.text,
+      fontSize: 14,
       fontWeight: '800',
-
-      lineHeight: 20,
-
-      letterSpacing: -0.25,
+      lineHeight: 18,
+      letterSpacing: -0.2,
     },
-
 
     itemDesc: {
-      color:
-        COLORS.textSecondary,
-
-      fontSize: 12,
-
-      lineHeight: 16,
-
-      marginTop: 4,
+      color: COLORS.textSecondary,
+      fontSize: 11,
+      lineHeight: 15,
+      marginTop: 3,
     },
-
 
     /* =====================================================
        BOTTOM CARD ROW
     ===================================================== */
-
     cardBottomRow: {
       flexDirection: 'row',
-
       alignItems: 'center',
-
-      justifyContent:
-        'space-between',
-
-      marginTop: 12,
-
-      paddingTop: 10,
-
+      justifyContent: 'space-between',
+      marginTop: 10,
+      paddingTop: 8,
       borderTopWidth: 1,
-
-      borderTopColor:
-        '#F3EFEC',
+      borderTopColor: '#F3EFEC',
+      gap: 6,
     },
-
 
     priceContainer: {
-      justifyContent:
-        'center',
+      justifyContent: 'center',
+      flexShrink: 1,
     },
-
 
     priceCurrency: {
-      color:
-        COLORS.textMuted,
-
+      color: COLORS.textMuted,
       fontSize: 9,
-
       fontWeight: '700',
-
-      textTransform:
-        'uppercase',
-
-      marginBottom: 1,
+      textTransform: 'uppercase',
     },
-
 
     itemPrice: {
-      color:
-        COLORS.text,
-
-      fontSize: 18,
-
+      color: COLORS.text,
+      fontSize: 16,
       fontWeight: '800',
-
       letterSpacing: -0.3,
     },
-
 
     /* =====================================================
        ADD BUTTON
     ===================================================== */
-
     addBtn: {
       width: 36,
-
       height: 36,
-
       borderRadius: 18,
-
-      backgroundColor:
-        COLORS.orange,
-
+      backgroundColor: COLORS.orange,
       alignItems: 'center',
-
-      justifyContent:
-        'center',
-
-      shadowColor:
-        COLORS.orange,
-
-      shadowOffset: {
-        width: 0,
-
-        height: 3,
-      },
-
+      justifyContent: 'center',
+      shadowColor: COLORS.orange,
+      shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.22,
-
-      shadowRadius: 5,
-
+      shadowRadius: 4,
       elevation: 3,
+      flexShrink: 0,
     },
-
 
     /* =====================================================
-       QUANTITY
+       QUANTITY CONTROL
     ===================================================== */
-
     qtyControlRow: {
       flexDirection: 'row',
-
       alignItems: 'center',
-
-      gap: 8,
-
-      backgroundColor:
-        COLORS.orangeLight,
-
+      gap: 6,
+      backgroundColor: COLORS.orangeLight,
       borderRadius: 18,
-
-      paddingHorizontal: 6,
-
-      paddingVertical: 4,
-
+      paddingHorizontal: 5,
+      paddingVertical: 3,
       borderWidth: 1,
-
-      borderColor:
-        '#F7D9C6',
+      borderColor: '#F7D9C6',
+      flexShrink: 0,
     },
-
 
     qtyActionBtn: {
-      width: 23,
-
-      height: 23,
-
+      width: 24,
+      height: 24,
       borderRadius: 12,
-
-      backgroundColor:
-        COLORS.white,
-
+      backgroundColor: COLORS.white,
       alignItems: 'center',
-
-      justifyContent:
-        'center',
+      justifyContent: 'center',
     },
-
 
     qtyBtnBusy: {
       opacity: 0.5,
     },
 
-
     qtyActionText: {
-      color:
-        COLORS.text,
-
+      color: COLORS.text,
       fontWeight: '800',
-
-      fontSize: 13,
-
-      minWidth: 16,
-
+      fontSize: 12,
+      minWidth: 14,
       textAlign: 'center',
     },
-
 
     /* =====================================================
        SOLD OUT
     ===================================================== */
-
     soldOutBadge: {
-      backgroundColor:
-        COLORS.gray,
-
+      backgroundColor: COLORS.gray,
       borderRadius: 8,
-
-      paddingHorizontal: 9,
-
-      paddingVertical: 5,
-
+      paddingHorizontal: 8,
+      paddingVertical: 4,
       alignItems: 'center',
+      flexShrink: 0,
     },
 
-
     soldOutText: {
-      color:
-        COLORS.textSecondary,
-
+      color: COLORS.textSecondary,
       fontSize: 10,
-
       fontWeight: '700',
     },
 
-
     /* =====================================================
-       FLOATING CART
+       FLOATING CART BAR
     ===================================================== */
-
     floatingCartBarWrapper: {
       position: 'absolute',
-
-      bottom: 18,
-
-      left: 16,
-
-      right: 16,
-
+      bottom: 16,
+      left: 14,
+      right: 14,
       zIndex: 999,
-
       alignItems: 'center',
     },
-
 
     floatingCartBar: {
       width: '100%',
-
       maxWidth: 480,
-
       flexDirection: 'row',
-
       alignItems: 'center',
-
-      justifyContent:
-        'space-between',
-
-      backgroundColor:
-        COLORS.orange,
-
+      justifyContent: 'space-between',
+      backgroundColor: COLORS.orange,
       borderRadius: 18,
-
       paddingVertical: 12,
-
       paddingHorizontal: 16,
-
-      shadowColor:
-        COLORS.orange,
-
-      shadowOffset: {
-        width: 0,
-
-        height: 7,
-      },
-
-      shadowOpacity: 0.28,
-
-      shadowRadius: 12,
-
+      shadowColor: COLORS.orange,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.3,
+      shadowRadius: 10,
       elevation: 7,
     },
 
-
     cartCountCircle: {
-      width: 31,
-
-      height: 31,
-
-      borderRadius: 16,
-
-      backgroundColor:
-        COLORS.white,
-
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: COLORS.white,
       alignItems: 'center',
-
-      justifyContent:
-        'center',
+      justifyContent: 'center',
     },
 
-
     cartCountCircleText: {
-      color:
-        COLORS.orangeDark,
-
+      color: COLORS.orangeDark,
       fontWeight: '800',
-
       fontSize: 13,
     },
 
-
     cartCenterText: {
-      color:
-        COLORS.white,
-
-      fontSize: 14,
-
+      color: COLORS.white,
+      fontSize: 13,
       fontWeight: '700',
-
       letterSpacing: 0.2,
     },
 
-
     cartRightBox: {
       flexDirection: 'row',
-
       alignItems: 'center',
-
       gap: 4,
     },
 
-
     cartRightAmount: {
-      color:
-        COLORS.white,
-
-      fontSize: 17,
-
+      color: COLORS.white,
+      fontSize: 16,
       fontWeight: '800',
     },
 

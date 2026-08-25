@@ -4,6 +4,7 @@ import {
   ShoppingBag as CartIcon,
   ClipboardList as OrderIcon,
   Store,
+  QrCode,
 } from 'lucide-react';
 
 export default function Header({
@@ -11,6 +12,7 @@ export default function Header({
   cartCount = 0,
   openCart,
   openOrderTracker,
+  openQrModal,
   activeOrder,
 }) {
   const displayName = restaurantName || 'Saffron Café';
@@ -20,11 +22,11 @@ export default function Header({
       <View style={styles.headerRow}>
 
         {/* =========================
-            RESTAURANT NAME
+            RESTAURANT NAME & BRAND
         ========================== */}
         <View style={styles.brandContainer}>
           <View style={styles.logoBadge}>
-            <Store size={21} color="#ffffff" />
+            <Store size={20} color="#ffffff" />
           </View>
 
           <View style={styles.brandTextContainer}>
@@ -36,7 +38,7 @@ export default function Header({
               {displayName}
             </Text>
 
-            <Text style={styles.brandSub}>
+            <Text style={styles.brandSub} numberOfLines={1}>
               Smart Ordering
             </Text>
           </View>
@@ -48,16 +50,36 @@ export default function Header({
         <View style={styles.actionsRow}>
 
           {/* =========================
-              ORDER BUTTON
+              RESTAURANT QR CODE BUTTON
+          ========================== */}
+          {openQrModal && (
+            <TouchableOpacity
+              style={styles.qrButton}
+              onPress={openQrModal}
+              activeOpacity={0.8}
+              accessibilityLabel="View and Download Restaurant QR Code"
+            >
+              <QrCode
+                size={16}
+                color="#1B1C1C"
+                strokeWidth={2.3}
+              />
+              <Text style={styles.qrButtonText}>QR</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* =========================
+              ORDER TRACKER BUTTON
           ========================== */}
           {activeOrder && (
             <TouchableOpacity
               style={styles.orderButton}
               onPress={openOrderTracker}
               activeOpacity={0.8}
+              accessibilityLabel="View Active Order"
             >
               <OrderIcon
-                size={19}
+                size={17}
                 color="#D33401"
                 strokeWidth={2.3}
               />
@@ -78,14 +100,15 @@ export default function Header({
             style={styles.cartButton}
             onPress={openCart}
             activeOpacity={0.8}
+            accessibilityLabel={`Cart with ${cartCount} items`}
           >
             <CartIcon
-              size={20}
+              size={19}
               color="#ffffff"
               strokeWidth={2.3}
             />
 
-            {/* Cart Count */}
+            {/* Cart Count Badge */}
             {cartCount > 0 && (
               <View style={styles.cartBadge}>
                 <Text style={styles.cartBadgeText}>
@@ -102,35 +125,36 @@ export default function Header({
 }
 
 const styles = StyleSheet.create({
-
   // ==========================================
-  // MAIN HEADER
+  // MAIN HEADER CONTAINER
   // ==========================================
   container: {
     width: '100%',
     backgroundColor: '#FBF9F9',
-
     borderBottomWidth: 1,
     borderBottomColor: '#E0DDD8',
-
     paddingHorizontal: 16,
-    paddingVertical: 11,
-
+    paddingVertical: 10,
     zIndex: 100,
-    elevation: 5,
+    elevation: 4,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
   },
 
   // ==========================================
-  // HEADER ROW
+  // HEADER ROW (MAX WIDTH ALIGNED)
   // ==========================================
   headerRow: {
     width: '100%',
-
+    maxWidth: 1280,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-
-    minHeight: 44,
+    minHeight: 42,
+    gap: 8,
   },
 
   // ==========================================
@@ -139,7 +163,6 @@ const styles = StyleSheet.create({
   brandContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-
     flex: 1,
     minWidth: 0,
   },
@@ -147,40 +170,31 @@ const styles = StyleSheet.create({
   logoBadge: {
     width: 38,
     height: 38,
-
     borderRadius: 10,
-
     backgroundColor: '#1B1C1C',
-
     alignItems: 'center',
     justifyContent: 'center',
-
     marginRight: 10,
+    flexShrink: 0,
   },
 
   brandTextContainer: {
     flex: 1,
     minWidth: 0,
+    justifyContent: 'center',
   },
 
   brandTitle: {
     color: '#1B1C1C',
-
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '800',
-
     letterSpacing: -0.3,
-
-    maxWidth: '100%',
   },
 
   brandSub: {
     color: '#747878',
-
-    fontSize: 10,
-
+    fontSize: 11,
     fontWeight: '600',
-
     marginTop: 1,
   },
 
@@ -190,10 +204,30 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-
-    marginLeft: 10,
-
+    marginLeft: 6,
     gap: 8,
+    flexShrink: 0,
+  },
+
+  // ==========================================
+  // QR BUTTON
+  // ==========================================
+  qrButton: {
+    height: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 11,
+    borderRadius: 20,
+    backgroundColor: '#EFEDED',
+    borderWidth: 1,
+    borderColor: '#E0DDD8',
+    gap: 4,
+  },
+
+  qrButtonText: {
+    color: '#1B1C1C',
+    fontSize: 12,
+    fontWeight: '800',
   },
 
   // ==========================================
@@ -201,44 +235,28 @@ const styles = StyleSheet.create({
   // ==========================================
   orderButton: {
     height: 40,
-
     flexDirection: 'row',
     alignItems: 'center',
-
     paddingHorizontal: 12,
-
     borderRadius: 20,
-
     backgroundColor: '#FFF1EC',
-
     borderWidth: 1,
     borderColor: '#F3C8BA',
-
-    position: 'relative',
   },
 
   orderButtonText: {
     color: '#D33401',
-
     fontSize: 12,
-
     fontWeight: '800',
-
-    marginLeft: 6,
+    marginLeft: 5,
   },
 
-  // ==========================================
-  // ORDER STATUS DOT
-  // ==========================================
   orderDot: {
     width: 7,
     height: 7,
-
     borderRadius: 4,
-
     backgroundColor: '#D33401',
-
-    marginLeft: 6,
+    marginLeft: 5,
   },
 
   // ==========================================
@@ -247,24 +265,18 @@ const styles = StyleSheet.create({
   cartButton: {
     width: 42,
     height: 42,
-
     borderRadius: 21,
-
     backgroundColor: '#D33401',
-
     alignItems: 'center',
     justifyContent: 'center',
-
     position: 'relative',
-
     shadowColor: '#D33401',
     shadowOffset: {
       width: 0,
       height: 3,
     },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.28,
     shadowRadius: 6,
-
     elevation: 4,
   },
 
@@ -273,31 +285,22 @@ const styles = StyleSheet.create({
   // ==========================================
   cartBadge: {
     position: 'absolute',
-
     top: -5,
     right: -5,
-
     minWidth: 19,
     height: 19,
-
     borderRadius: 10,
-
     backgroundColor: '#1B1C1C',
-
     alignItems: 'center',
     justifyContent: 'center',
-
     paddingHorizontal: 4,
-
     borderWidth: 2,
     borderColor: '#FBF9F9',
   },
 
   cartBadgeText: {
     color: '#ffffff',
-
     fontSize: 9,
-
     fontWeight: '900',
   },
-});
+});
