@@ -203,6 +203,117 @@ export const loginWithOtp = async (
   return res.data;
 };
 
+/* =========================================================
+   CUSTOMER OTP & LOGIN
+========================================================= */
+
+export const generateCustomerOtp = async (
+  mobile,
+  restaurantId = null,
+  encryptedRestaurantId = null
+) => {
+  const deviceId = getDeviceId();
+  try {
+    const res = await api.post(
+      '/api/public/store/auth/generate-otp',
+      {
+        mobile,
+        deviceId,
+        restaurantId,
+        encryptedRestaurantId,
+      }
+    );
+    return res.data;
+  } catch (err) {
+    // Fallback to /api/Auth/GenerateOtp
+    const res = await api.post(
+      '/api/Auth/GenerateOtp',
+      {
+        mobile,
+        deviceId,
+      }
+    );
+    return res.data;
+  }
+};
+
+export const verifyCustomerOtpAndLogin = async (
+  mobile,
+  otpCode,
+  name = '',
+  restaurantId = null,
+  encryptedRestaurantId = null
+) => {
+  const deviceId = getDeviceId();
+  try {
+    const res = await api.post(
+      '/api/public/store/auth/verify-otp',
+      {
+        mobile,
+        otpCode,
+        name,
+        deviceId,
+        restaurantId,
+        encryptedRestaurantId,
+      }
+    );
+
+    if (res.data?.token) {
+      setAuthToken(res.data.token);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(
+          'menza_customer_user',
+          JSON.stringify(res.data)
+        );
+      }
+    }
+
+    return res.data;
+  } catch (err) {
+    // Fallback to /api/Auth/Login
+    const res = await api.post(
+      '/api/Auth/Login',
+      {
+        mobile,
+        otpCode,
+        name,
+        deviceId,
+        restaurantId,
+      }
+    );
+
+    if (res.data?.token) {
+      setAuthToken(res.data.token);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(
+          'menza_customer_user',
+          JSON.stringify(res.data)
+        );
+      }
+    }
+
+    return res.data;
+  }
+};
+
+export const getSavedCustomer = () => {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('menza_customer_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const clearCustomerAuth = () => {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('menza_customer_user');
+    localStorage.removeItem('menza_token');
+  }
+  setAuthToken(null);
+};
+
 export const getMyRestaurants = async () => {
   try {
     const res = await api.get(
@@ -2004,6 +2115,8 @@ export const placeOrder =
         : null,
       customerName: orderPayload.name || 'Guest Diner',
       customerPhone: orderPayload.mobileNumber || '',
+      otpCode: orderPayload.otpCode || null,
+      customerUserId: orderPayload.customerUserId || null,
       orderTypeId: Number(orderPayload.orderTypeId || 1),
       paymentMode:
         orderPayload.paymentMode ||

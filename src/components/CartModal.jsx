@@ -23,6 +23,12 @@ import {
   ShieldCheck,
   AlertTriangle,
   ImageOff,
+  CheckCircle2,
+  KeyRound,
+  Smartphone,
+  RefreshCw,
+  Send,
+  Check,
 } from 'lucide-react';
 import * as api from '../services/api';
 
@@ -120,6 +126,133 @@ export default function CartModal({
   const [removingItemId, setRemovingItemId] = useState(null);
   const [clearingCart, setClearingCart] = useState(false);
   const [liveOrderTypes, setLiveOrderTypes] = useState([]);
+
+  /* Customer OTP Verification State */
+  const [isVerified, setIsVerified] = useState(false);
+  const [isOtpSent, setIsOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpCountdown, setOtpCountdown] = useState(0);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [otpSuccessMsg, setOtpSuccessMsg] = useState('');
+  const [verifiedCustomer, setVerifiedCustomer] = useState(null);
+
+  // Check saved customer login on mount or modal open
+  useEffect(() => {
+    if (!visible) return;
+    const saved = api.getSavedCustomer();
+    if (saved && (saved.mobile || saved.token)) {
+      if (saved.mobile) setMobileNumber(saved.mobile);
+      if (saved.name && (!guestName || guestName.startsWith('Guest '))) {
+        setGuestName(saved.name);
+      }
+      setIsVerified(true);
+      setVerifiedCustomer(saved);
+    }
+  }, [visible]);
+
+  // Countdown timer effect
+  useEffect(() => {
+    if (otpCountdown <= 0) return;
+    const timer = setInterval(() => {
+      setOtpCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [otpCountdown]);
+
+  const handleSendOtp = async () => {
+    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
+    if (cleanMobile.length < 10) {
+      setErrorMsg('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    try {
+      setErrorMsg('');
+      setOtpSuccessMsg('');
+      setIsSendingOtp(true);
+
+      const restId = cart?.restaurantId || catalog?.restaurantId || null;
+      const encRestId = catalog?.encryptedRestaurantId || null;
+
+      await api.generateCustomerOtp(cleanMobile, restId, encRestId);
+      setIsOtpSent(true);
+      setOtpCountdown(30);
+      setOtpSuccessMsg(`OTP sent to +91 ${cleanMobile}`);
+    } catch (err) {
+      console.error('Send OTP error:', err);
+      setErrorMsg(
+        err?.response?.data?.message ||
+          err?.message ||
+          'Failed to send OTP. Please try again.'
+      );
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
+    const cleanOtp = otpCode.trim();
+
+    if (cleanMobile.length < 10) {
+      setErrorMsg('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    if (!cleanOtp || cleanOtp.length < 4) {
+      setErrorMsg('Please enter the 6-digit OTP code.');
+      return;
+    }
+
+    try {
+      setErrorMsg('');
+      setOtpSuccessMsg('');
+      setIsVerifyingOtp(true);
+
+      const restId = cart?.restaurantId || catalog?.restaurantId || null;
+      const encRestId = catalog?.encryptedRestaurantId || null;
+
+      const authData = await api.verifyCustomerOtpAndLogin(
+        cleanMobile,
+        cleanOtp,
+        guestName.trim(),
+        restId,
+        encRestId
+      );
+
+      if (authData) {
+        setIsVerified(true);
+        setIsOtpSent(false);
+        setOtpCode('');
+        setVerifiedCustomer(authData);
+        if (authData.name && !guestName) {
+          setGuestName(authData.name);
+        }
+        setOtpSuccessMsg('Mobile verified successfully!');
+      } else {
+        setErrorMsg('Invalid or expired OTP code.');
+      }
+    } catch (err) {
+      console.error('Verify OTP error:', err);
+      setErrorMsg(
+        err?.response?.data?.message ||
+          err?.message ||
+          'OTP verification failed. Please try again.'
+      );
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
+  const handleResetVerification = () => {
+    api.clearCustomerAuth();
+    setIsVerified(false);
+    setIsOtpSent(false);
+    setOtpCode('');
+    setVerifiedCustomer(null);
+    setOtpSuccessMsg('');
+  };
 
   // Refresh server cart and fetch live OrderTypeMaster whenever the modal opens.
   useEffect(() => {
@@ -373,6 +506,27 @@ export default function CartModal({
       return;
     }
 
+    const cleanPhone = phoneDigits.slice(-10);
+
+    // Verify Customer Mobile & OTP before proceeding
+    if (!isVerified) {
+      if (isOtpSent && otpCode.trim().length >= 4) {
+        try {
+          await handleVerifyOtp();
+        } catch (e) {
+          return;
+        }
+      } else {
+        setErrorMsg(
+          'Mobile verification required. Please click "Get OTP" to verify your number before placing the order.'
+        );
+        if (!isOtpSent) {
+          handleSendOtp();
+        }
+        return;
+      }
+    }
+
     if (hasUnavailableItems) {
       setErrorMsg(
         'Please remove out-of-stock items from your cart before proceeding.'
@@ -401,12 +555,12 @@ export default function CartModal({
       })
     );
 
-    const cleanPhone = phoneDigits.slice(-10);
-
     const orderPayload = {
       restaurantId: restId,
       name: guestName.trim(),
       mobileNumber: cleanPhone,
+      otpCode: isVerified ? null : (otpCode.trim() || null),
+      customerUserId: verifiedCustomer?.userId || null,
       remarks: remarks.trim(),
       isHomeDelivery: false,
       orderTypeId,
@@ -1228,31 +1382,167 @@ export default function CartModal({
                     />
                   </View>
 
-                  <View
-                    style={styles.inputGroup}
-                  >
-                    <Text
-                      style={styles.inputLabel}
-                    >
-                      Mobile Number *
-                    </Text>
+                  {/* Customer Mobile & OTP Verification Flow */}
+                  {isVerified ? (
+                    <View style={styles.verifiedCard}>
+                      <View style={styles.verifiedCardLeft}>
+                        <View style={styles.verifiedIconWrap}>
+                          <ShieldCheck size={20} color="#15803d" />
+                        </View>
+                        <View>
+                          <View style={styles.verifiedBadgeRow}>
+                            <Text style={styles.verifiedBadgeText}>
+                              ✓ Mobile Verified
+                            </Text>
+                          </View>
+                          <Text style={styles.verifiedMobileText}>
+                            +91 {mobileNumber} {guestName ? `(${guestName})` : ''}
+                          </Text>
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        onPress={handleResetVerification}
+                        style={styles.changePhoneBtn}
+                      >
+                        <Text style={styles.changePhoneBtnText}>Change</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={styles.inputGroup}>
+                      <View style={styles.inputLabelRow}>
+                        <Text style={styles.inputLabel}>
+                          Mobile Number *
+                        </Text>
+                        <Text style={styles.inputHelperText}>
+                          (Verification required)
+                        </Text>
+                      </View>
 
-                    <TextInput
-                      style={
-                        styles.textInput
-                      }
-                      placeholder="Enter 10-digit mobile number *"
-                      placeholderTextColor="#64748b"
-                      keyboardType="phone-pad"
-                      maxLength={15}
-                      value={
-                        mobileNumber
-                      }
-                      onChangeText={
-                        setMobileNumber
-                      }
-                    />
-                  </View>
+                      <View style={styles.phoneInputRow}>
+                        <TextInput
+                          style={[
+                            styles.textInput,
+                            styles.phoneInputFlex,
+                          ]}
+                          placeholder="Enter 10-digit mobile number *"
+                          placeholderTextColor="#64748b"
+                          keyboardType="phone-pad"
+                          maxLength={15}
+                          value={mobileNumber}
+                          onChangeText={(val) => {
+                            setMobileNumber(val);
+                            if (isOtpSent) {
+                              setIsOtpSent(false);
+                              setOtpCode('');
+                            }
+                          }}
+                        />
+
+                        <TouchableOpacity
+                          style={[
+                            styles.sendOtpBtn,
+                            (isSendingOtp || mobileNumber.replace(/\D/g, '').length < 10) &&
+                              styles.sendOtpBtnDisabled,
+                          ]}
+                          disabled={isSendingOtp || mobileNumber.replace(/\D/g, '').length < 10}
+                          onPress={handleSendOtp}
+                          activeOpacity={0.8}
+                        >
+                          {isSendingOtp ? (
+                            <ActivityIndicator size="small" color="#ffffff" />
+                          ) : (
+                            <View style={styles.sendOtpBtnContent}>
+                              <Smartphone size={14} color="#ffffff" />
+                              <Text style={styles.sendOtpBtnText}>
+                                {isOtpSent ? 'Resend' : 'Get OTP'}
+                              </Text>
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Success / Info message banner */}
+                      {otpSuccessMsg ? (
+                        <View style={styles.otpSuccessBanner}>
+                          <CheckCircle2 size={14} color="#15803d" />
+                          <Text style={styles.otpSuccessBannerText}>
+                            {otpSuccessMsg}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {/* OTP Input & Verification Card */}
+                      {isOtpSent && (
+                        <View style={styles.otpCard}>
+                          <View style={styles.otpCardHeader}>
+                            <View style={styles.otpCardHeaderLeft}>
+                              <KeyRound size={16} color="#D33401" />
+                              <Text style={styles.otpCardTitle}>
+                                Enter 6-Digit OTP
+                              </Text>
+                            </View>
+                            <Text style={styles.otpCardSubtitle}>
+                              Sent to +91 {mobileNumber.replace(/\D/g, '').slice(-10)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.otpInputRow}>
+                            <TextInput
+                              style={styles.otpInput}
+                              placeholder="• • • • • •"
+                              placeholderTextColor="#94a3b8"
+                              keyboardType="number-pad"
+                              maxLength={6}
+                              value={otpCode}
+                              onChangeText={setOtpCode}
+                              autoFocus
+                            />
+
+                            <TouchableOpacity
+                              style={[
+                                styles.verifyOtpBtn,
+                                (isVerifyingOtp || otpCode.trim().length < 4) &&
+                                  styles.verifyOtpBtnDisabled,
+                              ]}
+                              disabled={isVerifyingOtp || otpCode.trim().length < 4}
+                              onPress={handleVerifyOtp}
+                              activeOpacity={0.8}
+                            >
+                              {isVerifyingOtp ? (
+                                <ActivityIndicator size="small" color="#ffffff" />
+                              ) : (
+                                <View style={styles.verifyOtpBtnContent}>
+                                  <Check size={14} color="#ffffff" />
+                                  <Text style={styles.verifyOtpBtnText}>
+                                    Verify OTP
+                                  </Text>
+                                </View>
+                              )}
+                            </TouchableOpacity>
+                          </View>
+
+                          <View style={styles.otpFooterRow}>
+                            {otpCountdown > 0 ? (
+                              <Text style={styles.countdownText}>
+                                Resend available in {otpCountdown}s
+                              </Text>
+                            ) : (
+                              <TouchableOpacity
+                                onPress={handleSendOtp}
+                                disabled={isSendingOtp}
+                                style={styles.resendBtn}
+                              >
+                                <RefreshCw size={12} color="#D33401" />
+                                <Text style={styles.resendBtnText}>
+                                  Resend OTP
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  )}
 
                   <View
                     style={styles.inputGroup}
@@ -2303,5 +2593,209 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: 'center',
     lineHeight: 17,
+  },
+
+  /* Verification and OTP Styles */
+  inputLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  inputHelperText: {
+    color: '#D33401',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  phoneInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  phoneInputFlex: {
+    flex: 1,
+  },
+  sendOtpBtn: {
+    backgroundColor: '#D33401',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 85,
+    minHeight: 42,
+  },
+  sendOtpBtnDisabled: {
+    backgroundColor: '#cbd5e1',
+  },
+  sendOtpBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  sendOtpBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  verifiedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1.5,
+    borderColor: '#86efac',
+    borderRadius: 14,
+    padding: 12,
+  },
+  verifiedCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  verifiedIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#dcfce7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  verifiedBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  verifiedBadgeText: {
+    color: '#15803d',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  verifiedMobileText: {
+    color: '#1e293b',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  changePhoneBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  changePhoneBtnText: {
+    color: '#15803d',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  otpSuccessBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#86efac',
+    padding: 8,
+    borderRadius: 8,
+    marginTop: 6,
+  },
+  otpSuccessBannerText: {
+    color: '#15803d',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  otpCard: {
+    backgroundColor: '#FFF7F4',
+    borderWidth: 1.5,
+    borderColor: '#FFD6C9',
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 8,
+    gap: 10,
+  },
+  otpCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  otpCardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  otpCardTitle: {
+    color: '#9A2501',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  otpCardSubtitle: {
+    color: '#747878',
+    fontSize: 11,
+  },
+  otpInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  otpInput: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#FFBBAB',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1B1C1C',
+    textAlign: 'center',
+    letterSpacing: 4,
+  },
+  verifyOtpBtn: {
+    backgroundColor: '#15803d',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 42,
+  },
+  verifyOtpBtnDisabled: {
+    backgroundColor: '#cbd5e1',
+  },
+  verifyOtpBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  verifyOtpBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  otpFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  countdownText: {
+    color: '#747878',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  resendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+  },
+  resendBtnText: {
+    color: '#D33401',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });
