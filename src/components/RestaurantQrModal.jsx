@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -158,8 +158,16 @@ export default function RestaurantQrModal({
     activeTable ? activeTable.id : null
   );
   const [copied, setCopied] = useState(false);
+  const [qrReady, setQrReady] = useState(false);
 
-  if (!visible) return null;
+  useEffect(() => {
+    if (!visible) {
+      setQrReady(false);
+      return;
+    }
+    const frame = requestAnimationFrame(() => setQrReady(true));
+    return () => cancelAnimationFrame(frame);
+  }, [visible]);
 
   const restName =
     restaurantName || catalog?.restaurantName || 'Menza Fine Dining';
@@ -307,14 +315,21 @@ export default function RestaurantQrModal({
               </View>
 
               <View style={styles.qrCodeWrapper}>
-                <QRCodeSVG
-                  id={qrElementId}
-                  value={targetUrl}
-                  size={190}
-                  bgColor="#ffffff"
-                  fgColor="#1B1C1C"
-                  level="Q"
-                />
+                {qrReady ? (
+                  <QRCodeSVG
+                    id={qrElementId}
+                    value={targetUrl}
+                    size={190}
+                    bgColor="#ffffff"
+                    fgColor="#1B1C1C"
+                    level="Q"
+                  />
+                ) : (
+                  <View style={styles.qrPlaceholder}>
+                    <QrCode size={54} color="#D33401" strokeWidth={1.8} />
+                    <Text style={styles.qrLoadingText}>Preparing QR...</Text>
+                  </View>
+                )}
               </View>
 
               <Text style={styles.qrCardInstruction}>
@@ -558,6 +573,22 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
+  },
+
+  qrPlaceholder: {
+    width: 190,
+    height: 190,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FBF9F9',
+    borderRadius: 8,
+    gap: 8,
+  },
+
+  qrLoadingText: {
+    color: '#747878',
+    fontSize: 11,
+    fontWeight: '600',
   },
 
   qrCardInstruction: {

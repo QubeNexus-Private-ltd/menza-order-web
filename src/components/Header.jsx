@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import {
   ShoppingBag as CartIcon,
   ClipboardList as OrderIcon,
@@ -17,98 +17,94 @@ export default function Header({
 }) {
   const displayName = restaurantName || 'Saffron Café';
 
+  const handleQrPress = React.useCallback(() => {
+    if (typeof openQrModal === 'function') {
+      openQrModal();
+    }
+  }, [openQrModal]);
+
+  const handleOrderPress = React.useCallback(() => {
+    if (typeof openOrderTracker === 'function') {
+      openOrderTracker();
+    }
+  }, [openOrderTracker]);
+
+  const handleCartPress = React.useCallback(() => {
+    if (typeof openCart === 'function') {
+      openCart();
+    }
+  }, [openCart]);
+
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-
-        {/* =========================
-            RESTAURANT NAME & BRAND
-        ========================== */}
         <View style={styles.brandContainer}>
           <View style={styles.logoBadge}>
             <Store size={20} color="#ffffff" />
           </View>
 
           <View style={styles.brandTextContainer}>
-            <Text
-              style={styles.brandTitle}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
+            <Text style={styles.brandTitle} numberOfLines={1} ellipsizeMode="tail">
               {displayName}
             </Text>
-
             <Text style={styles.brandSub} numberOfLines={1}>
               Smart Ordering
             </Text>
           </View>
         </View>
 
-        {/* =========================
-            RIGHT SIDE ACTIONS
-        ========================== */}
         <View style={styles.actionsRow}>
-
-          {/* =========================
-              RESTAURANT QR CODE BUTTON
-          ========================== */}
-          {openQrModal && (
-            <TouchableOpacity
-              style={styles.qrButton}
-              onPress={openQrModal}
-              activeOpacity={0.8}
+          {typeof openQrModal === 'function' && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.qrButton,
+                pressed && styles.qrButtonPressed,
+              ]}
+              onPress={handleQrPress}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              pressRetentionOffset={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              android_ripple={{ color: '#D8D5D2', borderless: false }}
+              accessibilityRole="button"
               accessibilityLabel="View and Download Restaurant QR Code"
             >
-              <QrCode
-                size={16}
-                color="#1B1C1C"
-                strokeWidth={2.3}
-              />
+              <QrCode size={16} color="#1B1C1C" strokeWidth={2.3} />
               <Text style={styles.qrButtonText}>QR</Text>
-            </TouchableOpacity>
+            </Pressable>
           )}
 
-          {/* =========================
-              ORDER TRACKER BUTTON
-          ========================== */}
-          {activeOrder && (
-            <TouchableOpacity
-              style={styles.orderButton}
-              onPress={openOrderTracker}
-              activeOpacity={0.8}
+          {activeOrder && typeof openOrderTracker === 'function' && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.orderButton,
+                pressed && styles.orderButtonPressed,
+              ]}
+              onPress={handleOrderPress}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              pressRetentionOffset={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              android_ripple={{ color: '#F3C8BA', borderless: false }}
+              accessibilityRole="button"
               accessibilityLabel="View Active Order"
             >
-              <OrderIcon
-                size={17}
-                color="#D33401"
-                strokeWidth={2.3}
-              />
-
-              <Text style={styles.orderButtonText}>
-                Order
-              </Text>
-
-              {/* Order status dot */}
+              <OrderIcon size={17} color="#D33401" strokeWidth={2.3} />
+              <Text style={styles.orderButtonText}>Order</Text>
               <View style={styles.orderDot} />
-            </TouchableOpacity>
+            </Pressable>
           )}
 
-          {/* =========================
-              CART BUTTON
-          ========================== */}
-          <TouchableOpacity
-            style={styles.cartButton}
-            onPress={openCart}
-            activeOpacity={0.8}
+          <Pressable
+            style={({ pressed }) => [
+              styles.cartButton,
+              pressed && styles.cartButtonPressed,
+            ]}
+            onPress={handleCartPress}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            pressRetentionOffset={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            android_ripple={{ color: '#B52D03', borderless: true }}
+            accessibilityRole="button"
             accessibilityLabel={`Cart with ${cartCount} items`}
           >
-            <CartIcon
-              size={19}
-              color="#ffffff"
-              strokeWidth={2.3}
-            />
+            <CartIcon size={19} color="#ffffff" strokeWidth={2.3} />
 
-            {/* Cart Count Badge */}
             {cartCount > 0 && (
               <View style={styles.cartBadge}>
                 <Text style={styles.cartBadgeText}>
@@ -116,8 +112,7 @@ export default function Header({
                 </Text>
               </View>
             )}
-          </TouchableOpacity>
-
+          </Pressable>
         </View>
       </View>
     </View>
@@ -125,9 +120,6 @@ export default function Header({
 }
 
 const styles = StyleSheet.create({
-  // ==========================================
-  // MAIN HEADER CONTAINER
-  // ==========================================
   container: {
     width: '100%',
     backgroundColor: '#FBF9F9',
@@ -135,17 +127,13 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E0DDD8',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    zIndex: 100,
-    elevation: 4,
+    zIndex: 1000,
+    elevation: 8,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
     shadowRadius: 6,
   },
-
-  // ==========================================
-  // HEADER ROW (MAX WIDTH ALIGNED)
-  // ==========================================
   headerRow: {
     width: '100%',
     maxWidth: 1280,
@@ -156,17 +144,12 @@ const styles = StyleSheet.create({
     minHeight: 42,
     gap: 8,
   },
-
-  // ==========================================
-  // RESTAURANT BRAND
-  // ==========================================
   brandContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
     minWidth: 0,
   },
-
   logoBadge: {
     width: 38,
     height: 38,
@@ -177,80 +160,77 @@ const styles = StyleSheet.create({
     marginRight: 10,
     flexShrink: 0,
   },
-
   brandTextContainer: {
     flex: 1,
     minWidth: 0,
     justifyContent: 'center',
   },
-
   brandTitle: {
     color: '#1B1C1C',
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: -0.3,
   },
-
   brandSub: {
     color: '#747878',
     fontSize: 11,
     fontWeight: '600',
     marginTop: 1,
   },
-
-  // ==========================================
-  // RIGHT ACTIONS
-  // ==========================================
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 6,
     gap: 8,
     flexShrink: 0,
+    zIndex: 1001,
   },
-
-  // ==========================================
-  // QR BUTTON
-  // ==========================================
   qrButton: {
     height: 40,
+    minWidth: 58,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 11,
     borderRadius: 20,
     backgroundColor: '#EFEDED',
     borderWidth: 1,
     borderColor: '#E0DDD8',
     gap: 4,
+    zIndex: 1002,
+    elevation: 2,
   },
-
+  qrButtonPressed: {
+    backgroundColor: '#E3E0DD',
+    transform: [{ scale: 0.97 }],
+  },
   qrButtonText: {
     color: '#1B1C1C',
     fontSize: 12,
     fontWeight: '800',
   },
-
-  // ==========================================
-  // ORDER BUTTON
-  // ==========================================
   orderButton: {
     height: 40,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 12,
     borderRadius: 20,
     backgroundColor: '#FFF1EC',
     borderWidth: 1,
     borderColor: '#F3C8BA',
+    zIndex: 1002,
   },
-
+  orderButtonPressed: {
+    backgroundColor: '#FFE4DA',
+    transform: [{ scale: 0.97 }],
+  },
   orderButtonText: {
     color: '#D33401',
     fontSize: 12,
     fontWeight: '800',
     marginLeft: 5,
   },
-
   orderDot: {
     width: 7,
     height: 7,
@@ -258,10 +238,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#D33401',
     marginLeft: 5,
   },
-
-  // ==========================================
-  // CART BUTTON
-  // ==========================================
   cartButton: {
     width: 42,
     height: 42,
@@ -270,19 +246,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+    zIndex: 1002,
     shadowColor: '#D33401',
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.28,
     shadowRadius: 6,
-    elevation: 4,
+    elevation: 5,
   },
-
-  // ==========================================
-  // CART BADGE
-  // ==========================================
+  cartButtonPressed: {
+    backgroundColor: '#B92D03',
+    transform: [{ scale: 0.96 }],
+  },
   cartBadge: {
     position: 'absolute',
     top: -5,
@@ -297,10 +271,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#FBF9F9',
   },
-
   cartBadgeText: {
     color: '#ffffff',
     fontSize: 9,
     fontWeight: '900',
   },
-});
+});
