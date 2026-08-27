@@ -102,6 +102,9 @@ export default function App() {
   const [loading, setLoading] =
     useState(true);
 
+  const [storeOperatingStatus, setStoreOperatingStatus] =
+    useState(null);
+
   const [toastMessage, setToastMessage] =
     useState('');
 
@@ -120,6 +123,16 @@ export default function App() {
   useEffect(() => {
     const restId = catalog?.restaurantId || selectedRestaurant?.id || 1;
     signalrService.startSignalRConnection(restId);
+
+    const unsubscribe = signalrService.onStoreOperatingStatusChanged((status) => {
+      if (status) {
+        setStoreOperatingStatus(status);
+      }
+    });
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
   }, [catalog?.restaurantId, selectedRestaurant?.id]);
 
   /* =========================
@@ -175,16 +188,25 @@ export default function App() {
         window.location.search
       );
 
+    // Multi-parameter table fallback
     const urlTableId =
-      searchParams.get('tableId');
+      searchParams.get('tableId') ||
+      searchParams.get('t') ||
+      searchParams.get('table') ||
+      searchParams.get('tablenum');
 
+    // Multi-parameter encrypted restaurant ID fallback
     const encRestId =
-      searchParams.get('encRestId');
+      searchParams.get('r') ||
+      searchParams.get('encRestId') ||
+      searchParams.get('enc') ||
+      searchParams.get('eid');
 
+    // Multi-parameter plain restaurant ID fallback
     const urlRestId =
-      searchParams.get(
-        'restaurantId'
-      ) || 1;
+      searchParams.get('restId') ||
+      searchParams.get('restaurantId') ||
+      searchParams.get('id');
 
     const paymentReturnOrderId =
       searchParams.get('order_id') ||
@@ -197,18 +219,19 @@ export default function App() {
           encRestId;
 
         if (!targetEncryptedId) {
+          const rawId = urlRestId ? Number(urlRestId) : 1;
           const encResult =
             await api.getEncryptedRestaurantIdFromApi(
-              Number(urlRestId)
+              rawId
             );
 
           targetEncryptedId =
-            encResult.encryptedRestaurantId;
+            encResult?.encryptedRestaurantId || String(rawId);
         }
 
         const targetTableNum =
           urlTableId
-            ? Number(urlTableId)
+            ? isNaN(Number(urlTableId)) ? urlTableId : Number(urlTableId)
             : null;
 
         await loadMenuViaEncryptedEndpoint(
@@ -351,6 +374,15 @@ export default function App() {
             encryptedRestId
           );
 
+        try {
+          const statusData = await api.getStoreOperatingStatus(numericRestId);
+          if (statusData) {
+            setStoreOperatingStatus(statusData);
+          }
+        } catch (statusErr) {
+          console.warn('Status fetch error:', statusErr);
+        }
+
         const tablesData =
           await api.getTables(
             numericRestId
@@ -378,18 +410,8 @@ export default function App() {
               rId: numericRestId,
             });
           }
-        } else if (
-          tablesData.length > 0
-        ) {
-          setActiveTable(
-            tablesData[0]
-          );
         } else {
-          setActiveTable({
-            id: 1,
-            tableName: 'Table #1',
-            rId: numericRestId,
-          });
+          setActiveTable(null);
         }
 
         const rObj =
@@ -595,6 +617,14 @@ export default function App() {
       setLoading(true);
 
       try {
+        if (storeOperatingStatus && storeOperatingStatus.canPlaceOrder === false) {
+          const msg = storeOperatingStatus.statusMessage ||
+            (storeOperatingStatus.status === 'PAUSED'
+              ? `Kitchen is temporarily paused (${storeOperatingStatus.remainingPauseMinutes || 0}m left). Ordering is currently disabled.`
+              : 'Restaurant is currently closed for ordering.');
+          throw new Error(msg);
+        }
+
         const restId =
           catalog
             ? catalog.restaurantId
@@ -1181,12 +1211,30 @@ export default function App() {
       ) : null}
 
       <Header
-        mode={mode}
-        setMode={setMode}
-        activeTable={activeTable}
-        openScanner={() =>
-          setScannerOpen(true)
+        restaurantName={
+          catalog
+            ? catalog.restaurantName
+            : 'Restaurant Menu'
         }
+        restaurantAddress={
+          catalog?.restaurantAddress ||
+          catalog?.address ||
+          [catalog?.address, catalog?.city, catalog?.state].filter(Boolean).join(', ') ||
+          ''
+        }
+        restaurantImage={
+          catalog?.imageUrl ||
+          catalog?.restaurantImage ||
+          ''
+        }
+        restaurantLogo={
+          catalog?.logoUrl ||
+          catalog?.logo ||
+          ''
+        }
+        loading={loading}
+        storeOperatingStatus={storeOperatingStatus}
+        activeTable={activeTable}
         openQrModal={() =>
           setQrModalOpen(true)
         }
@@ -1211,24 +1259,6 @@ export default function App() {
               )
         }
         activeOrder={activeOrder}
-        onCallWaiter={
-          handleCallWaiter
-        }
-        onRequestBill={
-          handleRequestBill
-        }
-        staffUser={staffUser}
-        openLogin={() =>
-          setMode('staff')
-        }
-        onLogout={
-          handleStaffLogout
-        }
-        restaurantName={
-          catalog
-            ? catalog.restaurantName
-            : 'Menza Fine Dining'
-        }
       />
 
       {mode === 'customer' ? (
@@ -1260,6 +1290,7 @@ export default function App() {
             handleRequestBill
           }
           loading={loading}
+          storeOperatingStatus={storeOperatingStatus}
         />
       ) : (
         <StaffView
@@ -1342,6 +1373,7 @@ export default function App() {
         activeTable={activeTable}
         catalog={catalog}
         loading={loading}
+        storeOperatingStatus={storeOperatingStatus}
       />
 
       <OrderTrackerModal

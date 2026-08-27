@@ -8,6 +8,7 @@ import {
   Modal,
   StyleSheet,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import {
   X,
@@ -173,6 +174,15 @@ export default function OrderTrackerModal({
   ]);
 
   if (!visible) return null;
+
+  const maskPhoneLast4 = (phone) => {
+    if (!phone) return '';
+    const str = String(phone).trim();
+    if (str.includes('*')) return str;
+    const digits = str.replace(/\D/g, '');
+    if (digits.length <= 4) return digits;
+    return '******' + digits.slice(-4);
+  };
 
   const normalizeStatus = (value) => {
     const valueLower = String(value ?? '')
@@ -657,6 +667,36 @@ export default function OrderTrackerModal({
           </TouchableOpacity>
         </View>
 
+        {/* RESTAURANT BRAND & ADDRESS HEADER */}
+        <View style={styles.restaurantBrandCard}>
+          {(selectedOrder.logoUrl || catalog?.logoUrl || selectedOrder.imageUrl || catalog?.imageUrl) ? (
+            <Image
+              source={{ uri: selectedOrder.logoUrl || catalog?.logoUrl || selectedOrder.imageUrl || catalog?.imageUrl }}
+              style={styles.restaurantBrandLogo}
+              resizeMode="cover"
+            />
+          ) : null}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.restaurantBrandName}>
+              {selectedOrder.restaurantName || catalog?.restaurantName || ''}
+            </Text>
+            {((selectedOrder.address || catalog?.address) || (selectedOrder.city || catalog?.city)) ? (
+              <Text style={styles.restaurantBrandAddress}>
+                {[
+                  selectedOrder.address || catalog?.address,
+                  selectedOrder.city || catalog?.city,
+                  selectedOrder.state || catalog?.state
+                ].filter(Boolean).join(', ')}
+              </Text>
+            ) : null}
+            {(selectedOrder.contactPhone || catalog?.contactNumber) ? (
+              <Text style={styles.restaurantBrandContact}>
+                Ph: {selectedOrder.contactPhone || catalog?.contactNumber}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+
         {/* ORDER STATUS HERO CARD */}
         <View
           style={[
@@ -852,7 +892,7 @@ export default function OrderTrackerModal({
               >
                 {selectedOrder.customerName ||
                   selectedOrder.name ||
-                  'Guest Diner'}
+                  ''}
               </Text>
             </View>
 
@@ -874,9 +914,7 @@ export default function OrderTrackerModal({
                   styles.infoTableValue
                 }
               >
-                {selectedOrder.mobileNumber ||
-                  selectedOrder.customerPhone ||
-                  'N/A'}
+                {maskPhoneLast4(selectedOrder.maskedMobileNumber || selectedOrder.mobileNumber || selectedOrder.customerPhone) || ''}
               </Text>
             </View>
 
@@ -2955,5 +2993,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#ffffff',
+  },
+  restaurantBrandCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  restaurantBrandLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+  },
+  restaurantBrandName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  restaurantBrandAddress: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#64748B',
+    marginTop: 2,
+  },
+  restaurantBrandContact: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginTop: 1,
   },
 });

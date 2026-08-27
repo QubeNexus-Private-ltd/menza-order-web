@@ -7,6 +7,8 @@ let currentOrderId = null;
 const statusListeners = new Set();
 const orderCreatedListeners = new Set();
 
+const storeOperatingStatusListeners = new Set();
+
 /**
  * Initializes and starts the SignalR Hub connection
  */
@@ -77,6 +79,18 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
           callback(data);
         } catch (e) {
           console.error('Error in SignalR kitchen listener:', e);
+        }
+      });
+    });
+
+    // Event listener: OnStoreOperatingStatusChanged
+    hubConnection.on('OnStoreOperatingStatusChanged', (data) => {
+      console.log('⚡ [SignalR] Real-Time StoreOperatingStatusChanged received:', data);
+      storeOperatingStatusListeners.forEach((callback) => {
+        try {
+          callback(data);
+        } catch (e) {
+          console.error('Error in SignalR store status listener:', e);
         }
       });
     });
@@ -159,5 +173,17 @@ export function onOrderCreated(callback) {
   }
   return () => {
     orderCreatedListeners.delete(callback);
+  };
+}
+
+/**
+ * Subscribe to real-time store operating status change events
+ */
+export function onStoreOperatingStatusChanged(callback) {
+  if (typeof callback === 'function') {
+    storeOperatingStatusListeners.add(callback);
+  }
+  return () => {
+    storeOperatingStatusListeners.delete(callback);
   };
 }

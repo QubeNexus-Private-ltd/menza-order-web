@@ -112,6 +112,7 @@ export default function CartModal({
   catalog,
   orderTypes = [],
   loading,
+  storeOperatingStatus,
 }) {
   const [guestName, setGuestName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
@@ -545,6 +546,16 @@ export default function CartModal({
       return;
     }
 
+    if (storeOperatingStatus && storeOperatingStatus.canPlaceOrder === false) {
+      setErrorMsg(
+        storeOperatingStatus.statusMessage ||
+        (storeOperatingStatus.status === 'PAUSED'
+          ? `Kitchen is temporarily paused (${storeOperatingStatus.remainingPauseMinutes || 0}m left). Reopening soon.`
+          : 'Kitchen is currently closed for ordering.')
+      );
+      return;
+    }
+
     if (!activeCartItems.length) {
       setErrorMsg('Your cart is empty.');
       return;
@@ -678,9 +689,15 @@ export default function CartModal({
           paymentSessionId
         ) {
           try {
+            const cfMode =
+              checkoutRes?.environment?.toLowerCase() === 'production' ||
+              checkoutRes?.data?.environment?.toLowerCase() === 'production'
+                ? 'production'
+                : 'sandbox';
+
             const cashfree =
               window.Cashfree({
-                mode: 'sandbox',
+                mode: cfMode,
               });
 
             cashfree.checkout({
@@ -1879,33 +1896,6 @@ export default function CartModal({
                     </View>
                   ) : null}
 
-                  {platformFee > 0 ? (
-                    <View
-                      style={
-                        styles.summaryRow
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.summaryLabel
-                        }
-                      >
-                        Platform Fee
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.summaryValue
-                        }
-                      >
-                        ₹
-                        {money(
-                          platformFee
-                        )}
-                      </Text>
-                    </View>
-                  ) : null}
-
                   <View
                     style={
                       styles.zeroFeeBadge
@@ -1921,7 +1911,7 @@ export default function CartModal({
                         styles.zeroFeeBadgeText
                       }
                     >
-                      Zero Platform Fee for Customers
+                      Zero Platform & Payment Gateway Fee for Customers
                     </Text>
                   </View>
 
@@ -1987,7 +1977,8 @@ export default function CartModal({
                 style={[
                   styles.checkoutBtn,
                   (isLoadingState ||
-                    hasUnavailableItems) &&
+                    hasUnavailableItems ||
+                    (storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)) &&
                     styles.checkoutBtnDisabled,
                 ]}
                 onPress={
@@ -1995,7 +1986,8 @@ export default function CartModal({
                 }
                 disabled={
                   isLoadingState ||
-                  hasUnavailableItems
+                  hasUnavailableItems ||
+                  Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
                 }
                 activeOpacity={0.85}
               >
@@ -2011,14 +2003,13 @@ export default function CartModal({
                         styles.checkoutBtnText
                       }
                     >
-                      {paymentMethod ===
-                      'cashfree'
-                        ? 'PAY VIA CASHFREE'
-                        : 'CONFIRM & PLACE ORDER'}{' '}
-                      • ₹
-                      {money(
-                        grandTotal
-                      )}
+                      {storeOperatingStatus && !storeOperatingStatus.canPlaceOrder
+                        ? (storeOperatingStatus.status === 'PAUSED'
+                            ? `KITCHEN PAUSED (${storeOperatingStatus.remainingPauseMinutes || 0}M LEFT)`
+                            : 'KITCHEN CLOSED FOR ORDERING')
+                        : (paymentMethod === 'cashfree'
+                            ? 'PAY VIA CASHFREE'
+                            : 'CONFIRM & PLACE ORDER') + ` • ₹${money(grandTotal)}`}
                     </Text>
 
                     <ArrowRight

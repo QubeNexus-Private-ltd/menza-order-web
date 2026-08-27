@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Image,
   StyleSheet,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import {
   Search,
@@ -15,12 +16,124 @@ import {
   Minus,
   Store,
   ChevronUp,
+  MapPin,
+  Utensils,
+  Clock,
+  Bell,
+  Receipt,
+  Sparkles,
 } from 'lucide-react';
 import {
   getUnitDescription,
   getItemImageUrl,
+  getOriginalImageUrl,
   IMAGE_NOT_AVAILABLE,
 } from '../services/api';
+
+function SkeletonBox({ width, height, borderRadius = 8, style }) {
+  if (typeof window !== 'undefined') {
+    return (
+      <div
+        className="skeleton-pulse"
+        style={{
+          width: typeof width === 'number' ? `${width}px` : width,
+          height: typeof height === 'number' ? `${height}px` : height,
+          borderRadius: `${borderRadius}px`,
+          backgroundColor: '#E2E8F0',
+          flexShrink: 0,
+          ...(typeof style === 'object' ? style : {}),
+        }}
+      />
+    );
+  }
+
+  return (
+    <View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor: '#E2E8F0',
+          opacity: 0.6,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+function CustomerViewSkeleton() {
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Search & Veg Filter Skeleton */}
+      <View style={styles.controlsRow}>
+        <SkeletonBox
+          width="100%"
+          height={44}
+          borderRadius={14}
+          style={{ flex: 1 }}
+        />
+        <SkeletonBox
+          width={72}
+          height={44}
+          borderRadius={14}
+        />
+      </View>
+
+      {/* Category Filter Pills Skeleton */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.categoriesScroll}
+        contentContainerStyle={styles.categoriesContainer}
+      >
+        {[85, 105, 115, 95, 110, 90].map((w, idx) => (
+          <SkeletonBox
+            key={idx}
+            width={w}
+            height={36}
+            borderRadius={22}
+          />
+        ))}
+      </ScrollView>
+
+      {/* Section Header Skeleton */}
+      <View style={styles.sectionHeaderRow}>
+        <SkeletonBox width={140} height={20} borderRadius={6} />
+        <SkeletonBox width={60} height={14} borderRadius={4} />
+      </View>
+
+      {/* Dishes Grid Skeleton */}
+      <View style={styles.grid}>
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
+          <View key={item} style={styles.cardSkeleton}>
+            <SkeletonBox
+              width="100%"
+              height={135}
+              borderRadius={12}
+              style={{ marginBottom: 10 }}
+            />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+              <SkeletonBox width={54} height={14} borderRadius={4} />
+              <SkeletonBox width={36} height={14} borderRadius={4} />
+            </View>
+            <SkeletonBox width="85%" height={15} borderRadius={4} style={{ marginBottom: 6 }} />
+            <SkeletonBox width="60%" height={11} borderRadius={4} style={{ marginBottom: 12 }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: 6, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
+              <SkeletonBox width={58} height={16} borderRadius={4} />
+              <SkeletonBox width={34} height={34} borderRadius={17} />
+            </View>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
 
 const COLORS = {
   orange: '#F47A24',
@@ -97,6 +210,7 @@ export default function CustomerView({
   onCallWaiter,
   onRequestBill,
   loading,
+  storeOperatingStatus,
 }) {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -106,8 +220,23 @@ export default function CustomerView({
   const restaurantName =
     catalog
       ? catalog.restaurantName ||
-        `Restaurant #${catalog.restaurantId}`
-      : 'Saffron Café';
+        (catalog.restaurantId ? `Restaurant #${catalog.restaurantId}` : 'Restaurant Menu')
+      : 'Restaurant Menu';
+
+  const restaurantAddress =
+    catalog?.restaurantAddress ||
+    catalog?.address ||
+    [catalog?.address, catalog?.city, catalog?.state].filter(Boolean).join(', ') ||
+    '';
+
+  const rawCover = catalog?.imageUrl || catalog?.restaurantImage || '';
+  const restaurantImageUrl = rawCover ? getOriginalImageUrl(rawCover) : '';
+
+  const rawLogo = catalog?.logoUrl || catalog?.logo || '';
+  const restaurantLogoUrl = rawLogo ? getOriginalImageUrl(rawLogo) : '';
+
+  const [logoError, setLogoError] = useState(false);
+  const [coverError, setCoverError] = useState(false);
 
   const totalCartCount =
     (cartItems || []).reduce(
@@ -382,6 +511,14 @@ export default function CustomerView({
     return generatedUrl || '';
   };
 
+  if (loading) {
+    return (
+      <View style={styles.rootWrapper}>
+        <CustomerViewSkeleton />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.rootWrapper}>
       <ScrollView
@@ -393,132 +530,70 @@ export default function CustomerView({
           false
         }
       >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={
-            false
-          }
-          style={
-            styles.categoriesScroll
-          }
-          contentContainerStyle={
-            styles.categoriesContainer
-          }
-        >
-          <TouchableOpacity
-            style={[
-              styles.categoryChip,
-              selectedCategory === null &&
-                styles.categoryChipActive,
-            ]}
-            onPress={() =>
-              setSelectedCategory(null)
-            }
-            activeOpacity={0.85}
-          >
-            <Text
-              style={[
-                styles.categoryChipText,
-                selectedCategory === null &&
-                  styles.categoryChipTextActive,
-              ]}
-            >
-              All
-            </Text>
-          </TouchableOpacity>
-
-          {(categories || []).map(
-            (cat) => (
-              <TouchableOpacity
-                key={
-                  cat.categoryId
-                }
-                style={[
-                  styles.categoryChip,
-                  selectedCategory ===
-                    cat.categoryId &&
-                    styles.categoryChipActive,
-                ]}
-                onPress={() =>
-                  setSelectedCategory(
-                    cat.categoryId
-                  )
-                }
-                activeOpacity={0.85}
-              >
-                <Text
-                  style={[
-                    styles.categoryChipText,
-                    selectedCategory ===
-                      cat.categoryId &&
-                      styles.categoryChipTextActive,
-                  ]}
-                >
-                  {
-                    cat.categoryName
-                  }
-                </Text>
-              </TouchableOpacity>
-            )
-          )}
-        </ScrollView>
-
-        <View
-          style={
-            styles.controlsRow
-          }
-        >
+        {/* Closed/Paused Notification Banner if Ordering is Disabled */}
+        {storeOperatingStatus && !storeOperatingStatus.canPlaceOrder && (
           <View
-            style={
-              styles.searchBox
-            }
+            style={[
+              styles.storeStatusBanner,
+              storeOperatingStatus.status === 'PAUSED'
+                ? styles.storeStatusBannerPaused
+                : styles.storeStatusBannerClosed,
+            ]}
           >
-            <Search
-              size={20}
-              color={
-                COLORS.textSecondary
-              }
+            <View
+              style={[
+                styles.storeStatusDot,
+                storeOperatingStatus.status === 'PAUSED'
+                  ? styles.storeStatusDotPaused
+                  : styles.storeStatusDotClosed,
+              ]}
             />
-
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.storeStatusBannerTitle,
+                  storeOperatingStatus.status === 'PAUSED'
+                    ? styles.storeStatusBannerTitlePaused
+                    : styles.storeStatusBannerTitleClosed,
+                ]}
+              >
+                {storeOperatingStatus.status === 'PAUSED'
+                  ? `Kitchen Temporarily Paused (${storeOperatingStatus.remainingPauseMinutes || 0}m left)`
+                  : 'Kitchen Closed for Ordering'}
+              </Text>
+              <Text style={styles.storeStatusBannerSubtitle}>
+                {storeOperatingStatus.statusMessage ||
+                  'Ordering is currently disabled for this outlet.'}
+              </Text>
+            </View>
+          </View>
+        )}
+        {/* Search & Veg Filter Bar */}
+        <View style={styles.controlsRow}>
+          <View style={styles.searchBox}>
+            <Search size={18} color="#64748B" />
             <TextInput
-              style={
-                styles.searchInput
-              }
-              placeholder="Search dishes..."
-              placeholderTextColor={
-                COLORS.textMuted
-              }
-              value={
-                searchQuery
-              }
-              onChangeText={
-                setSearchQuery
-              }
+              style={styles.searchInput}
+              placeholder="Search food, drinks, desserts..."
+              placeholderTextColor="#94A3B8"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
             />
           </View>
 
           <TouchableOpacity
             style={[
               styles.vegToggle,
-              vegOnly &&
-                styles.vegToggleActive,
+              vegOnly && styles.vegToggleActive,
             ]}
-            onPress={() =>
-              setVegOnly(!vegOnly)
-            }
+            onPress={() => setVegOnly(!vegOnly)}
             activeOpacity={0.85}
           >
-            <View
-              style={
-                styles.vegDot
-              }
-            />
-
+            <View style={[styles.vegDot, vegOnly && styles.vegDotActive]} />
             <Text
               style={[
                 styles.vegText,
-                vegOnly &&
-                  styles.vegTextActive,
+                vegOnly && styles.vegTextActive,
               ]}
             >
               Veg
@@ -526,80 +601,76 @@ export default function CustomerView({
           </TouchableOpacity>
         </View>
 
-        <View
-          style={
-            styles.sectionHeaderRow
-          }
+        {/* Category Filter Pills */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoriesScroll}
+          contentContainerStyle={styles.categoriesContainer}
         >
-          <Text
-            style={
-              styles.sectionHeaderTitle
-            }
+          <TouchableOpacity
+            style={[
+              styles.categoryChip,
+              selectedCategory === null && styles.categoryChipActive,
+            ]}
+            onPress={() => setSelectedCategory(null)}
+            activeOpacity={0.85}
           >
+            <Text
+              style={[
+                styles.categoryChipText,
+                selectedCategory === null && styles.categoryChipTextActive,
+              ]}
+            >
+              All Items
+            </Text>
+          </TouchableOpacity>
+
+          {(categories || []).map((cat) => (
+            <TouchableOpacity
+              key={cat.categoryId}
+              style={[
+                styles.categoryChip,
+                selectedCategory === cat.categoryId && styles.categoryChipActive,
+              ]}
+              onPress={() => setSelectedCategory(cat.categoryId)}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[
+                  styles.categoryChipText,
+                  selectedCategory === cat.categoryId && styles.categoryChipTextActive,
+                ]}
+              >
+                {cat.categoryName}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Section Header */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionHeaderTitle}>
             {selectedCategory
-              ? 'Menu Selection'
-              : 'Popular Choice'}
+              ? (categories || []).find((c) => c.categoryId === selectedCategory)?.categoryName || 'Menu Selection'
+              : 'Popular Dishes'}
           </Text>
 
-          <Text
-            style={
-              styles.itemCountBadge
-            }
-          >
-            {
-              filteredItems.length
-            }{' '}
-            {filteredItems.length ===
-            1
-              ? 'item'
-              : 'items'}
+          <Text style={styles.itemCountBadge}>
+            {filteredItems.length} {filteredItems.length === 1 ? 'item' : 'items'}
           </Text>
         </View>
 
         {loading ? (
-          <View
-            style={
-              styles.loaderBox
-            }
-          >
-            <ActivityIndicator
-              size="large"
-              color={
-                COLORS.orange
-              }
-            />
-
-            <Text
-              style={
-                styles.loaderText
-              }
-            >
-              Loading culinary catalog
-              for {restaurantName}...
-            </Text>
+          <View style={styles.loaderBox}>
+            <ActivityIndicator size="large" color="#D33401" />
+            <Text style={styles.loaderText}>Loading menu...</Text>
           </View>
-        ) : filteredItems.length ===
-          0 ? (
-          <View
-            style={
-              styles.emptyBox
-            }
-          >
-            <Text
-              style={
-                styles.emptyTitle
-              }
-            >
-              No Items Found
-            </Text>
-
-            <Text
-              style={
-                styles.emptySub
-              }
-            >
-              No dishes match your
-              filter in {restaurantName}.
+        ) : filteredItems.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyTitle}>No Dishes Found</Text>
+            <Text style={styles.emptySub}>
+              No items match your search or dietary filter.
             </Text>
           </View>
         ) : (
@@ -884,7 +955,7 @@ export default function CustomerView({
                             <TouchableOpacity
                               style={[
                                 styles.qtyActionBtn,
-                                itemBusy &&
+                                (itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)) &&
                                   styles.qtyBtnBusy,
                               ]}
                               onPress={() =>
@@ -898,7 +969,7 @@ export default function CustomerView({
                                 )
                               }
                               disabled={
-                                itemBusy
+                                itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
                               }
                             >
                               <Plus
@@ -911,9 +982,11 @@ export default function CustomerView({
                           </View>
                         ) : (
                           <TouchableOpacity
-                            style={
-                              styles.addBtn
-                            }
+                            style={[
+                              styles.addBtn,
+                              Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) &&
+                                styles.addBtnDisabled,
+                            ]}
                             onPress={() =>
                               runItemAction(
                                 item.itemId,
@@ -926,7 +999,7 @@ export default function CustomerView({
                               )
                             }
                             disabled={
-                              itemBusy
+                              itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
                             }
                           >
                             {itemBusy ? (
@@ -1218,6 +1291,25 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
+  cardSkeleton: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 155,
+    minWidth: 140,
+    maxWidth: 295,
+    minHeight: 280,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 10,
+    justifyContent: 'space-between',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
+  },
   cardTouchable: {
     flex: 1,
     justifyContent:
@@ -1386,6 +1478,12 @@ const styles = StyleSheet.create({
     elevation: 3,
     flexShrink: 0,
   },
+  addBtnDisabled: {
+    backgroundColor: '#D1D5DB',
+    shadowOpacity: 0,
+    elevation: 0,
+    opacity: 0.6,
+  },
   qtyControlRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1541,5 +1639,248 @@ const styles = StyleSheet.create({
       COLORS.textSecondary,
     fontSize: 12,
     textAlign: 'center',
+  },
+  restaurantHeroCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#EAE6E1',
+    marginBottom: 16,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  restaurantHeroCover: {
+    width: '100%',
+    height: 145,
+    backgroundColor: COLORS.softGray,
+  },
+  restaurantHeroCoverPlaceholder: {
+    width: '100%',
+    height: 90,
+    backgroundColor: '#FAF5EE',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  heroPatternOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#F3EAE0',
+    opacity: 0.6,
+  },
+  restaurantHeroBody: {
+    padding: 16,
+  },
+  restaurantHeroHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  restaurantLogoWrapper: {
+    width: 60,
+    height: 60,
+    borderRadius: 16,
+    backgroundColor: COLORS.white,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+    flexShrink: 0,
+    overflow: 'hidden',
+  },
+  restaurantLogo: {
+    width: '100%',
+    height: '100%',
+  },
+  restaurantLogoFallback: {
+    width: 60,
+    height: 60,
+    borderRadius: 16,
+    backgroundColor: COLORS.orange,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: COLORS.orange,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+    flexShrink: 0,
+  },
+  restaurantHeroText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  restaurantTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  restaurantHeroTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#1B1C1C',
+    letterSpacing: -0.4,
+  },
+  restaurantAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  restaurantHeroAddress: {
+    fontSize: 12.5,
+    color: '#6B6661',
+    fontWeight: '500',
+    flex: 1,
+    lineHeight: 17,
+  },
+  heroStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  heroStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  heroStatusPillOpen: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  heroStatusPillPaused: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  heroStatusPillClosed: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  heroStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  heroStatusDotOpen: {
+    backgroundColor: '#10B981',
+  },
+  heroStatusDotPaused: {
+    backgroundColor: '#F59E0B',
+  },
+  heroStatusDotClosed: {
+    backgroundColor: '#EF4444',
+  },
+  heroStatusText: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  heroStatusTextOpen: {
+    color: '#047857',
+  },
+  heroStatusTextPaused: {
+    color: '#B45309',
+  },
+  heroStatusTextClosed: {
+    color: '#B91C1C',
+  },
+  heroFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    marginTop: 12,
+    gap: 8,
+  },
+  tableBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF1EC',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#F3C8BA',
+  },
+  tableBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#D33401',
+  },
+  tableActionButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  heroActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#F5F2EE',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5DFD7',
+  },
+  heroActionBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#383431',
+  },
+  storeStatusBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+  },
+  storeStatusBannerPaused: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  storeStatusBannerClosed: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  storeStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 4,
+  },
+  storeStatusDotPaused: {
+    backgroundColor: '#D97706',
+  },
+  storeStatusDotClosed: {
+    backgroundColor: '#DC2626',
+  },
+  storeStatusBannerTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  storeStatusBannerTitlePaused: {
+    color: '#B45309',
+  },
+  storeStatusBannerTitleClosed: {
+    color: '#B91C1C',
+  },
+  storeStatusBannerSubtitle: {
+    fontSize: 11,
+    color: '#78716C',
+    marginTop: 2,
+    lineHeight: 15,
   },
 });

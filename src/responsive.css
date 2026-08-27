@@ -109,24 +109,20 @@ html, body {
   animation: floatUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Responsive Image Utilities */
-img {
-  max-width: 100%;
-  height: auto;
+/* Skeleton Shimmer / Pulse Animation */
+@keyframes skeletonPulse {
+  0% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.35;
+  }
 }
 
-/* Print Styles for QR Code generation */
-@media print {
-  body * {
-    visibility: hidden;
-  }
-  .print-qr-section, .print-qr-section * {
-    visibility: visible;
-  }
-  .print-qr-section {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-  }
+.skeleton-pulse {
+  animation: skeletonPulse 1.3s ease-in-out infinite !important;
 }
+

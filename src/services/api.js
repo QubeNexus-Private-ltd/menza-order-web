@@ -617,178 +617,7 @@ export const getUnitDescription = (item) => {
    FALLBACK MENU
 ========================================================= */
 
-const getCuratedFallbackItems = (
-  restaurantId
-) => [
-  {
-    itemId: 101,
-    itemName: 'Paneer Tikka Royale',
-    categoryId: 1,
-    description:
-      'Fresh malai paneer cubes marinated in rich tandoori spices and char-grilled.',
-    price: 240,
-    amount: 240,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1567188040759-fb8a883dc6d8?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 102,
-    itemName: 'Crispy Veg Spring Rolls',
-    categoryId: 1,
-    description:
-      'Golden fried crispy rolls packed with shredded crunchy vegetables and sweet chili sauce.',
-    price: 180,
-    amount: 180,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1544025162-d76694265947?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 103,
-    itemName: 'Tandoori Chicken Wings',
-    categoryId: 1,
-    description:
-      'Char-grilled chicken wings coated in spicy smoky yogurt tandoor marinade.',
-    price: 290,
-    amount: 290,
-    isVeg: false,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1527477321055-436158a2b00d?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 201,
-    itemName: 'Fresh Mint Lime Cooler',
-    categoryId: 2,
-    description:
-      'Refreshing sparkling lemon cooler with muddled mint leaves and crushed ice.',
-    price: 90,
-    amount: 90,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 202,
-    itemName: 'Royal Alphonso Mango Lassi',
-    categoryId: 2,
-    description:
-      'Thick creamy yogurt shake enriched with sweet Alphonso mango pulp.',
-    price: 120,
-    amount: 120,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1553787499-6f9133860278?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 203,
-    itemName: 'Classic Cold Coffee Frappé',
-    categoryId: 2,
-    description:
-      'Rich dark espresso blended with whole milk and vanilla ice cream.',
-    price: 140,
-    amount: 140,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 301,
-    itemName: 'Paneer Butter Masala',
-    categoryId: 3,
-    description:
-      'Soft cottage cheese cubes simmered in a velvety tomato, butter and cashew gravy.',
-    price: 320,
-    amount: 320,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 302,
-    itemName: 'Kadai Paneer Special',
-    categoryId: 3,
-    description:
-      'Paneer tossed with crisp bell peppers, onions and roasted coriander.',
-    price: 310,
-    amount: 310,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 401,
-    itemName: 'Signature Butter Chicken',
-    categoryId: 4,
-    description:
-      'Tender tandoori chicken cooked in mild creamy butter tomato sauce.',
-    price: 380,
-    amount: 380,
-    isVeg: false,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1588166524941-3bf61a9c41db?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 402,
-    itemName: 'Hyderabadi Dum Chicken Biryani',
-    categoryId: 4,
-    description:
-      'Aromatic basmati rice cooked on dum with marinated spicy chicken.',
-    price: 350,
-    amount: 350,
-    isVeg: false,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 501,
-    itemName: 'Butter Garlic Naan',
-    categoryId: 5,
-    description:
-      'Tandoor baked naan topped with roasted garlic and butter.',
-    price: 60,
-    amount: 60,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1626074353765-517a681e40be?w=600',
-    restaurantId,
-  },
-  {
-    itemId: 502,
-    itemName: 'Tandoori Roti (Butter)',
-    categoryId: 5,
-    description:
-      'Whole wheat crisp flatbread freshly baked in clay oven.',
-    price: 35,
-    amount: 35,
-    isVeg: true,
-    isAvailable: true,
-    imageUrl:
-      'https://images.unsplash.com/photo-1626074353765-517a681e40be?w=600',
-    restaurantId,
-  },
-];
+const getCuratedFallbackItems = () => [];
 
 /* =========================================================
    NORMALIZE MENU
@@ -817,71 +646,62 @@ const normalizeCatalogData = (
     encToken ||
     encryptRestaurantId(actualRestId);
 
-  let normalizedItems = [];
+  const normalizedItems = rawItems.map(
+    (item) => ({
+      ...item,
 
-  if (rawItems.length > 0) {
-    normalizedItems = rawItems.map(
-      (item) => ({
-        ...item,
+      itemId:
+        item.itemId ||
+        item.id,
 
-        itemId:
-          item.itemId ||
-          item.id,
+      itemName:
+        item.itemName ||
+        item.name ||
+        'Unnamed Dish',
 
-        itemName:
-          item.itemName ||
-          item.name ||
-          'Unnamed Dish',
+      categoryId:
+        item.categoryId ||
+        item.category?.id ||
+        1,
 
-        categoryId:
-          item.categoryId ||
-          item.category?.id ||
-          1,
+      description:
+        item.itemDescription ||
+        item.description ||
+        '',
 
-        description:
-          item.itemDescription ||
-          item.description ||
-          '',
+      price:
+        item.amount !== undefined
+          ? Number(item.amount)
+          : Number(item.price || 0),
 
-        price:
-          item.amount !== undefined
-            ? Number(item.amount)
-            : Number(item.price || 0),
+      amount:
+        item.amount !== undefined
+          ? Number(item.amount)
+          : Number(item.price || 0),
 
-        amount:
-          item.amount !== undefined
-            ? Number(item.amount)
-            : Number(item.price || 0),
+      isVeg:
+        item.isVeg !== undefined
+          ? item.isVeg
+          : true,
 
-        isVeg:
-          item.isVeg !== undefined
-            ? item.isVeg
-            : true,
+      isAvailable:
+        item.isAvailable !== undefined
+          ? item.isAvailable
+          : true,
 
-        isAvailable:
-          item.isAvailable !== undefined
-            ? item.isAvailable
-            : true,
+      imageUrl: getItemImageUrl(
+        item.imageUrl ||
+          item.ImageURL ||
+          item.image ||
+          item.photoUrl ||
+          item.img,
+        item.isVeg !== undefined ? item.isVeg : true
+      ),
 
-        imageUrl: getItemImageUrl(
-          item.imageUrl ||
-            item.ImageURL ||
-            item.image ||
-            item.photoUrl ||
-            item.img,
-          item.isVeg !== undefined ? item.isVeg : true
-        ),
-
-        restaurantId:
-          actualRestId,
-      })
-    );
-  } else {
-    normalizedItems =
-      getCuratedFallbackItems(
-        actualRestId
-      );
-  }
+      restaurantId:
+        actualRestId,
+    })
+  );
 
   return {
     restaurantId: actualRestId,
@@ -891,11 +711,51 @@ const normalizeCatalogData = (
 
     restaurantName:
       data.restaurantName ||
-      `Restaurant #${actualRestId}`,
+      data.name ||
+      (actualRestId ? `Restaurant #${actualRestId}` : 'Restaurant'),
 
     restaurantAddress:
       data.restaurantAddress ||
-      'Cyber City, Central Hub, Tech Boulevard',
+      data.address ||
+      [data.address, data.city, data.state].filter(Boolean).join(', ') ||
+      '',
+
+    address:
+      data.address ||
+      data.restaurantAddress ||
+      '',
+
+    city:
+      data.city ||
+      '',
+
+    state:
+      data.state ||
+      '',
+
+    imageUrl:
+      data.imageUrl ||
+      data.ImageUrl ||
+      data.restaurantImage ||
+      data.RestaurantImage ||
+      data.restaurantImageUrl ||
+      data.RestaurantImageUrl ||
+      data.image ||
+      data.Image ||
+      '',
+
+    logoUrl:
+      data.logoUrl ||
+      data.LogoUrl ||
+      data.logo ||
+      data.Logo ||
+      data.restaurantLogo ||
+      data.RestaurantLogo ||
+      data.restaurantLogoUrl ||
+      data.RestaurantLogoUrl ||
+      data.storeLogo ||
+      data.StoreLogo ||
+      '',
 
     isSubscriptionActive:
       data.isSubscriptionActive !==
@@ -932,28 +792,7 @@ const normalizeCatalogData = (
               c.id ||
               c.categoryId,
           }))
-        : [
-            {
-              categoryId: 1,
-              categoryName: 'Starters',
-            },
-            {
-              categoryId: 2,
-              categoryName: 'Beverages',
-            },
-            {
-              categoryId: 3,
-              categoryName: 'Paneer Dishes',
-            },
-            {
-              categoryId: 4,
-              categoryName: 'Chicken',
-            },
-            {
-              categoryId: 5,
-              categoryName: 'Chappati',
-            },
-          ],
+        : [],
 
     items: normalizedItems,
   };
@@ -970,6 +809,9 @@ export const getMenuCatalogByEncryptedId =
       encryptRestaurantId(1)
     ).trim();
 
+    let catalogData = null;
+    let decryptedRestId = 1;
+
     try {
       const pubRes = await api.get(
         `/api/public/store/menu?r=${encodeURIComponent(
@@ -981,16 +823,12 @@ export const getMenuCatalogByEncryptedId =
         (pubRes.data.restaurantId ||
           pubRes.data.items)
       ) {
-        const decryptedRestId =
+        decryptedRestId =
           pubRes.data.restaurantId ||
           decryptRestaurantId(
             cleanEncId
           );
-        return normalizeCatalogData(
-          pubRes.data,
-          decryptedRestId,
-          cleanEncId
-        );
+        catalogData = pubRes.data;
       }
     } catch (e) {
       console.log(
@@ -999,22 +837,119 @@ export const getMenuCatalogByEncryptedId =
       );
     }
 
-    const res = await api.get(
-      `/api/MenuCatalog/encrypted/${encodeURIComponent(
-        cleanEncId
-      )}`
-    );
+    if (!catalogData) {
+      try {
+        const res = await api.get(
+          `/api/MenuCatalog/encrypted/${encodeURIComponent(
+            cleanEncId
+          )}`
+        );
+        decryptedRestId =
+          res.data?.restaurantId ||
+          decryptRestaurantId(cleanEncId);
+        catalogData = res.data;
+      } catch (err) {
+        console.log('MenuCatalog fallback failed:', err?.message);
+      }
+    }
 
-    const decryptedRestId =
-      res.data?.restaurantId ||
-      decryptRestaurantId(cleanEncId);
-
-    return normalizeCatalogData(
-      res.data,
+    const normalized = normalizeCatalogData(
+      catalogData || {},
       decryptedRestId,
       cleanEncId
     );
+
+    // Augment with public store profile or RestaurantConfig to ensure full SAS logo and address
+    try {
+      const profile = await getStoreProfile(cleanEncId, decryptedRestId);
+      if (profile) {
+        const pLogo =
+          profile.logoUrl ||
+          profile.LogoUrl ||
+          profile.logo ||
+          profile.Logo ||
+          profile.restaurantLogo ||
+          profile.restaurantLogoUrl ||
+          profile.storeLogo;
+        if (pLogo) {
+          normalized.logoUrl = pLogo;
+        }
+
+        const pImg =
+          profile.imageUrl ||
+          profile.ImageUrl ||
+          profile.image ||
+          profile.Image ||
+          profile.restaurantImage ||
+          profile.restaurantImageUrl;
+        if (pImg) {
+          normalized.imageUrl = pImg;
+        }
+
+        if (profile.address || profile.Address) {
+          normalized.address = profile.address || profile.Address;
+        }
+        if (profile.city || profile.City) {
+          normalized.city = profile.city || profile.City;
+        }
+        if (profile.state || profile.State) {
+          normalized.state = profile.state || profile.State;
+        }
+
+        const pAddress =
+          profile.restaurantAddress ||
+          profile.RestaurantAddress ||
+          [
+            profile.address || profile.Address,
+            profile.city || profile.City,
+            profile.state || profile.State,
+          ]
+            .filter(Boolean)
+            .join(', ');
+        if (pAddress) {
+          normalized.restaurantAddress = pAddress;
+        }
+
+        const pName =
+          profile.restaurantName ||
+          profile.RestaurantName ||
+          profile.restName ||
+          profile.RestName;
+        if (
+          pName &&
+          (normalized.restaurantName.startsWith('Restaurant #') ||
+            !normalized.restaurantName)
+        ) {
+          normalized.restaurantName = pName;
+        }
+      }
+    } catch (profileErr) {
+      console.warn('Profile augmentation error:', profileErr?.message);
+    }
+
+    return normalized;
   };
+
+export const getStoreProfile = async (encryptedRestaurantId, restaurantId = 1) => {
+  try {
+    const encParam = encryptedRestaurantId
+      ? `r=${encodeURIComponent(encryptedRestaurantId)}`
+      : `restaurantId=${restaurantId}`;
+    const res = await api.get(`/api/public/store/profile?${encParam}`);
+    if (res?.data) {
+      return res.data;
+    }
+  } catch (e) {
+    try {
+      const rId = Number(restaurantId) || 1;
+      const res2 = await api.get(`/api/RestaurantConfig/${rId}`);
+      if (res2?.data) {
+        return res2.data;
+      }
+    } catch {}
+  }
+  return null;
+};
 
 export const getEncryptedRestaurantIdFromApi =
   async (restaurantId = 1) => {
@@ -2237,6 +2172,7 @@ export const placeOrder =
     let serverOrderId = null;
     let paymentSessionId = null;
     let paymentLink = null;
+    let lastErrorMsg = null;
 
     try {
       // Primary: Route customer orders to PublicDineInController (/api/public/store/order/place)
@@ -2251,9 +2187,19 @@ export const placeOrder =
       }
     } catch (publicErr) {
       console.warn(
-        'PublicDineInController /api/public/store/order/place fallback:',
-        publicErr?.message
+        'PublicDineInController /api/public/store/order/place error:',
+        publicErr?.response?.data || publicErr?.message
       );
+      const publicErrorMsg =
+        publicErr?.response?.data?.message ||
+        publicErr?.response?.data?.error ||
+        publicErr?.response?.data?.title;
+
+      if (publicErrorMsg) {
+        throw new Error(publicErrorMsg);
+      }
+      lastErrorMsg = publicErr?.message || 'Server error';
+
       try {
         const fallbackRes = await api.post('/api/Order/PlaceOrder', {
           ...publicPlaceOrderPayload,
@@ -2265,10 +2211,21 @@ export const placeOrder =
         }
       } catch (fallbackErr) {
         console.warn('Fallback /api/Order/PlaceOrder error:', fallbackErr?.message);
+        const fallbackErrorMsg =
+          fallbackErr?.response?.data?.message ||
+          fallbackErr?.response?.data?.error ||
+          fallbackErr?.response?.data?.title;
+        if (fallbackErrorMsg) {
+          throw new Error(fallbackErrorMsg);
+        }
       }
     }
 
-    const assignedId = serverOrderId || nextId;
+    if (!serverOrderId) {
+      throw new Error(lastErrorMsg || 'Failed to place order on server. Please try again.');
+    }
+
+    const assignedId = serverOrderId;
 
     const newOrder =
       normalizeOrder({
@@ -3561,34 +3518,7 @@ const getLocalTables = (
     }
   }
 
-  const defaultTables =
-    [
-      1, 2, 3, 4, 5, 6, 7, 8,
-    ].map((id) => ({
-      id,
-      tableName:
-        `Table #${id}`,
-      capacity:
-        id === 2 ||
-        id === 6
-          ? 2
-          : id === 3
-          ? 6
-          : id === 5
-          ? 8
-          : 4,
-      status:
-        'Available',
-      restaurantId:
-        rId,
-      rId,
-    }));
-
-  inMemoryTables[
-    rId
-  ] = defaultTables;
-
-  return defaultTables;
+  return [];
 };
 
 const saveLocalTables = (
@@ -3769,6 +3699,17 @@ export const getTableQrCodes =
       })
     );
   };
+
+export const getStoreOperatingStatus = async (restaurantId = 1) => {
+  try {
+    const rId = Number(restaurantId) || 1;
+    const response = await api.get(`/api/RestaurantConfig/${rId}/OperatingStatus`);
+    return response.data;
+  } catch (e) {
+    console.warn('Failed to fetch store operating status:', e?.message);
+    return null;
+  }
+};
 
 /* =========================================================
    DEFAULT EXPORT

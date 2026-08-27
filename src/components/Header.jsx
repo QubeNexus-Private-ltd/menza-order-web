@@ -1,21 +1,116 @@
-import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet, Image } from 'react-native';
 import {
   ShoppingBag as CartIcon,
   ClipboardList as OrderIcon,
   Store,
   QrCode,
+  MapPin,
+  Utensils,
 } from 'lucide-react';
+import { getOriginalImageUrl } from '../services/api';
+
+function SkeletonBox({ width, height, borderRadius = 8, style }) {
+  if (typeof window !== 'undefined') {
+    return (
+      <div
+        className="skeleton-pulse"
+        style={{
+          width: typeof width === 'number' ? `${width}px` : width,
+          height: typeof height === 'number' ? `${height}px` : height,
+          borderRadius: `${borderRadius}px`,
+          backgroundColor: '#E2E8F0',
+          flexShrink: 0,
+          ...(typeof style === 'object' ? style : {}),
+        }}
+      />
+    );
+  }
+
+  return (
+    <View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor: '#E2E8F0',
+          opacity: 0.6,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+function StoreLogoImage({ uri, size = 42, style, onError }) {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [uri]);
+
+  if (!uri || hasError) {
+    return <Store size={20} color="#FFFFFF" />;
+  }
+
+  if (typeof window !== 'undefined') {
+    return (
+      <img
+        src={uri}
+        alt="Store Logo"
+        style={{
+          width: size,
+          height: size,
+          objectFit: 'cover',
+          borderRadius: 10,
+          display: 'block',
+        }}
+        onError={() => {
+          setHasError(true);
+          if (typeof onError === 'function') onError();
+        }}
+      />
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode="cover"
+      onError={() => {
+        setHasError(true);
+        if (typeof onError === 'function') onError();
+      }}
+    />
+  );
+}
 
 export default function Header({
   restaurantName,
+  restaurantAddress,
+  restaurantImage,
+  restaurantLogo,
+  imageUrl,
+  logoUrl,
   cartCount = 0,
   openCart,
   openOrderTracker,
   openQrModal,
   activeOrder,
+  activeTable,
+  storeOperatingStatus,
+  loading = false,
 }) {
-  const displayName = restaurantName || 'Saffron Café';
+  const displayName = restaurantName || 'Restaurant Menu';
+  const rawImage =
+    logoUrl ||
+    restaurantLogo ||
+    imageUrl ||
+    restaurantImage ||
+    '';
+  const displayImage = rawImage ? getOriginalImageUrl(rawImage) : '';
 
   const handleQrPress = React.useCallback(() => {
     if (typeof openQrModal === 'function') {
@@ -38,21 +133,97 @@ export default function Header({
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <View style={styles.brandContainer}>
-          <View style={styles.logoBadge}>
-            <Store size={20} color="#ffffff" />
+        {/* Restaurant Identity: Logo, Name, Address & Live Status */}
+        {loading ? (
+          <View style={styles.brandContainer}>
+            <SkeletonBox width={38} height={38} borderRadius={10} />
+            <View style={[styles.brandTextContainer, { gap: 6 }]}>
+              <SkeletonBox width={120} height={14} borderRadius={4} />
+              <SkeletonBox width={160} height={10} borderRadius={3} />
+            </View>
           </View>
+        ) : (
+          <View style={styles.brandContainer}>
+            <View style={styles.logoBadge}>
+              <StoreLogoImage
+                uri={displayImage}
+                size={38}
+                style={styles.logoImage}
+              />
+            </View>
 
-          <View style={styles.brandTextContainer}>
-            <Text style={styles.brandTitle} numberOfLines={1} ellipsizeMode="tail">
-              {displayName}
-            </Text>
-            <Text style={styles.brandSub} numberOfLines={1}>
-              Smart Ordering
-            </Text>
+            <View style={styles.brandTextContainer}>
+              <View style={styles.brandTitleRow}>
+                <Text style={styles.brandTitle} numberOfLines={1} ellipsizeMode="tail">
+                  {displayName}
+                </Text>
+
+                {storeOperatingStatus && (
+                  <View
+                    style={[
+                      styles.statusPill,
+                      storeOperatingStatus.canPlaceOrder !== false
+                        ? styles.statusPillOpen
+                        : storeOperatingStatus.status === 'PAUSED'
+                        ? styles.statusPillPaused
+                        : styles.statusPillClosed,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.statusDot,
+                        storeOperatingStatus.canPlaceOrder !== false
+                          ? styles.statusDotOpen
+                          : storeOperatingStatus.status === 'PAUSED'
+                          ? styles.statusDotPaused
+                          : styles.statusDotClosed,
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.statusPillText,
+                        storeOperatingStatus.canPlaceOrder !== false
+                          ? styles.statusPillTextOpen
+                          : storeOperatingStatus.status === 'PAUSED'
+                          ? styles.statusPillTextPaused
+                          : styles.statusPillTextClosed,
+                      ]}
+                    >
+                      {storeOperatingStatus.canPlaceOrder !== false
+                        ? 'OPEN'
+                        : storeOperatingStatus.status === 'PAUSED'
+                        ? 'PAUSED'
+                        : 'CLOSED'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Address & Table Seating Row (No dummy fallbacks) */}
+              <View style={styles.subInfoRow}>
+                {restaurantAddress ? (
+                  <View style={styles.headerAddressRow}>
+                    <MapPin size={11} color="#EA580C" style={{ flexShrink: 0 }} />
+                    <Text style={styles.brandSub} numberOfLines={1}>
+                      {restaurantAddress}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {activeTable?.tableName ? (
+                  <View style={styles.headerTableBadge}>
+                    <Utensils size={10} color="#D33401" />
+                    <Text style={styles.headerTableText} numberOfLines={1}>
+                      {activeTable.tableName}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
           </View>
-        </View>
+        )}
 
+        {/* Action Controls: QR, Orders, Cart */}
         <View style={styles.actionsRow}>
           {typeof openQrModal === 'function' && (
             <Pressable
@@ -62,12 +233,10 @@ export default function Header({
               ]}
               onPress={handleQrPress}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              pressRetentionOffset={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              android_ripple={{ color: '#D8D5D2', borderless: false }}
               accessibilityRole="button"
-              accessibilityLabel="View and Download Restaurant QR Code"
+              accessibilityLabel="View QR Code"
             >
-              <QrCode size={16} color="#1B1C1C" strokeWidth={2.3} />
+              <QrCode size={15} color="#0F172A" strokeWidth={2.2} />
               <Text style={styles.qrButtonText}>QR</Text>
             </Pressable>
           )}
@@ -80,12 +249,10 @@ export default function Header({
               ]}
               onPress={handleOrderPress}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              pressRetentionOffset={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              android_ripple={{ color: '#F3C8BA', borderless: false }}
               accessibilityRole="button"
-              accessibilityLabel="View Restaurant Orders"
+              accessibilityLabel="View Orders"
             >
-              <OrderIcon size={17} color="#D33401" strokeWidth={2.3} />
+              <OrderIcon size={16} color="#D33401" strokeWidth={2.2} />
               <Text style={styles.orderButtonText}>Orders</Text>
               {activeOrder && <View style={styles.orderDot} />}
             </Pressable>
@@ -98,12 +265,10 @@ export default function Header({
             ]}
             onPress={handleCartPress}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            pressRetentionOffset={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            android_ripple={{ color: '#B52D03', borderless: true }}
             accessibilityRole="button"
             accessibilityLabel={`Cart with ${cartCount} items`}
           >
-            <CartIcon size={19} color="#ffffff" strokeWidth={2.3} />
+            <CartIcon size={18} color="#FFFFFF" strokeWidth={2.2} />
 
             {cartCount > 0 && (
               <View style={styles.cartBadge}>
@@ -122,26 +287,26 @@ export default function Header({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    backgroundColor: '#FBF9F9',
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#E0DDD8',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    borderBottomColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     zIndex: 1000,
-    elevation: 8,
-    shadowColor: '#000000',
+    elevation: 4,
+    shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
   },
   headerRow: {
     width: '100%',
-    maxWidth: 1280,
+    maxWidth: 1200,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 42,
+    minHeight: 40,
     gap: 8,
   },
   brandContainer: {
@@ -149,77 +314,171 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
     minWidth: 0,
+    gap: 8,
   },
   logoBadge: {
     width: 38,
     height: 38,
     borderRadius: 10,
-    backgroundColor: '#1B1C1C',
+    backgroundColor: '#1E293B',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
     flexShrink: 0,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+  },
+  logoImage: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
   },
   brandTextContainer: {
     flex: 1,
     minWidth: 0,
     justifyContent: 'center',
   },
+  brandTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    flexWrap: 'nowrap',
+    minWidth: 0,
+  },
   brandTitle: {
-    color: '#1B1C1C',
-    fontSize: 16,
+    color: '#0F172A',
+    fontSize: 14.5,
     fontWeight: '800',
     letterSpacing: -0.3,
+    flexShrink: 1,
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 5,
+    borderWidth: 1,
+    flexShrink: 0,
+  },
+  statusPillOpen: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  statusPillPaused: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  statusPillClosed: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  statusDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  statusDotOpen: {
+    backgroundColor: '#10B981',
+  },
+  statusDotPaused: {
+    backgroundColor: '#F59E0B',
+  },
+  statusDotClosed: {
+    backgroundColor: '#EF4444',
+  },
+  statusPillText: {
+    fontSize: 8.5,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  statusPillTextOpen: {
+    color: '#047857',
+  },
+  statusPillTextPaused: {
+    color: '#B45309',
+  },
+  statusPillTextClosed: {
+    color: '#B91C1C',
+  },
+  subInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 1.5,
+    gap: 5,
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  headerAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2.5,
+    flexShrink: 1,
+    minWidth: 0,
   },
   brandSub: {
-    color: '#747878',
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 1,
+    color: '#64748B',
+    fontSize: 10.5,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  headerTableBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2.5,
+    backgroundColor: '#FFF1EC',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#F3C8BA',
+    flexShrink: 0,
+  },
+  headerTableText: {
+    color: '#D33401',
+    fontSize: 9.5,
+    fontWeight: '800',
   },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 6,
-    gap: 8,
+    gap: 6,
     flexShrink: 0,
-    zIndex: 1001,
   },
   qrButton: {
-    height: 40,
-    minWidth: 58,
+    height: 34,
+    minWidth: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 11,
-    borderRadius: 20,
-    backgroundColor: '#EFEDED',
+    paddingHorizontal: 8,
+    borderRadius: 17,
+    backgroundColor: '#F1F5F9',
     borderWidth: 1,
-    borderColor: '#E0DDD8',
-    gap: 4,
-    zIndex: 1002,
-    elevation: 2,
+    borderColor: '#E2E8F0',
+    gap: 3,
   },
   qrButtonPressed: {
-    backgroundColor: '#E3E0DD',
+    backgroundColor: '#E2E8F0',
     transform: [{ scale: 0.97 }],
   },
   qrButtonText: {
-    color: '#1B1C1C',
-    fontSize: 12,
+    color: '#0F172A',
+    fontSize: 11,
     fontWeight: '800',
   },
   orderButton: {
-    height: 40,
+    height: 34,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    borderRadius: 20,
+    paddingHorizontal: 10,
+    borderRadius: 17,
     backgroundColor: '#FFF1EC',
     borderWidth: 1,
     borderColor: '#F3C8BA',
-    zIndex: 1002,
+    gap: 3,
   },
   orderButtonPressed: {
     backgroundColor: '#FFE4DA',
@@ -227,31 +486,29 @@ const styles = StyleSheet.create({
   },
   orderButtonText: {
     color: '#D33401',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
-    marginLeft: 5,
   },
   orderDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: '#D33401',
-    marginLeft: 5,
+    marginLeft: 1,
   },
   cartButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#D33401',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    zIndex: 1002,
     shadowColor: '#D33401',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.28,
-    shadowRadius: 6,
-    elevation: 5,
+    shadowRadius: 5,
+    elevation: 3,
   },
   cartButtonPressed: {
     backgroundColor: '#B92D03',
@@ -259,21 +516,21 @@ const styles = StyleSheet.create({
   },
   cartBadge: {
     position: 'absolute',
-    top: -5,
-    right: -5,
-    minWidth: 19,
-    height: 19,
-    borderRadius: 10,
-    backgroundColor: '#1B1C1C',
+    top: -4,
+    right: -4,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 8.5,
+    backgroundColor: '#0F172A',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
-    borderWidth: 2,
-    borderColor: '#FBF9F9',
+    paddingHorizontal: 2.5,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
   },
   cartBadgeText: {
-    color: '#ffffff',
-    fontSize: 9,
+    color: '#FFFFFF',
+    fontSize: 8.5,
     fontWeight: '900',
   },
 });

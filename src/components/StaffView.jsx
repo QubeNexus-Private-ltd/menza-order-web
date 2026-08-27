@@ -24,7 +24,7 @@ import {
   ArrowRight,
   RefreshCw,
   Sliders,
-  DollarSign,
+  IndianRupee,
   AlertTriangle,
   Send,
   Building,
@@ -426,7 +426,7 @@ export default function StaffView({
                           style={styles.tableActionBtnSettle}
                           onPress={() => onSettleTable(table.id)}
                         >
-                          <DollarSign size={14} color="#10b981" />
+                          <IndianRupee size={14} color="#10b981" />
                           <Text style={styles.tableActionBtnSettleText}>Settle Table</Text>
                         </TouchableOpacity>
                       )}
