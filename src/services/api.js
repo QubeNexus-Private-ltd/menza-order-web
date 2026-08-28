@@ -3704,7 +3704,22 @@ export const getStoreOperatingStatus = async (restaurantId = 1) => {
   try {
     const rId = Number(restaurantId) || 1;
     const response = await api.get(`/api/RestaurantConfig/${rId}/OperatingStatus`);
-    return response.data;
+    const data = response.data?.data ?? response.data;
+    if (typeof data === 'string') {
+      return {
+        restaurantId: rId,
+        isOpen: data === 'OPEN',
+        status: data,
+        canPlaceOrder: data === 'OPEN',
+        statusMessage: data === 'OPEN' ? 'Store is open.' : 'Store is closed.',
+      };
+    }
+    return data ? {
+      ...data,
+      isOpen: data.isOpen ?? data.status === 'OPEN',
+      canPlaceOrder: data.canPlaceOrder ?? (data.status === 'OPEN' || data.isOpen === true),
+      status: data.status || (data.isOpen ? 'OPEN' : 'CLOSED'),
+    } : null;
   } catch (e) {
     console.warn('Failed to fetch store operating status:', e?.message);
     return null;

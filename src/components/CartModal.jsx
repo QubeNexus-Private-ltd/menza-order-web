@@ -666,22 +666,38 @@ export default function CartModal({
           checkoutRes?.order_id ||
           checkoutRes?.data?.orderId;
 
-        await api.createPendingPaymentOrder({
+        // Store pending order in session/local storage to be placed ONLY AFTER payment is confirmed
+        const pendingOrderPayload = {
           ...orderPayload,
           tableId:
             isTableOrdering && activeTable
               ? activeTable.id
               : null,
           tableNumber: effectiveTable,
-          paymentStatus: 'Pending',
-          orderStatus: 'PendingPayment',
+          paymentStatus: 'Paid',
+          orderStatus: 'Confirmed',
           paymentOrderId: cashfreeOrderId,
           cashfreeOrderId,
           subTotal: subTotal,
           cgstAmount: cgst,
           sgstAmount: sgst,
           totalAmount: grandTotal,
-        });
+        };
+
+        if (typeof window !== 'undefined' && cashfreeOrderId) {
+          try {
+            sessionStorage.setItem(
+              'pending_cf_order_' + cashfreeOrderId,
+              JSON.stringify(pendingOrderPayload)
+            );
+            localStorage.setItem(
+              'pending_cf_order_' + cashfreeOrderId,
+              JSON.stringify(pendingOrderPayload)
+            );
+          } catch (storageErr) {
+            console.warn('Could not cache pending order payload:', storageErr);
+          }
+        }
 
         if (
           typeof window !== 'undefined' &&
@@ -720,19 +736,6 @@ export default function CartModal({
             paymentLink;
           return;
         }
-
-        await onPlaceOrder({
-          ...orderPayload,
-          paymentStatus:
-            checkoutRes?.status ===
-              'SUCCESS' ||
-            checkoutRes?.status === 'PAID'
-              ? 'SUCCESS'
-              : 'Pending',
-          paymentOrderId:
-            cashfreeOrderId,
-          cashfreeOrderId,
-        });
       } catch (err) {
         console.error(
           'Cashfree checkout API error:',

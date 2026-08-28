@@ -124,10 +124,32 @@ export default function App() {
     const restId = catalog?.restaurantId || selectedRestaurant?.id || 1;
     signalrService.startSignalRConnection(restId);
 
-    const unsubscribe = signalrService.onStoreOperatingStatusChanged((status) => {
-      if (status) {
-        setStoreOperatingStatus(status);
-      }
+    const unsubscribe = signalrService.onStoreOperatingStatusChanged((raw) => {
+      if (!raw) return;
+      const data = raw?.data || raw;
+      const normalized = typeof data === 'string'
+        ? {
+            restaurantId: restId,
+            isOpen: data === 'OPEN',
+            status: data,
+            canPlaceOrder: data === 'OPEN',
+            statusMessage: data === 'OPEN' ? 'Store is open.' : 'Store is closed.',
+          }
+        : {
+            ...data,
+            isOpen: data.isOpen ?? data.status === 'OPEN',
+            canPlaceOrder: data.canPlaceOrder ?? (data.status === 'OPEN' || data.isOpen === true),
+            status: data.status || (data.isOpen ? 'OPEN' : 'CLOSED'),
+          };
+
+      setStoreOperatingStatus(normalized);
+      showToast(
+        normalized.canPlaceOrder
+          ? '🟢 Store is now OPEN for ordering!'
+          : normalized.status === 'PAUSED'
+          ? `🟡 Kitchen is temporarily paused (${normalized.remainingPauseMinutes || 0}m left)`
+          : '🔴 Store is now CLOSED for ordering.'
+      );
     });
 
     return () => {
@@ -243,7 +265,7 @@ export default function App() {
           try {
             let statusRes = null;
             try {
-              statusRes = await api.getCashfreePaymentStatus(
+              statusRes = await api.verifyCashfreePayment(
                 paymentReturnOrderId
               );
             } catch (statusErr) {
@@ -253,93 +275,135 @@ export default function App() {
               );
             }
 
-            const ordersList =
-              (await api.getMyOrders()) || [];
+            const isPaid =
+              statusRes?.status === 'SUCCESS' ||
+              statusRes?.status === 'PAID' ||
+              statusRes?.order_status === 'PAID' ||
+              statusRes?.data?.order_status === 'PAID' ||
+              statusRes?.data?.status === 'SUCCESS' ||
+              statusRes?.paymentStatus === 'SUCCESS' ||
+              statusRes?.paymentStatus === 'Paid';
 
-            let targetOrder =
-              ordersList.find(
-                (o) =>
-                  String(o.cashfreeOrderId) ===
-                    String(paymentReturnOrderId) ||
-                  String(o.paymentOrderId) ===
-                    String(paymentReturnOrderId) ||
-                  String(o.id) ===
-                    String(paymentReturnOrderId)
-              );
-
-            if (!targetOrder && ordersList.length > 0) {
-              targetOrder = ordersList[0];
+            if (statusRes && (statusRes?.status === 'FAILED' || statusRes?.order_status === 'FAILED' || statusRes?.status === 'CANCELLED' || statusRes?.order_status === 'CANCELLED')) {
+              showToast('❌ Payment was cancelled or failed. Your order was not placed.');
+              return;
             }
 
-            if (targetOrder) {
-              // 1. Confirm payment and transition status via PublicDineInController endpoint
-              let confirmedOrder = null;
+            // 1. Retrieve pending order payload cached before payment
+            let pendingPayload = null;
+            try {
+              const rawPayload =
+                sessionStorage.getItem('pending_cf_order_' + paymentReturnOrderId) ||
+                localStorage.getItem('pending_cf_order_' + paymentReturnOrderId);
+              if (rawPayload) pendingPayload = JSON.parse(rawPayload);
+            } catch (storageErr) {
+              console.log('Error parsing pending order payload:', storageErr);
+            }
+
+            let finalPlacedOrder = null;
+
+            if (pendingPayload) {
               try {
-                confirmedOrder = await api.confirmOrderPayment(
-                  targetOrder.id,
-                  paymentReturnOrderId
+                const placeRes = await api.placeOrder({
+                  ...pendingPayload,
+                  paymentStatus: 'Paid',
+                  orderStatus: 'Confirmed',
+                  paymentOrderId: paymentReturnOrderId,
+                  cashfreeOrderId: paymentReturnOrderId,
+                });
+
+                finalPlacedOrder =
+                  placeRes?.order ||
+                  (placeRes?.orderId
+                    ? await api.getOrder(placeRes.orderId)
+                    : null);
+
+                // Clean up cached payload
+                sessionStorage.removeItem('pending_cf_order_' + paymentReturnOrderId);
+                localStorage.removeItem('pending_cf_order_' + paymentReturnOrderId);
+              } catch (placeErr) {
+                console.log('Place verified order error:', placeErr?.message);
+              }
+            }
+
+            if (!finalPlacedOrder) {
+              const ordersList =
+                (await api.getMyOrders()) || [];
+
+              let targetOrder =
+                ordersList.find(
+                  (o) =>
+                    String(o.cashfreeOrderId) ===
+                      String(paymentReturnOrderId) ||
+                    String(o.paymentOrderId) ===
+                      String(paymentReturnOrderId) ||
+                    String(o.id) ===
+                      String(paymentReturnOrderId)
                 );
-              } catch (confErr) {
-                console.log('Public confirmOrderPayment error:', confErr?.message);
+
+              if (!targetOrder && ordersList.length > 0) {
+                targetOrder = ordersList[0];
               }
 
-              // 2. Fetch full tracked order details via PublicDineInController
-              let fullOrder = confirmedOrder;
-              if (!fullOrder) {
+              if (targetOrder) {
+                // Confirm payment and transition status via PublicDineInController endpoint
+                let confirmedOrder = null;
                 try {
-                  fullOrder = await api.getOrder(targetOrder.id);
-                } catch (ordErr) {
-                  console.log('Fetch updated order error:', ordErr?.message);
+                  confirmedOrder = await api.confirmOrderPayment(
+                    targetOrder.id,
+                    paymentReturnOrderId
+                  );
+                } catch (confErr) {
+                  console.log('Public confirmOrderPayment error:', confErr?.message);
                 }
-              }
 
+                finalPlacedOrder = confirmedOrder || (await api.getOrder(targetOrder.id)) || targetOrder;
+              }
+            }
+
+            if (finalPlacedOrder) {
               const finalOrder = {
-                ...(fullOrder || targetOrder),
-                items: (fullOrder?.items && fullOrder.items.length > 0)
-                  ? fullOrder.items
-                  : (targetOrder.items || []),
-                paymentStatus: 'SUCCESS',
+                ...finalPlacedOrder,
+                items: (finalPlacedOrder?.items && finalPlacedOrder.items.length > 0)
+                  ? finalPlacedOrder.items
+                  : (pendingPayload?.items || []),
+                paymentStatus: 'Paid',
                 orderStatus: 'Confirmed',
               };
 
               setActiveOrder(finalOrder);
               setOrderTrackerOpen(true);
               showToast(
-                `🎉 Payment completed! Order #${finalOrder.id} is confirmed and sent to the kitchen.`
+                `🎉 Payment completed! Order #${finalOrder.id || finalOrder.orderId} is confirmed and sent to the kitchen.`
               );
 
               await api.clearCart();
               syncCart(null);
-
-              if (
-                typeof window !== 'undefined' &&
-                window.history?.replaceState
-              ) {
-                const cleanUrl = new URL(
-                  window.location.href
-                );
-                cleanUrl.searchParams.delete('order_id');
-                cleanUrl.searchParams.delete('orderId');
-                cleanUrl.searchParams.delete('cf_order_id');
-                cleanUrl.searchParams.delete('payment_status');
-
-                // If table ordering is disabled or order has no table, remove tableId from URL
-                if (catData?.isTableOrderingEnabled === false || !targetOrder.tableId) {
-                  cleanUrl.searchParams.delete('tableId');
-                }
-
-                window.history.replaceState(
-                  {},
-                  document.title,
-                  cleanUrl.toString()
-                );
-              }
             }
           } catch (e) {
             console.error(
               'Post payment redirect handling error:',
               e
             );
+          } finally {
+            if (
+              typeof window !== 'undefined' &&
+              window.history?.replaceState
+            ) {
+              const cleanUrl = new URL(
+                window.location.href
+              );
+              cleanUrl.searchParams.delete('order_id');
+              cleanUrl.searchParams.delete('orderId');
+              cleanUrl.searchParams.delete('cf_order_id');
+              cleanUrl.searchParams.delete('payment_status');
+
+              window.history.replaceState(
+                {},
+                document.title,
+                cleanUrl.toString()
+              );
+            }
           }
         }
       };
