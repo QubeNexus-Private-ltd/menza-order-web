@@ -245,7 +245,7 @@ export default function CustomerView({
       0
     );
 
-  const totalCartAmount =
+  const totalCartSubTotal =
     (cartItems || []).reduce(
       (acc, item) =>
         acc +
@@ -253,12 +253,23 @@ export default function CustomerView({
           Number(
             item.unitPrice ??
             item.amount ??
+            item.price ??
             0
           ) || 0
         ) *
         (Number(item.quantity) || 1),
       0
     );
+
+  const cgstRate = Number(catalog?.cgstPercentage ?? 2.5);
+  const sgstRate = Number(catalog?.sgstPercentage ?? 2.5);
+  const hasGst = cgstRate > 0 || sgstRate > 0 || Boolean(catalog?.gstNumber);
+
+  const totalCartTax = hasGst
+    ? Math.round(totalCartSubTotal * ((cgstRate + sgstRate) / 100) * 100) / 100
+    : 0;
+
+  const totalCartAmount = Math.round((totalCartSubTotal + totalCartTax) * 100) / 100;
 
   const filteredItems =
     (items || []).filter((item) => {

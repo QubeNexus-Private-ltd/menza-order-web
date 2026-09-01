@@ -225,6 +225,26 @@ export const generateOtp = async (
   const res = await api.post(
     '/api/Auth/GenerateOtp',
     {
+      mobileNumber: cleanMobile,
+      mobile: cleanMobile,
+      deviceId: deviceId || getDeviceId(),
+    }
+  );
+
+  return res.data;
+};
+
+export const resendOtp = async (
+  mobile,
+  deviceId
+) => {
+  const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+  consumeRateLimit('OTP_GENERATE', cleanMobile || getDeviceId());
+
+  const res = await api.post(
+    '/api/Auth/ResendOtp',
+    {
+      mobileNumber: cleanMobile,
       mobile: cleanMobile,
       deviceId: deviceId || getDeviceId(),
     }
@@ -243,8 +263,10 @@ export const loginWithOtp = async (
   const res = await api.post(
     '/api/Auth/Login',
     {
+      mobileNumber: cleanMobile,
       mobile: cleanMobile,
       otpCode,
+      otp: otpCode,
       deviceId: getDeviceId(),
     }
   );
@@ -278,6 +300,7 @@ export const generateCustomerOtp = async (
     const res = await api.post(
       '/api/public/store/auth/generate-otp',
       {
+        mobileNumber: cleanMobile,
         mobile: cleanMobile,
         deviceId,
         restaurantId,
@@ -291,6 +314,7 @@ export const generateCustomerOtp = async (
     const res = await api.post(
       '/api/Auth/GenerateOtp',
       {
+        mobileNumber: cleanMobile,
         mobile: cleanMobile,
         deviceId,
       }
@@ -315,8 +339,10 @@ export const verifyCustomerOtpAndLogin = async (
     const res = await api.post(
       '/api/public/store/auth/verify-otp',
       {
+        mobileNumber: cleanMobile,
         mobile: cleanMobile,
         otpCode,
+        otp: otpCode,
         name,
         deviceId,
         restaurantId,
@@ -341,8 +367,10 @@ export const verifyCustomerOtpAndLogin = async (
     const res = await api.post(
       '/api/Auth/Login',
       {
+        mobileNumber: cleanMobile,
         mobile: cleanMobile,
         otpCode,
+        otp: otpCode,
         name,
         deviceId,
         restaurantId,
@@ -1112,20 +1140,19 @@ const recalculateCart = (cart) => {
     Math.round(subTotal * 100) /
     100;
 
+  const discountAmount = Number(cart.discountAmount || 0);
+  const taxableAmount = Math.max(0, roundedSubTotal - discountAmount);
+
   const cgstPercentage =
     cart.cgstPercentage !== undefined ? Number(cart.cgstPercentage) : 2.5;
   const sgstPercentage =
     cart.sgstPercentage !== undefined ? Number(cart.sgstPercentage) : 2.5;
 
   const cgstAmount =
-    cart.cgstAmount !== undefined
-      ? Number(cart.cgstAmount)
-      : Math.round(roundedSubTotal * (cgstPercentage / 100) * 100) / 100;
+    Math.round(taxableAmount * (cgstPercentage / 100) * 100) / 100;
 
   const sgstAmount =
-    cart.sgstAmount !== undefined
-      ? Number(cart.sgstAmount)
-      : Math.round(roundedSubTotal * (sgstPercentage / 100) * 100) / 100;
+    Math.round(taxableAmount * (sgstPercentage / 100) * 100) / 100;
 
   const taxAmount =
     Math.round(
@@ -1134,10 +1161,13 @@ const recalculateCart = (cart) => {
         100
     ) / 100;
 
+  const platformFee = Number(cart.platformFee || 0);
+
   const totalAmount =
     Math.round(
-      (roundedSubTotal +
-        taxAmount) *
+      (taxableAmount +
+        taxAmount +
+        platformFee) *
         100
     ) / 100;
 
@@ -1146,8 +1176,8 @@ const recalculateCart = (cart) => {
     items,
     itemTotal: roundedSubTotal,
     subTotal: roundedSubTotal,
-    taxableAmount:
-      roundedSubTotal,
+    discountAmount,
+    taxableAmount,
     cgstPercentage,
     sgstPercentage,
     gstNumber: cart.gstNumber || null,
@@ -1155,8 +1185,7 @@ const recalculateCart = (cart) => {
     sgstAmount,
     taxAmount,
     totalAmount,
-    platformFee:
-      Number(cart.platformFee || 0),
+    platformFee,
     hasUnavailableItems:
       items.some(
         (item) =>
@@ -2156,15 +2185,37 @@ export const placeOrder =
         orderPayload.deliveryType ||
         (orderPayload.tableId ? 'Dine-In' : 'Takeaway / Counter'),
       paymentMode:
-        orderPayload.paymentMode ||
-        (orderPayload.paymentMethod === 'cashfree' ? 'ONLINE' : 'CASH'),
+        (orderPayload.paymentStatus === 'Paid' || orderPayload.cashfreeOrderId || orderPayload.paymentOrderId)
+          ? 'CASHFREE'
+          : (orderPayload.paymentMode || (orderPayload.paymentMethod === 'cashfree' ? 'CASHFREE' : 'CASH')),
       paymentType:
         orderPayload.paymentType ||
-        ((orderPayload.paymentMode === 'ONLINE' || orderPayload.paymentMethod === 'cashfree')
+        ((orderPayload.paymentMode === 'ONLINE' || orderPayload.paymentMode === 'CASHFREE' || orderPayload.paymentMethod === 'cashfree')
           ? 'ONLINE_CASHFREE'
           : 'COUNTER_CASH'),
       remarks: orderPayload.remarks || '',
       source: orderPayload.source || 'QR_DINEIN',
+      paymentStatus:
+        orderPayload.paymentStatus ||
+        (orderPayload.paymentMethod === 'cashfree' ? 'Paid' : 'Pending'),
+      orderStatus:
+        orderPayload.orderStatus ||
+        (orderPayload.paymentMethod === 'cashfree' ? 'Confirmed' : 'Placed'),
+      paymentOrderId:
+        orderPayload.paymentOrderId ||
+        orderPayload.cashfreeOrderId ||
+        null,
+      cashfreeOrderId:
+        orderPayload.cashfreeOrderId ||
+        orderPayload.paymentOrderId ||
+        null,
+      gstNumber: orderPayload.gstNumber || null,
+      cgstPercentage: orderPayload.cgstPercentage !== undefined ? Number(orderPayload.cgstPercentage) : 2.5,
+      sgstPercentage: orderPayload.sgstPercentage !== undefined ? Number(orderPayload.sgstPercentage) : 2.5,
+      cgstAmount: orderPayload.cgstAmount !== undefined ? Number(orderPayload.cgstAmount) : cgst,
+      sgstAmount: orderPayload.sgstAmount !== undefined ? Number(orderPayload.sgstAmount) : sgst,
+      taxAmount: orderPayload.taxAmount !== undefined ? Number(orderPayload.taxAmount) : (cgst + sgst),
+      totalAmount: orderPayload.totalAmount !== undefined ? Number(orderPayload.totalAmount) : grandTotal,
       returnUrl,
       items: backendItems,
     };
@@ -2391,11 +2442,24 @@ export const placeOrder =
   };
 
 /* =========================================================
-   GET ORDER
+   GET ORDER (Deduplicated with in-flight caching)
 ========================================================= */
 
-export const getOrder =
-  async (orderId, phone = '') => {
+const orderTrackInFlightCache = new Map();
+
+export const getOrder = async (orderId, phone = '') => {
+  if (!orderId) return null;
+
+  const cacheKey = `${orderId}_${phone || ''}`;
+  const now = Date.now();
+  const cached = orderTrackInFlightCache.get(cacheKey);
+
+  // Return existing in-flight promise if called within 2.5 seconds
+  if (cached && now - cached.time < 2500) {
+    return cached.promise;
+  }
+
+  const promise = (async () => {
     try {
       // Primary: Route to PublicDineInController tracking endpoint
       const res = await api.get(
@@ -2418,22 +2482,17 @@ export const getOrder =
       }
     }
 
-    const orders =
-      getLocalOrders();
+    const orders = getLocalOrders();
+    const found = orders.find(
+      (order) => Number(order.id) === Number(orderId)
+    );
 
-    const found =
-      orders.find(
-        (order) =>
-          Number(order.id) ===
-          Number(orderId)
-      );
+    return found ? normalizeOrder(found) : null;
+  })();
 
-    return found
-      ? normalizeOrder(
-          found
-        )
-      : null;
-  };
+  orderTrackInFlightCache.set(cacheKey, { promise, time: now });
+  return promise;
+};
 
 /* =========================================================
    GET CURRENT DEVICE ORDERS
@@ -2860,201 +2919,33 @@ export const getLiveOrderTracking = async (
   orderId,
   restaurantId
 ) => {
-
   if (!orderId) {
-
-    console.warn(
-      'getLiveOrderTracking: missing orderId'
-    );
-
     return null;
-
   }
 
-  console.log(
-    '========================================'
-  );
-
-  console.log(
-    'LIVE CUSTOMER ORDER TRACKING'
-  );
-
-  console.log(
-    'Order ID:',
-    orderId
-  );
-
-  console.log(
-    'Restaurant ID:',
-    restaurantId
-  );
-
-  console.log(
-    '========================================'
-  );
-
-
-  /*
-   * STEP 1
-   *
-   * Get latest kitchen status.
-   */
-
-  let kitchenOrder = null;
-
-  if (restaurantId) {
-
-    kitchenOrder =
-      await getLiveKitchenOrder(
-        restaurantId,
-        orderId
-      );
-
-  }
-
-
-  /*
-   * STEP 2
-   *
-   * If kitchen API returned the order,
-   * combine it with the complete order.
-   */
-
-  if (kitchenOrder) {
-
-    let fullOrder = null;
-
-    try {
-
-      fullOrder =
-        await getOrder(
-          orderId
-        );
-
-    } catch (error) {
-
-      console.log(
-        'Full order API failed:',
-        error?.message
-      );
-
-    }
-
-
-    /*
-     * Kitchen status MUST have priority.
-     *
-     * Example:
-     *
-     * Customer order:
-     * Confirmed
-     *
-     * Kitchen:
-     * Preparing
-     *
-     * Final result:
-     * Preparing
-     */
-
-    const kitchenStatus =
-      kitchenOrder?.kitchenStatus ??
-      kitchenOrder?.kitchenOrderStatus ??
-      kitchenOrder?.orderStatus ??
-      kitchenOrder?.status ??
-      fullOrder?.kitchenStatus ??
-      fullOrder?.orderStatus ??
-      fullOrder?.status ??
-      'Pending';
-
-
-    const backendOrderId =
-      kitchenOrder?.orderId ??
-      kitchenOrder?.id ??
-      orderId;
-
-
-    const combinedOrder = {
-
-      ...(fullOrder || {}),
-
-      ...kitchenOrder,
-
-      id: Number(
-        backendOrderId
-      ),
-
-      orderId: Number(
-        backendOrderId
-      ),
-
-      /*
-       * IMPORTANT:
-       * Kitchen status wins.
-       */
-
-      orderStatus:
-        kitchenStatus,
-
-      kitchenStatus:
-        kitchenStatus,
-
-    };
-
-
-    console.log(
-      'FINAL LIVE ORDER:',
-      combinedOrder
-    );
-
-
-    return normalizeOrder(
-      combinedOrder
-    );
-
-  }
-
-
-  /*
-   * STEP 3
-   *
-   * Kitchen API didn't return the order.
-   *
-   * Use your existing public tracking API.
-   */
-
+  // 1. Primary: Use dedicated public order tracking endpoint (/api/public/store/order/track/{orderId})
   try {
-
-    console.log(
-      'Kitchen API unavailable.'
-    );
-
-    console.log(
-      'Using public order tracking API...'
-    );
-
-    const publicOrder =
-      await getOrder(
-        orderId
-      );
-
+    const publicOrder = await getOrder(orderId);
     if (publicOrder) {
-
       return publicOrder;
-
     }
-
   } catch (error) {
-
-    console.warn(
-      'Public order tracking failed:',
-      error?.message
-    );
-
+    console.warn('Public order tracking check failed:', error?.message);
   }
 
+  // 2. Staff/Chef Fallback: Only hit internal /api/Order/Kitchen if staff token exists
+  if (authToken && restaurantId) {
+    try {
+      const kitchenOrder = await getLiveKitchenOrder(restaurantId, orderId);
+      if (kitchenOrder) {
+        return normalizeOrder(kitchenOrder);
+      }
+    } catch (e) {
+      // Staff endpoint unavailable or unauthorized
+    }
+  }
 
   return null;
-
 };
 
 /* =========================================================

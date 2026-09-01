@@ -122,11 +122,18 @@ export default function OrderTrackerModal({
     }
 
     let cancelled = false;
+    let lastRefreshTime = 0;
 
     // Join SignalR order group for instant push updates
     signalrService.joinOrderGroup(selectedOrder.id);
 
-    const refresh = async () => {
+    const refresh = async (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastRefreshTime < 3000) {
+        return; // Throttle to maximum 1 call per 3 seconds
+      }
+      lastRefreshTime = now;
+
       try {
         let latest = null;
 
@@ -137,7 +144,18 @@ export default function OrderTrackerModal({
         }
 
         if (!cancelled && latest) {
-          setSelectedOrder(latest);
+          setSelectedOrder((prev) => {
+            if (
+              prev &&
+              prev.id === latest.id &&
+              prev.orderStatus === latest.orderStatus &&
+              prev.paymentStatus === latest.paymentStatus &&
+              prev.kitchenStatus === latest.kitchenStatus
+            ) {
+              return prev;
+            }
+            return latest;
+          });
         }
       } catch (error) {
         console.log(
@@ -147,24 +165,55 @@ export default function OrderTrackerModal({
       }
     };
 
-    refresh();
+    // Only fetch immediately on mount if order data is missing items/details
+    if (!selectedOrder?.items || selectedOrder.items.length === 0) {
+      refresh(true);
+    }
 
-    // Real-Time SignalR Listener: Instantly refresh on status change push from backend
+    // Terminal state check: finalized orders do not need continuous polling
+    const isTerminal = ['Completed', 'Settled', 'Cancelled'].includes(selectedOrder?.orderStatus);
+
+    // Real-Time SignalR Listener: Direct in-memory state update without HTTP request (Model 3 Cost Optimization)
     const unsubscribeSignalR = signalrService.onOrderStatusChanged((data) => {
       const changedOrderId = Number(data?.orderId || data?.id || 0);
       if (changedOrderId === Number(selectedOrder.id) || !changedOrderId) {
-        console.log('⚡ [SignalR] Real-time order update for order #', selectedOrder.id);
-        refresh();
+        console.log('⚡ [SignalR] Real-time order update received in-memory:', data);
+
+        const newOrderStatus = data?.orderStatus || data?.status;
+        const newKitchenStatus = data?.kitchenStatus;
+        const newPaymentStatus = data?.paymentStatus;
+
+        setSelectedOrder((prev) => {
+          if (!prev) return prev;
+          if (
+            (!newOrderStatus || prev.orderStatus === newOrderStatus) &&
+            (!newKitchenStatus || prev.kitchenStatus === newKitchenStatus) &&
+            (!newPaymentStatus || prev.paymentStatus === newPaymentStatus)
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            orderStatus: newOrderStatus || prev.orderStatus,
+            kitchenStatus: newKitchenStatus || prev.kitchenStatus,
+            paymentStatus: newPaymentStatus || prev.paymentStatus,
+            settledDateUtc: data?.settledDateUtc || prev.settledDateUtc,
+            estimatedPickupTime: data?.estimatedPickupTime || prev.estimatedPickupTime,
+          };
+        });
       }
     });
 
-    // Fallback polling interval (every 5 seconds) in case of network drops
-    const interval = setInterval(refresh, 5000);
+    // Fallback polling only for non-terminal orders (every 30s as safety net)
+    const interval = !isTerminal ? setInterval(() => refresh(false), 30000) : null;
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       unsubscribeSignalR();
+      if (selectedOrder?.id) {
+        signalrService.leaveOrderGroup(selectedOrder.id);
+      }
     };
   }, [
     visible,

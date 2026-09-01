@@ -262,7 +262,17 @@ export default function App() {
         );
 
         if (paymentReturnOrderId) {
+          const processedKey = 'cf_ret_handled_' + paymentReturnOrderId;
+          if (sessionStorage.getItem(processedKey)) {
+            console.log('Payment return already processed for', paymentReturnOrderId);
+            return;
+          }
+          sessionStorage.setItem(processedKey, 'true');
+
           try {
+            // Join real-time SignalR group for immediate settlement events
+            signalrService.joinOrderGroup(paymentReturnOrderId);
+
             let statusRes = null;
             try {
               statusRes = await api.verifyCashfreePayment(
@@ -306,6 +316,8 @@ export default function App() {
               try {
                 const placeRes = await api.placeOrder({
                   ...pendingPayload,
+                  paymentMode: 'CASHFREE',
+                  paymentType: 'ONLINE_CASHFREE',
                   paymentStatus: 'Paid',
                   orderStatus: 'Confirmed',
                   paymentOrderId: paymentReturnOrderId,
@@ -1004,10 +1016,21 @@ export default function App() {
       try {
         const latest = await api.getLiveOrderTracking(orderId, restId);
         if (latest) {
-          setActiveOrder((previous) => ({
-            ...(previous || {}),
-            ...latest,
-          }));
+          setActiveOrder((previous) => {
+            if (
+              previous &&
+              previous.id === latest.id &&
+              previous.orderStatus === latest.orderStatus &&
+              previous.paymentStatus === latest.paymentStatus &&
+              previous.kitchenStatus === latest.kitchenStatus
+            ) {
+              return previous;
+            }
+            return {
+              ...(previous || {}),
+              ...latest,
+            };
+          });
           return latest;
         }
       } catch (error) {

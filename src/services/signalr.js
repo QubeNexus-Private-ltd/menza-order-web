@@ -8,6 +8,7 @@ const statusListeners = new Set();
 const orderCreatedListeners = new Set();
 
 const storeOperatingStatusListeners = new Set();
+const paymentVerifiedListeners = new Set();
 
 /**
  * Initializes and starts the SignalR Hub connection
@@ -95,6 +96,18 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
       });
     });
 
+    // Event listener: OnPaymentVerified (CashFree Webhook -> Azure Function settlement)
+    hubConnection.on('OnPaymentVerified', (data) => {
+      console.log('⚡ [SignalR] Real-Time PaymentVerified received:', data);
+      paymentVerifiedListeners.forEach((callback) => {
+        try {
+          callback(data);
+        } catch (e) {
+          console.error('Error in SignalR payment verified listener:', e);
+        }
+      });
+    });
+
     await hubConnection.start();
     console.log('⚡ [SignalR] OrderNotificationHub Connected successfully to', hubUrl);
 
@@ -153,6 +166,23 @@ export async function joinOrderGroup(orderId) {
 }
 
 /**
+ * Leave a specific order group when modal is closed
+ */
+export async function leaveOrderGroup(orderId) {
+  if (!orderId) return;
+  const targetId = String(orderId);
+
+  if (hubConnection && hubConnection.state === 'Connected') {
+    try {
+      await hubConnection.invoke('LeaveOrderGroup', targetId);
+      console.log(`⚡ [SignalR] Left Order_${targetId} group`);
+    } catch (err) {
+      // ignore
+    }
+  }
+}
+
+/**
  * Subscribe to real-time order status change events
  */
 export function onOrderStatusChanged(callback) {
@@ -185,5 +215,17 @@ export function onStoreOperatingStatusChanged(callback) {
   }
   return () => {
     storeOperatingStatusListeners.delete(callback);
+  };
+}
+
+/**
+ * Subscribe to real-time payment verified events from CashFree / Azure Function
+ */
+export function onPaymentVerified(callback) {
+  if (typeof callback === 'function') {
+    paymentVerifiedListeners.add(callback);
+  }
+  return () => {
+    paymentVerifiedListeners.delete(callback);
   };
 }

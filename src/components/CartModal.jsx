@@ -31,6 +31,7 @@ import {
   Check,
 } from 'lucide-react';
 import * as api from '../services/api';
+import { joinOrderGroup } from '../services/signalr';
 
 function ItemImageWithFallback({
   uri,
@@ -358,32 +359,60 @@ export default function CartModal({
       ? cart.items
       : cartItems;
 
-  // Backend is authoritative for billing values.
-  const subTotal = Number(cart?.subTotal ?? 0);
+  // Items Subtotal calculated from active items
+  const itemsSubTotal = (activeCartItems || []).reduce(
+    (sum, item) =>
+      sum +
+      (Number(
+        item.unitPrice ??
+          item.amount ??
+          item.price ??
+          0
+      ) || 0) *
+        (Number(item.quantity) || 1),
+    0
+  );
+
+  const subTotal = Number(cart?.subTotal ?? 0) > 0 ? Number(cart.subTotal) : Math.round(itemsSubTotal * 100) / 100;
   const discountAmount = Number(
     cart?.discountAmount ?? 0
   );
-  const taxableAmount = Number(
-    cart?.taxableAmount ?? 0
-  );
-  const cgst = Number(cart?.cgstAmount ?? 0);
-  const sgst = Number(cart?.sgstAmount ?? 0);
+  const taxableAmount = Math.max(0, subTotal - discountAmount);
+
+  // GST percentage resolution: Check cart first, then catalog, default to 2.5% if restaurant has GST
   const cgstPercentage = Number(
-    cart?.cgstPercentage ?? 2.5
+    cart?.cgstPercentage ??
+    catalog?.cgstPercentage ??
+    2.5
   );
   const sgstPercentage = Number(
-    cart?.sgstPercentage ?? 2.5
+    cart?.sgstPercentage ??
+    catalog?.sgstPercentage ??
+    2.5
   );
-  const gstNumber = cart?.gstNumber || null;
-  const taxAmount = Number(
-    cart?.taxAmount ?? cgst + sgst
-  );
+  const gstNumber = cart?.gstNumber || catalog?.gstNumber || null;
+
+  // Determine if GST is present
+  const hasGst = cgstPercentage > 0 || sgstPercentage > 0 || Boolean(gstNumber);
+
+  // CGST and SGST calculation: use cart if > 0, otherwise compute from taxableAmount
+  const cgst = Number(cart?.cgstAmount ?? 0) > 0
+    ? Number(cart.cgstAmount)
+    : (hasGst ? Math.round(taxableAmount * (cgstPercentage / 100) * 100) / 100 : 0);
+
+  const sgst = Number(cart?.sgstAmount ?? 0) > 0
+    ? Number(cart.sgstAmount)
+    : (hasGst ? Math.round(taxableAmount * (sgstPercentage / 100) * 100) / 100 : 0);
+
+  const taxAmount = Math.round((cgst + sgst) * 100) / 100;
   const platformFee = Number(
     cart?.platformFee ?? 0
   );
-  const grandTotal = Number(
-    cart?.totalAmount ?? 0
-  );
+
+  // Grand Total MUST strictly sum GST amount in the total and display on screen!
+  const grandTotal = Math.round(
+    (taxableAmount + taxAmount + platformFee) * 100
+  ) / 100;
 
   const hasUnavailableItems =
     Boolean(cart?.hasUnavailableItems) ||
@@ -621,6 +650,11 @@ export default function CartModal({
       gstNumber: gstNumber || null,
       cgstPercentage,
       sgstPercentage,
+      subTotal,
+      cgstAmount: cgst,
+      sgstAmount: sgst,
+      taxAmount,
+      totalAmount: grandTotal,
     };
 
     if (paymentMethod === 'cashfree') {
@@ -674,6 +708,8 @@ export default function CartModal({
               ? activeTable.id
               : null,
           tableNumber: effectiveTable,
+          paymentMode: 'CASHFREE',
+          paymentType: 'ONLINE_CASHFREE',
           paymentStatus: 'Paid',
           orderStatus: 'Confirmed',
           paymentOrderId: cashfreeOrderId,
@@ -694,6 +730,8 @@ export default function CartModal({
               'pending_cf_order_' + cashfreeOrderId,
               JSON.stringify(pendingOrderPayload)
             );
+            // Join real-time SignalR order group for instant settlement updates
+            joinOrderGroup(cashfreeOrderId);
           } catch (storageErr) {
             console.warn('Could not cache pending order payload:', storageErr);
           }
@@ -1824,64 +1862,68 @@ export default function CartModal({
                     </View>
                   ) : null}
 
-                  <View
-                    style={styles.summaryRow}
-                  >
-                    <Text
-                      style={styles.summaryLabel}
-                    >
-                      CGST{' '}
-                      {cgstPercentage >
-                      0
-                        ? `(${cgstPercentage}%)`
-                        : ''}
-                    </Text>
+                  {hasGst && taxAmount > 0 ? (
+                    <>
+                      <View
+                        style={styles.summaryRow}
+                      >
+                        <Text
+                          style={styles.summaryLabel}
+                        >
+                          CGST{' '}
+                          {cgstPercentage >
+                          0
+                            ? `(${cgstPercentage}%)`
+                            : ''}
+                        </Text>
 
-                    <Text
-                      style={styles.summaryValue}
-                    >
-                      ₹{money(cgst)}
-                    </Text>
-                  </View>
+                        <Text
+                          style={styles.summaryValue}
+                        >
+                          ₹{money(cgst)}
+                        </Text>
+                      </View>
 
-                  <View
-                    style={styles.summaryRow}
-                  >
-                    <Text
-                      style={styles.summaryLabel}
-                    >
-                      SGST{' '}
-                      {sgstPercentage >
-                      0
-                        ? `(${sgstPercentage}%)`
-                        : ''}
-                    </Text>
+                      <View
+                        style={styles.summaryRow}
+                      >
+                        <Text
+                          style={styles.summaryLabel}
+                        >
+                          SGST{' '}
+                          {sgstPercentage >
+                          0
+                            ? `(${sgstPercentage}%)`
+                            : ''}
+                        </Text>
 
-                    <Text
-                      style={styles.summaryValue}
-                    >
-                      ₹{money(sgst)}
-                    </Text>
-                  </View>
+                        <Text
+                          style={styles.summaryValue}
+                        >
+                          ₹{money(sgst)}
+                        </Text>
+                      </View>
 
-                  <View
-                    style={styles.summaryRow}
-                  >
-                    <Text
-                      style={styles.summaryLabel}
-                    >
-                      Total Tax
-                    </Text>
+                      <View
+                        style={styles.summaryRow}
+                      >
+                        <Text
+                          style={styles.summaryLabel}
+                        >
+                          Total Tax (GST)
+                        </Text>
 
-                    <Text
-                      style={styles.summaryValue}
-                    >
-                      ₹
-                      {money(
-                        taxAmount
-                      )}
-                    </Text>
-                  </View>
+                        <Text
+                          style={styles.summaryValue}
+                        >
+                          ₹
+                          {money(
+                            taxAmount
+                          )}
+                        </Text>
+                      </View>
+                    </>
+                  ) : null}
 
                   {gstNumber ? (
                     <View
