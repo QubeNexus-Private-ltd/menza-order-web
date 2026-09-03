@@ -37,7 +37,7 @@ const STATUSES = [
   'Confirmed',
   'Preparing',
   'Ready',
-  'Delivered',
+  'Served',
 ];
 
 export default function OrderTrackerModal({
@@ -85,10 +85,16 @@ export default function OrderTrackerModal({
         const id = Number(o?.orderId || o?.id);
 
         if (id && !uniqueMap.has(id)) {
-          uniqueMap.set(
-            id,
-            api.normalizeOrder ? api.normalizeOrder(o) : o
-          );
+          const norm = api.normalizeOrder ? api.normalizeOrder(o) : o;
+          if (selectedOrder && Number(selectedOrder.id) === id) {
+            uniqueMap.set(id, {
+              ...norm,
+              kitchenStatus: selectedOrder.kitchenStatus || norm.kitchenStatus,
+              orderStatus: selectedOrder.orderStatus || norm.orderStatus,
+            });
+          } else {
+            uniqueMap.set(id, norm);
+          }
         }
       }
 
@@ -145,16 +151,44 @@ export default function OrderTrackerModal({
 
         if (!cancelled && latest) {
           setSelectedOrder((prev) => {
-            if (
-              prev &&
-              prev.id === latest.id &&
-              prev.orderStatus === latest.orderStatus &&
-              prev.paymentStatus === latest.paymentStatus &&
-              prev.kitchenStatus === latest.kitchenStatus
-            ) {
-              return prev;
-            }
-            return latest;
+            if (!prev) return latest;
+
+            const STATUS_RANKS = {
+              pending: 0,
+              placed: 0,
+              new: 0,
+              created: 0,
+              confirmed: 1,
+              accepted: 1,
+              preparing: 2,
+              cooking: 2,
+              in_kitchen: 2,
+              kitchen: 2,
+              ready: 3,
+              prepared: 3,
+              delivered: 4,
+              served: 4,
+              completed: 4,
+              settled: 4,
+            };
+
+            const prevOrderRank = STATUS_RANKS[String(prev.orderStatus || '').trim().toLowerCase()] ?? 0;
+            const latestOrderRank = STATUS_RANKS[String(latest.orderStatus || '').trim().toLowerCase()] ?? 0;
+            const effectiveOrderStatus = latestOrderRank >= prevOrderRank ? latest.orderStatus : prev.orderStatus;
+
+            const prevKitchenRank = STATUS_RANKS[String(prev.kitchenStatus || '').trim().toLowerCase()] ?? 0;
+            const latestKitchenRank = STATUS_RANKS[String(latest.kitchenStatus || '').trim().toLowerCase()] ?? 0;
+            const effectiveKitchenStatus = (latest.kitchenStatus && latestKitchenRank >= prevKitchenRank)
+              ? latest.kitchenStatus
+              : prev.kitchenStatus;
+
+            return {
+              ...prev,
+              ...latest,
+              orderStatus: effectiveOrderStatus,
+              kitchenStatus: effectiveKitchenStatus,
+              items: (Array.isArray(latest.items) && latest.items.length > 0) ? latest.items : prev.items,
+            };
           });
         }
       } catch (error) {
@@ -178,28 +212,22 @@ export default function OrderTrackerModal({
 
     // Real-Time SignalR Listener: Direct in-memory state update without HTTP request
     const unsubscribeSignalR = signalrService.onOrderStatusChanged((data) => {
-      const changedOrderId = Number(data?.orderId || data?.id || 0);
+      const changedOrderId = Number(data?.orderId || data?.OrderId || data?.id || data?.Id || 0);
       if (changedOrderId === Number(selectedOrder.id) || !changedOrderId) {
         console.log('⚡ [SignalR] Real-time order update received in-memory:', data);
 
-        const newOrderStatus = data?.orderStatus || data?.status;
-        const newKitchenStatus = data?.kitchenStatus;
-        const newPaymentStatus = data?.paymentStatus;
+        const newOrderStatus = data?.orderStatus || data?.OrderStatus || data?.status || data?.Status;
+        const newKitchenStatus = data?.kitchenStatus || data?.KitchenStatus || data?.kitchenOrderStatus;
+        const newPaymentStatus = data?.paymentStatus || data?.PaymentStatus;
 
         setSelectedOrder((prev) => {
           if (!prev) return prev;
-          if (
-            (!newOrderStatus || prev.orderStatus === newOrderStatus) &&
-            (!newKitchenStatus || prev.kitchenStatus === newKitchenStatus) &&
-            (!newPaymentStatus || prev.paymentStatus === newPaymentStatus)
-          ) {
-            return prev;
-          }
           return {
             ...prev,
             orderStatus: newOrderStatus || prev.orderStatus,
             kitchenStatus: newKitchenStatus || prev.kitchenStatus,
             paymentStatus: newPaymentStatus || prev.paymentStatus,
+            items: Array.isArray(data?.items) ? data.items : prev.items,
             settledDateUtc: data?.settledDateUtc || prev.settledDateUtc,
             estimatedPickupTime: data?.estimatedPickupTime || prev.estimatedPickupTime,
           };

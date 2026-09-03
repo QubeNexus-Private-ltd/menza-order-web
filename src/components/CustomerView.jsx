@@ -226,7 +226,15 @@ export default function CustomerView({
 
   useEffect(() => {
     if (activeOrder) {
-      setLiveOrder(activeOrder);
+      setLiveOrder((prev) => {
+        if (!prev) return activeOrder;
+        return {
+          ...prev,
+          ...activeOrder,
+          kitchenStatus: activeOrder.kitchenStatus || prev.kitchenStatus,
+          orderStatus: activeOrder.orderStatus || prev.orderStatus,
+        };
+      });
     }
   }, [activeOrder]);
 

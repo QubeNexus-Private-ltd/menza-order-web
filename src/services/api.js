@@ -1828,6 +1828,27 @@ const saveLocalOrders = (
   }
 };
 
+export const updateLocalOrderStatus = (orderId, orderStatus = null, kitchenStatus = null) => {
+  if (!orderId) return;
+  const numId = Number(orderId);
+  const orders = getLocalOrders();
+  let changed = false;
+  const updatedOrders = orders.map((o) => {
+    if (Number(o.id || o.orderId) === numId) {
+      changed = true;
+      return {
+        ...o,
+        orderStatus: orderStatus || o.orderStatus,
+        kitchenStatus: kitchenStatus || o.kitchenStatus,
+      };
+    }
+    return o;
+  });
+  if (changed) {
+    saveLocalOrders(updatedOrders);
+  }
+};
+
 /* =========================================================
    NORMALIZE ORDER
    VERY IMPORTANT FOR TRACKER
@@ -1947,6 +1968,34 @@ export const normalizeOrder = (
       Number(order.id),
 
     orderStatus,
+
+    kitchenStatus: (() => {
+      const rawKitchen =
+        order.kitchenStatus ||
+        order.KitchenStatus ||
+        order.kitchenOrderStatus ||
+        order.KitchenOrderStatus ||
+        null;
+      if (rawKitchen) return rawKitchen;
+
+      const stLower = String(orderStatus || '').toLowerCase();
+      if (stLower.includes('ready')) return 'Ready';
+      if (stLower.includes('prep') || stLower.includes('cook') || stLower.includes('kitchen')) return 'Preparing';
+      if (stLower.includes('serve') || stLower.includes('deliver') || stLower.includes('complete')) return 'Served';
+
+      if (typeof localStorage !== 'undefined') {
+        try {
+          const savedRaw = localStorage.getItem('menza_active_order');
+          if (savedRaw) {
+            const parsed = JSON.parse(savedRaw);
+            if (Number(parsed?.id || parsed?.orderId) === Number(order.id || order.orderId) && parsed.kitchenStatus) {
+              return parsed.kitchenStatus;
+            }
+          }
+        } catch {}
+      }
+      return null;
+    })(),
 
     paymentStatus,
 
@@ -2440,6 +2489,33 @@ export const placeOrder =
         `Order #${newOrder.id} placed successfully!`,
     };
   };
+
+/* =========================================================
+   GET ACTIVE ORDER BY TABLE
+========================================================= */
+
+export const getActiveOrderByTable = async (tableId, restaurantId = null) => {
+  if (!tableId) return null;
+  try {
+    const params = restaurantId ? { restaurantId } : undefined;
+    const res = await api.get(`/api/Order/Table/${tableId}/Active`, { params });
+    if (res?.data && (res.data.id || res.data.orderId)) {
+      return normalizeOrder(res.data);
+    }
+  } catch (e) {
+    // Fallback: check cached local orders
+    try {
+      const orders = getLocalOrders();
+      const found = orders.find(
+        (o) =>
+          Number(o.tableId) === Number(tableId) &&
+          !['Cancelled', 'Settled', 'Completed'].includes(o.orderStatus)
+      );
+      if (found) return normalizeOrder(found);
+    } catch {}
+  }
+  return null;
+};
 
 /* =========================================================
    GET ORDER (Deduplicated with in-flight caching)

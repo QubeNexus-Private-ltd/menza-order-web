@@ -135,28 +135,78 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
       .build();
 
     // Central dispatcher for status changes (supporting both OnEvent and Event naming)
-    const dispatchStatusChanged = (data) => {
-      console.log('⚡ [SignalR] Order / Kitchen status update:', data);
+    const dispatchStatusChanged = (raw) => {
+      console.log('⚡ [SignalR] Raw Order / Kitchen status update:', raw);
+      if (!raw) return;
 
-      const status = String(data?.orderStatus || data?.kitchenStatus || data?.status || '').toLowerCase();
-      const orderNum = data?.orderNumber || data?.orderId || data?.id || '';
+      const data = (raw && typeof raw === 'object' && raw.data) ? raw.data : raw;
+
+      // Robust extraction of order ID across all possible casing / naming conventions
+      const orderId = Number(
+        data.orderId ||
+        data.OrderId ||
+        data.id ||
+        data.Id ||
+        data.order_id ||
+        data.Order_Id ||
+        data.orderNumber ||
+        data.OrderNumber ||
+        0
+      );
+
+      // Robust extraction of kitchen status
+      const kitchenStatus =
+        data.kitchenStatus ||
+        data.KitchenStatus ||
+        data.kitchenOrderStatus ||
+        data.KitchenOrderStatus ||
+        null;
+
+      // Robust extraction of overall order status
+      const orderStatus =
+        data.orderStatus ||
+        data.OrderStatus ||
+        data.status ||
+        data.Status ||
+        data.orderState ||
+        data.OrderState ||
+        null;
+
+      const paymentStatus =
+        data.paymentStatus ||
+        data.PaymentStatus ||
+        null;
+
+      const normalized = {
+        ...data,
+        id: orderId || data.id,
+        orderId: orderId || data.orderId,
+        kitchenStatus: kitchenStatus || data.kitchenStatus,
+        orderStatus: orderStatus || data.orderStatus,
+        status: orderStatus || data.status,
+        paymentStatus: paymentStatus || data.paymentStatus,
+        items: Array.isArray(data.items) ? data.items : Array.isArray(data.Items) ? data.Items : undefined,
+      };
+
+      const effectiveStatus = String(kitchenStatus || orderStatus || '').toLowerCase();
+      const orderNum = orderId || data?.pickupToken || data?.tokenNumber || '';
 
       // Determine chime & notification
-      if (status.includes('ready')) {
+      if (effectiveStatus.includes('ready')) {
         playNotificationChime('ready');
         sendBrowserNotification(
           `🔔 Order #${orderNum} is READY!`,
-          'Your dishes are prepared and being served to your table now.',
+          'Your dishes are prepared and are being delivered to your table.',
           `order-${orderNum}-ready`
         );
-      } else if (status.includes('serve') || status.includes('deliver') || status.includes('complete')) {
+      } else if (effectiveStatus.includes('serve') || effectiveStatus.includes('deliver') || effectiveStatus.includes('complete')) {
         playNotificationChime('served');
         sendBrowserNotification(
-          `🍽️ Order #${orderNum} Served`,
-          'Your food has arrived at your table. Enjoy your meal!',
+          `🍽️ Order #${orderNum} Has Been Served`,
+          'Your food has arrived at your table. Enjoy your feast!',
           `order-${orderNum}-served`
         );
-      } else if (status.includes('cook') || status.includes('prep') || status.includes('kitchen')) {
+      } else if (effectiveStatus.includes('cook') || effectiveStatus.includes('prep') || effectiveStatus.includes('kitchen')) {
         playNotificationChime('cooking');
         sendBrowserNotification(
           `👨‍🍳 Cooking Order #${orderNum}`,
@@ -166,16 +216,17 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
       }
 
       statusListeners.forEach((cb) => {
-        try { cb(data); } catch (e) { console.error(e); }
+        try { cb(normalized); } catch (e) { console.error(e); }
       });
 
       kitchenProgressListeners.forEach((cb) => {
-        try { cb(data); } catch (e) { console.error(e); }
+        try { cb(normalized); } catch (e) { console.error(e); }
       });
     };
 
-    const dispatchOrderCreated = (data) => {
-      console.log('⚡ [SignalR] Real-Time OrderCreated received:', data);
+    const dispatchOrderCreated = (raw) => {
+      console.log('⚡ [SignalR] Real-Time OrderCreated received:', raw);
+      const data = (raw && typeof raw === 'object' && raw.data) ? raw.data : raw;
       playNotificationChime('cooking');
       orderCreatedListeners.forEach((cb) => {
         try { cb(data); } catch (e) { console.error(e); }
@@ -196,11 +247,17 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
     hubConnection.on('OnOrderServed', dispatchStatusChanged);
     hubConnection.on('OrderServed', dispatchStatusChanged);
 
-    // 4. Order Created (New KOT received from Table QR or Counter)
+    // 4. Generic order/ticket updates
+    hubConnection.on('OnOrderUpdated', dispatchStatusChanged);
+    hubConnection.on('OrderUpdated', dispatchStatusChanged);
+    hubConnection.on('OnKitchenTicketUpdated', dispatchStatusChanged);
+    hubConnection.on('KitchenTicketUpdated', dispatchStatusChanged);
+
+    // 5. Order Created (New KOT received from Table QR or Counter)
     hubConnection.on('OnOrderCreated', dispatchOrderCreated);
     hubConnection.on('OrderCreated', dispatchOrderCreated);
 
-    // 5. Order Settled (Payment verified)
+    // 6. Order Settled (Payment verified)
     hubConnection.on('OnOrderSettled', dispatchStatusChanged);
     hubConnection.on('OrderSettled', dispatchStatusChanged);
 

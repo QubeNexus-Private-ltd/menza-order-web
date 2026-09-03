@@ -8,7 +8,14 @@ import {
   View,
   StyleSheet,
   Text,
+  TouchableOpacity,
 } from 'react-native';
+import {
+  Bell,
+  Flame,
+  Check,
+  Utensils,
+} from 'lucide-react';
 
 import Header from './components/Header';
 import CustomerView from './components/CustomerView';
@@ -65,8 +72,28 @@ export default function App() {
   const [activeTable, setActiveTable] =
     useState(null);
 
-  const [activeOrder, setActiveOrder] =
-    useState(null);
+  const [activeOrder, setActiveOrderState] = useState(() => {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('menza_active_order');
+        return saved ? JSON.parse(saved) : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  const setActiveOrder = useCallback((order) => {
+    setActiveOrderState(order);
+    if (typeof localStorage !== 'undefined') {
+      if (order && !['Cancelled', 'Settled'].includes(order.orderStatus)) {
+        localStorage.setItem('menza_active_order', JSON.stringify(order));
+      } else {
+        localStorage.removeItem('menza_active_order');
+      }
+    }
+  }, []);
 
   const [staffUser, setStaffUser] =
     useState(null);
@@ -105,17 +132,16 @@ export default function App() {
   const [storeOperatingStatus, setStoreOperatingStatus] =
     useState(null);
 
-  const [toastMessage, setToastMessage] =
-    useState('');
+  const [toastData, setToastData] =
+    useState(null);
 
-  const showToast = (msg) => {
-    setToastMessage(msg);
+  const showToast = useCallback((msg, type = 'info', orderId = null) => {
+    setToastData({ message: msg, type, orderId });
 
-    setTimeout(
-      () => setToastMessage(''),
-      4500
-    );
-  };
+    setTimeout(() => {
+      setToastData((prev) => (prev?.message === msg ? null : prev));
+    }, 5500);
+  }, []);
 
   /* =========================
      SIGNALR REAL-TIME SYNC
@@ -160,23 +186,42 @@ export default function App() {
       if (!data) return;
       console.log('⚡ [App.jsx] Real-Time Kitchen / Order Update received:', data);
 
-      const changedOrderId = Number(data?.orderId || data?.id || 0);
-      const newOrderStatus = data?.orderStatus || data?.status;
-      const newKitchenStatus = data?.kitchenStatus;
+      const changedOrderId = Number(data?.orderId || data?.OrderId || data?.id || data?.Id || 0);
+      const newOrderStatus = data?.orderStatus || data?.OrderStatus || data?.status || data?.Status;
+      const newKitchenStatus = data?.kitchenStatus || data?.KitchenStatus || data?.kitchenOrderStatus;
 
-      // 1. Update activeOrder if it's the active one
-      setActiveOrder((prev) => {
-        if (!prev) return prev;
+      // 1. Update activeOrder if it's the active one or if it matches current table
+      setActiveOrderState((prev) => {
+        if (!prev) {
+          if (activeTable && data.tableId && Number(data.tableId) === Number(activeTable)) {
+            api.getOrder(changedOrderId).then((fresh) => {
+              if (fresh) setActiveOrder(fresh);
+            });
+          }
+          return prev;
+        }
+
         const curId = Number(prev.id || prev.orderId || 0);
         if (changedOrderId && changedOrderId !== curId) return prev;
 
-        return {
+        const updated = {
           ...prev,
           orderStatus: newOrderStatus || prev.orderStatus,
           kitchenStatus: newKitchenStatus || prev.kitchenStatus,
           paymentStatus: data?.paymentStatus || prev.paymentStatus,
           settledDateUtc: data?.settledDateUtc || prev.settledDateUtc,
+          items: Array.isArray(data?.items) ? data.items : prev.items,
         };
+
+        if (typeof localStorage !== 'undefined') {
+          if (!['Cancelled', 'Settled'].includes(updated.orderStatus)) {
+            localStorage.setItem('menza_active_order', JSON.stringify(updated));
+          } else {
+            localStorage.removeItem('menza_active_order');
+          }
+        }
+
+        return updated;
       });
 
       // 2. Update orders list
@@ -195,14 +240,21 @@ export default function App() {
         });
       });
 
+      // Sync persistent local orders
+      api.updateLocalOrderStatus(changedOrderId, newOrderStatus, newKitchenStatus);
+
       // 3. User Toast Alert based on Kitchen Progression
       const st = String(newKitchenStatus || newOrderStatus || '').toLowerCase();
+      const displayId = changedOrderId ? `#${changedOrderId}` : '';
+
       if (st.includes('ready')) {
-        showToast(`🔔 Kitchen Update: Order #${changedOrderId || ''} is READY! Server is bringing it to your table.`);
+        showToast(`Order ${displayId} is READY! Server is bringing it to your table.`, 'ready', changedOrderId);
       } else if (st.includes('serve') || st.includes('deliver') || st.includes('complete')) {
-        showToast(`🍽️ Order #${changedOrderId || ''} has been served. Enjoy your meal!`);
+        showToast(`Order ${displayId} has been served to your table. Enjoy your feast!`, 'served', changedOrderId);
       } else if (st.includes('prep') || st.includes('cook')) {
-        showToast(`👨‍🍳 Chef started cooking Order #${changedOrderId || ''}!`);
+        showToast(`Chef started preparing Order ${displayId} in the kitchen (~15m).`, 'cooking', changedOrderId);
+      } else if (st.includes('confirm')) {
+        showToast(`Order ${displayId} confirmed and sent to kitchen KOT.`, 'info', changedOrderId);
       }
     });
 
@@ -315,6 +367,20 @@ export default function App() {
           targetEncryptedId,
           targetTableNum
         );
+
+        // If dining at a table, automatically detect and sync any active running kitchen order
+        if (targetTableNum) {
+          try {
+            const rawId = urlRestId ? Number(urlRestId) : 1;
+            const runningOrder = await api.getActiveOrderByTable(targetTableNum, rawId);
+            if (runningOrder && !['Cancelled', 'Settled'].includes(runningOrder.orderStatus)) {
+              setActiveOrder(runningOrder);
+              signalrService.joinOrderGroup(runningOrder.id);
+            }
+          } catch (e) {
+            console.log('Active table order check:', e);
+          }
+        }
 
         if (paymentReturnOrderId) {
           const processedKey = 'cf_ret_handled_' + paymentReturnOrderId;
@@ -1071,22 +1137,56 @@ export default function App() {
       try {
         const latest = await api.getLiveOrderTracking(orderId, restId);
         if (latest) {
+          const STATUS_RANKS = {
+            pending: 0,
+            placed: 0,
+            new: 0,
+            created: 0,
+            confirmed: 1,
+            accepted: 1,
+            preparing: 2,
+            cooking: 2,
+            in_kitchen: 2,
+            kitchen: 2,
+            ready: 3,
+            prepared: 3,
+            delivered: 4,
+            served: 4,
+            completed: 4,
+            settled: 4,
+          };
+
+          let mergedResult = latest;
+
           setActiveOrder((previous) => {
-            if (
-              previous &&
-              previous.id === latest.id &&
-              previous.orderStatus === latest.orderStatus &&
-              previous.paymentStatus === latest.paymentStatus &&
-              previous.kitchenStatus === latest.kitchenStatus
-            ) {
-              return previous;
+            if (!previous || Number(previous.id || previous.orderId) !== Number(orderId)) {
+              mergedResult = latest;
+              return latest;
             }
-            return {
-              ...(previous || {}),
+
+            const prevOrderRank = STATUS_RANKS[String(previous.orderStatus || '').trim().toLowerCase()] ?? 0;
+            const latestOrderRank = STATUS_RANKS[String(latest.orderStatus || '').trim().toLowerCase()] ?? 0;
+            const effectiveOrderStatus = latestOrderRank >= prevOrderRank ? latest.orderStatus : previous.orderStatus;
+
+            const prevKitchenRank = STATUS_RANKS[String(previous.kitchenStatus || '').trim().toLowerCase()] ?? 0;
+            const latestKitchenRank = STATUS_RANKS[String(latest.kitchenStatus || '').trim().toLowerCase()] ?? 0;
+            const effectiveKitchenStatus = (latest.kitchenStatus && latestKitchenRank >= prevKitchenRank)
+              ? latest.kitchenStatus
+              : previous.kitchenStatus;
+
+            mergedResult = {
+              ...previous,
               ...latest,
+              orderStatus: effectiveOrderStatus,
+              kitchenStatus: effectiveKitchenStatus,
+              items: (Array.isArray(latest.items) && latest.items.length > 0) ? latest.items : previous.items,
             };
+
+            return mergedResult;
           });
-          return latest;
+
+          api.updateLocalOrderStatus(orderId, mergedResult.orderStatus, mergedResult.kitchenStatus);
+          return mergedResult;
         }
       } catch (error) {
         console.log('handleRefreshOrder error:', error?.message);
@@ -1340,16 +1440,45 @@ export default function App() {
     <View
       style={styles.appContainer}
     >
-      {toastMessage ? (
-        <View
-          style={styles.toastBanner}
+      {toastData ? (
+        <TouchableOpacity
+          style={[
+            styles.toastBanner,
+            toastData.type === 'ready'
+              ? styles.toastReady
+              : toastData.type === 'cooking'
+              ? styles.toastCooking
+              : toastData.type === 'served'
+              ? styles.toastServed
+              : styles.toastDefault,
+          ]}
+          onPress={() => {
+            if (toastData.orderId || activeOrder) {
+              setOrderTrackerOpen(true);
+            }
+          }}
+          activeOpacity={0.9}
         >
-          <Text
-            style={styles.toastText}
-          >
-            {toastMessage}
+          <View style={styles.toastIconWrap}>
+            {toastData.type === 'ready' ? (
+              <Bell size={16} color="#ffffff" />
+            ) : toastData.type === 'cooking' ? (
+              <Flame size={16} color="#ffffff" />
+            ) : toastData.type === 'served' ? (
+              <Check size={16} color="#ffffff" />
+            ) : (
+              <Utensils size={16} color="#ffffff" />
+            )}
+          </View>
+          <Text style={styles.toastText} numberOfLines={2}>
+            {toastData.message}
           </Text>
-        </View>
+          {(toastData.orderId || activeOrder) && (
+            <View style={styles.toastActionPill}>
+              <Text style={styles.toastActionText}>Track</Text>
+            </View>
+          )}
+        </TouchableOpacity>
       ) : null}
 
       <Header
@@ -1580,23 +1709,68 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 65,
     alignSelf: 'center',
-    maxWidth: '90%',
+    maxWidth: '92%',
     zIndex: 9999,
-    backgroundColor: '#78350f',
-    paddingHorizontal: 18,
-    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: 24,
-    shadowColor: '#78350f',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 10,
+    gap: 10,
+  },
+
+  toastDefault: {
+    backgroundColor: '#0f172a',
+    shadowColor: '#0f172a',
+  },
+
+  toastReady: {
+    backgroundColor: '#7c3aed',
+    shadowColor: '#7c3aed',
+  },
+
+  toastCooking: {
+    backgroundColor: '#ea580c',
+    shadowColor: '#ea580c',
+  },
+
+  toastServed: {
+    backgroundColor: '#15803d',
+    shadowColor: '#15803d',
+  },
+
+  toastIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   toastText: {
     color: '#ffffff',
-    fontWeight: '800',
+    fontWeight: '700',
     fontSize: 13,
-    textAlign: 'center',
+    flex: 1,
+    lineHeight: 18,
+  },
+
+  toastActionPill: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+
+  toastActionText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
 });
