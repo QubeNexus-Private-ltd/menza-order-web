@@ -173,7 +173,10 @@ export default function OrderTrackerModal({
     // Terminal state check: finalized orders do not need continuous polling
     const isTerminal = ['Completed', 'Settled', 'Cancelled'].includes(selectedOrder?.orderStatus);
 
-    // Real-Time SignalR Listener: Direct in-memory state update without HTTP request (Model 3 Cost Optimization)
+    // Request browser notifications if user wants updates
+    signalrService.requestNotificationPermission();
+
+    // Real-Time SignalR Listener: Direct in-memory state update without HTTP request
     const unsubscribeSignalR = signalrService.onOrderStatusChanged((data) => {
       const changedOrderId = Number(data?.orderId || data?.id || 0);
       if (changedOrderId === Number(selectedOrder.id) || !changedOrderId) {
@@ -200,6 +203,21 @@ export default function OrderTrackerModal({
             settledDateUtc: data?.settledDateUtc || prev.settledDateUtc,
             estimatedPickupTime: data?.estimatedPickupTime || prev.estimatedPickupTime,
           };
+        });
+
+        setAllOrdersList((prevList) => {
+          if (!Array.isArray(prevList)) return prevList;
+          return prevList.map((o) => {
+            const oId = Number(o.id || o.orderId || 0);
+            if (oId === changedOrderId) {
+              return {
+                ...o,
+                orderStatus: newOrderStatus || o.orderStatus,
+                kitchenStatus: newKitchenStatus || o.kitchenStatus,
+              };
+            }
+            return o;
+          });
         });
       }
     });

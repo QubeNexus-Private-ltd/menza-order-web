@@ -122,9 +122,12 @@ export default function App() {
   ========================= */
   useEffect(() => {
     const restId = catalog?.restaurantId || selectedRestaurant?.id || 1;
-    signalrService.startSignalRConnection(restId);
+    signalrService.startSignalRConnection(restId, activeOrder?.id || null);
 
-    const unsubscribe = signalrService.onStoreOperatingStatusChanged((raw) => {
+    // Request notification permission
+    signalrService.requestNotificationPermission();
+
+    const unsubStore = signalrService.onStoreOperatingStatusChanged((raw) => {
       if (!raw) return;
       const data = raw?.data || raw;
       const normalized = typeof data === 'string'
@@ -152,10 +155,62 @@ export default function App() {
       );
     });
 
+    // Real-Time Kitchen & Order Progress Sync (from CaptainMenza Chef & MenzaServe Waiter)
+    const unsubOrder = signalrService.onOrderStatusChanged((data) => {
+      if (!data) return;
+      console.log('⚡ [App.jsx] Real-Time Kitchen / Order Update received:', data);
+
+      const changedOrderId = Number(data?.orderId || data?.id || 0);
+      const newOrderStatus = data?.orderStatus || data?.status;
+      const newKitchenStatus = data?.kitchenStatus;
+
+      // 1. Update activeOrder if it's the active one
+      setActiveOrder((prev) => {
+        if (!prev) return prev;
+        const curId = Number(prev.id || prev.orderId || 0);
+        if (changedOrderId && changedOrderId !== curId) return prev;
+
+        return {
+          ...prev,
+          orderStatus: newOrderStatus || prev.orderStatus,
+          kitchenStatus: newKitchenStatus || prev.kitchenStatus,
+          paymentStatus: data?.paymentStatus || prev.paymentStatus,
+          settledDateUtc: data?.settledDateUtc || prev.settledDateUtc,
+        };
+      });
+
+      // 2. Update orders list
+      setOrders((prevList) => {
+        if (!Array.isArray(prevList)) return prevList;
+        return prevList.map((o) => {
+          const oId = Number(o.id || o.orderId || 0);
+          if (oId === changedOrderId) {
+            return {
+              ...o,
+              orderStatus: newOrderStatus || o.orderStatus,
+              kitchenStatus: newKitchenStatus || o.kitchenStatus,
+            };
+          }
+          return o;
+        });
+      });
+
+      // 3. User Toast Alert based on Kitchen Progression
+      const st = String(newKitchenStatus || newOrderStatus || '').toLowerCase();
+      if (st.includes('ready')) {
+        showToast(`🔔 Kitchen Update: Order #${changedOrderId || ''} is READY! Server is bringing it to your table.`);
+      } else if (st.includes('serve') || st.includes('deliver') || st.includes('complete')) {
+        showToast(`🍽️ Order #${changedOrderId || ''} has been served. Enjoy your meal!`);
+      } else if (st.includes('prep') || st.includes('cook')) {
+        showToast(`👨‍🍳 Chef started cooking Order #${changedOrderId || ''}!`);
+      }
+    });
+
     return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();
+      if (typeof unsubStore === 'function') unsubStore();
+      if (typeof unsubOrder === 'function') unsubOrder();
     };
-  }, [catalog?.restaurantId, selectedRestaurant?.id]);
+  }, [catalog?.restaurantId, selectedRestaurant?.id, activeOrder?.id]);
 
   /* =========================
      CART
@@ -1354,6 +1409,8 @@ export default function App() {
           categories={categories}
           items={items}
           activeTable={activeTable}
+          activeOrder={activeOrder}
+          openOrderTracker={() => setOrderTrackerOpen(true)}
           openScanner={() =>
             setScannerOpen(true)
           }

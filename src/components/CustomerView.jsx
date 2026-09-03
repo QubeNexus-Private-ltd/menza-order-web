@@ -22,7 +22,11 @@ import {
   Bell,
   Receipt,
   Sparkles,
+  Flame,
+  Check,
+  ChevronRight,
 } from 'lucide-react';
+import * as signalrService from '../services/signalr';
 import {
   getUnitDescription,
   getItemImageUrl,
@@ -202,6 +206,8 @@ export default function CustomerView({
   categories,
   items,
   activeTable,
+  activeOrder,
+  openOrderTracker,
   openScanner,
   cartItems = [],
   openCart,
@@ -216,6 +222,32 @@ export default function CustomerView({
   const [searchQuery, setSearchQuery] = useState('');
   const [vegOnly, setVegOnly] = useState(false);
   const [actionLoading, setActionLoading] = useState({});
+  const [liveOrder, setLiveOrder] = useState(activeOrder || null);
+
+  useEffect(() => {
+    if (activeOrder) {
+      setLiveOrder(activeOrder);
+    }
+  }, [activeOrder]);
+
+  useEffect(() => {
+    const unsub = signalrService.onKitchenProgress((data) => {
+      const changedId = Number(data?.orderId || data?.id || 0);
+      setLiveOrder((prev) => {
+        if (!prev) return prev;
+        const curId = Number(prev.id || prev.orderId || 0);
+        if (changedId && changedId !== curId) return prev;
+        return {
+          ...prev,
+          orderStatus: data?.orderStatus || data?.status || prev.orderStatus,
+          kitchenStatus: data?.kitchenStatus || prev.kitchenStatus,
+        };
+      });
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
 
   const restaurantName =
     catalog
@@ -1113,6 +1145,74 @@ export default function CustomerView({
           </TouchableOpacity>
         </View>
       )}
+
+      {/* FLOATING LIVE KITCHEN PROGRESS BAR */}
+      {liveOrder && !['Cancelled', 'Settled'].includes(liveOrder.orderStatus) && (
+        <View style={[styles.floatingLiveOrderWrapper, totalCartCount > 0 && styles.floatingLiveOrderWrapperWithCart]}>
+          <TouchableOpacity
+            style={[
+              styles.floatingLiveOrderBar,
+              String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
+                ? styles.liveOrderBarReady
+                : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
+                ? styles.liveOrderBarCooking
+                : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
+                ? styles.liveOrderBarServed
+                : styles.liveOrderBarPlaced,
+            ]}
+            onPress={() => {
+              if (typeof openOrderTracker === 'function') openOrderTracker();
+            }}
+            activeOpacity={0.9}
+          >
+            <View style={styles.liveOrderLeftIconWrap}>
+              {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready') ? (
+                <Bell size={18} color="#ffffff" />
+              ) : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook') ? (
+                <Flame size={18} color="#ffffff" />
+              ) : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver') ? (
+                <Check size={18} color="#ffffff" />
+              ) : (
+                <Utensils size={18} color="#ffffff" />
+              )}
+            </View>
+
+            <View style={{ flex: 1, paddingHorizontal: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.liveOrderTitleText}>
+                  Order #{liveOrder.id || liveOrder.orderId}
+                </Text>
+                <View style={styles.liveOrderPillBadge}>
+                  <Text style={styles.liveOrderPillBadgeText}>
+                    {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
+                      ? 'Ready to Serve'
+                      : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
+                      ? 'Cooking in Kitchen'
+                      : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
+                      ? 'Served to Table'
+                      : 'Order Placed'}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.liveOrderSubtitleText} numberOfLines={1}>
+                {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
+                  ? 'Plated! Server is bringing dishes to your table.'
+                  : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
+                  ? 'Chef started preparing your hot meals (~15m).'
+                  : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
+                  ? 'Delivered to your table. Enjoy your feast!'
+                  : 'KOT received in kitchen. Preparing shortly.'}
+              </Text>
+            </View>
+
+            <View style={styles.liveOrderActionWrap}>
+              <Text style={styles.liveOrderActionText}>Track</Text>
+              <ChevronRight size={15} color="#ffffff" />
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -1893,5 +1993,86 @@ const styles = StyleSheet.create({
     color: '#78716C',
     marginTop: 2,
     lineHeight: 15,
+  },
+  floatingLiveOrderWrapper: {
+    position: 'absolute',
+    bottom: 20,
+    left: 14,
+    right: 14,
+    maxWidth: 600,
+    alignSelf: 'center',
+    zIndex: 999,
+  },
+  floatingLiveOrderWrapperWithCart: {
+    bottom: 84,
+  },
+  floatingLiveOrderBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  liveOrderBarPlaced: {
+    backgroundColor: '#0284c7',
+  },
+  liveOrderBarCooking: {
+    backgroundColor: '#ea580c',
+  },
+  liveOrderBarReady: {
+    backgroundColor: '#7c3aed',
+  },
+  liveOrderBarServed: {
+    backgroundColor: '#15803d',
+  },
+  liveOrderLeftIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liveOrderTitleText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  liveOrderPillBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  liveOrderPillBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  liveOrderSubtitleText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  liveOrderActionWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 2,
+  },
+  liveOrderActionText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
   },
 });

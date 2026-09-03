@@ -4,11 +4,108 @@ import { getBaseUrl } from './api';
 let hubConnection = null;
 let currentRestaurantId = null;
 let currentOrderId = null;
+
 const statusListeners = new Set();
 const orderCreatedListeners = new Set();
-
 const storeOperatingStatusListeners = new Set();
 const paymentVerifiedListeners = new Set();
+const kitchenProgressListeners = new Set();
+
+/* =========================================================
+   AUDIO CHIME & BROWSER NOTIFICATIONS
+========================================================= */
+
+/**
+ * Requests browser notification permission if not yet decided
+ */
+export function requestNotificationPermission() {
+  if (typeof window !== 'undefined' && 'Notification' in window) {
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }
+}
+
+/**
+ * Synthesizes a crisp, pleasant restaurant audio chime using Web Audio API
+ */
+export function playNotificationChime(type = 'ready') {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    if (type === 'ready') {
+      // 2-tone uplifting bell: D5 (587Hz) -> A5 (880Hz)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(587.33, now);
+      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.18);
+      gain1.gain.setValueAtTime(0.25, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.7);
+    } else if (type === 'served') {
+      // 3-tone cheerful arrival chime: C5 -> E5 -> G5
+      [523.25, 659.25, 783.99].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const t = now + i * 0.12;
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.2, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.5);
+      });
+    } else {
+      // Soft gentle ping for 'cooking' or 'placed'
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(554.37, now + 0.12);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.45);
+    }
+  } catch (e) {
+    // Autoplay restrictions safely caught
+  }
+}
+
+/**
+ * Fires a native desktop/mobile browser notification if permission is granted
+ */
+export function sendBrowserNotification(title, body = '', tag = 'order-update') {
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  try {
+    if (Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        icon: '/favicon.png',
+        tag,
+        badge: '/favicon.png',
+      });
+    }
+  } catch (e) {
+    console.warn('Browser notification error:', e);
+  }
+}
+
+/* =========================================================
+   SIGNALR CONNECTION
+========================================================= */
 
 /**
  * Initializes and starts the SignalR Hub connection
@@ -31,80 +128,95 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
     hubConnection = new HubConnectionBuilder()
       .withUrl(hubUrl, {
         transport: HttpTransportType.WebSockets | HttpTransportType.ServerSentEvents | HttpTransportType.LongPolling,
+        withCredentials: true,
       })
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .configureLogging(LogLevel.Warning)
       .build();
 
-    // Event listener: OnOrderStatusChanged
-    hubConnection.on('OnOrderStatusChanged', (data) => {
-      console.log('⚡ [SignalR] Real-Time OrderStatusChanged received:', data);
-      statusListeners.forEach((callback) => {
-        try {
-          callback(data);
-        } catch (e) {
-          console.error('Error in SignalR status listener:', e);
-        }
-      });
-    });
+    // Central dispatcher for status changes (supporting both OnEvent and Event naming)
+    const dispatchStatusChanged = (data) => {
+      console.log('⚡ [SignalR] Order / Kitchen status update:', data);
 
-    // Event listener: OnOrderCreated
-    hubConnection.on('OnOrderCreated', (data) => {
+      const status = String(data?.orderStatus || data?.kitchenStatus || data?.status || '').toLowerCase();
+      const orderNum = data?.orderNumber || data?.orderId || data?.id || '';
+
+      // Determine chime & notification
+      if (status.includes('ready')) {
+        playNotificationChime('ready');
+        sendBrowserNotification(
+          `🔔 Order #${orderNum} is READY!`,
+          'Your dishes are prepared and being served to your table now.',
+          `order-${orderNum}-ready`
+        );
+      } else if (status.includes('serve') || status.includes('deliver') || status.includes('complete')) {
+        playNotificationChime('served');
+        sendBrowserNotification(
+          `🍽️ Order #${orderNum} Served`,
+          'Your food has arrived at your table. Enjoy your meal!',
+          `order-${orderNum}-served`
+        );
+      } else if (status.includes('cook') || status.includes('prep') || status.includes('kitchen')) {
+        playNotificationChime('cooking');
+        sendBrowserNotification(
+          `👨‍🍳 Cooking Order #${orderNum}`,
+          'The chef in the kitchen has started preparing your order.',
+          `order-${orderNum}-cooking`
+        );
+      }
+
+      statusListeners.forEach((cb) => {
+        try { cb(data); } catch (e) { console.error(e); }
+      });
+
+      kitchenProgressListeners.forEach((cb) => {
+        try { cb(data); } catch (e) { console.error(e); }
+      });
+    };
+
+    const dispatchOrderCreated = (data) => {
       console.log('⚡ [SignalR] Real-Time OrderCreated received:', data);
-      orderCreatedListeners.forEach((callback) => {
-        try {
-          callback(data);
-        } catch (e) {
-          console.error('Error in SignalR order created listener:', e);
-        }
+      playNotificationChime('cooking');
+      orderCreatedListeners.forEach((cb) => {
+        try { cb(data); } catch (e) { console.error(e); }
       });
-    });
+    };
 
-    // Event listener: OnOrderSettled
-    hubConnection.on('OnOrderSettled', (data) => {
-      console.log('⚡ [SignalR] Real-Time OrderSettled received:', data);
-      statusListeners.forEach((callback) => {
-        try {
-          callback(data);
-        } catch (e) {
-          console.error('Error in SignalR settled listener:', e);
-        }
-      });
-    });
+    // 1. Order Status Changed (from POS, Waiter, or Chef)
+    hubConnection.on('OnOrderStatusChanged', dispatchStatusChanged);
+    hubConnection.on('OrderStatusChanged', dispatchStatusChanged);
 
-    // Event listener: OnKitchenStatusChanged
-    hubConnection.on('OnKitchenStatusChanged', (data) => {
-      console.log('⚡ [SignalR] Real-Time KitchenStatusChanged received:', data);
-      statusListeners.forEach((callback) => {
-        try {
-          callback(data);
-        } catch (e) {
-          console.error('Error in SignalR kitchen listener:', e);
-        }
-      });
-    });
+    // 2. Kitchen Status Changed (Specific KDS bump from CaptainMenza)
+    hubConnection.on('OnKitchenStatusChanged', dispatchStatusChanged);
+    hubConnection.on('KitchenStatusChanged', dispatchStatusChanged);
 
-    // Event listener: OnStoreOperatingStatusChanged
+    // 3. Ready and Served explicit events
+    hubConnection.on('OnOrderReady', dispatchStatusChanged);
+    hubConnection.on('OrderReady', dispatchStatusChanged);
+    hubConnection.on('OnOrderServed', dispatchStatusChanged);
+    hubConnection.on('OrderServed', dispatchStatusChanged);
+
+    // 4. Order Created (New KOT received from Table QR or Counter)
+    hubConnection.on('OnOrderCreated', dispatchOrderCreated);
+    hubConnection.on('OrderCreated', dispatchOrderCreated);
+
+    // 5. Order Settled (Payment verified)
+    hubConnection.on('OnOrderSettled', dispatchStatusChanged);
+    hubConnection.on('OrderSettled', dispatchStatusChanged);
+
+    // 6. Store Operating Status
     hubConnection.on('OnStoreOperatingStatusChanged', (data) => {
       console.log('⚡ [SignalR] Real-Time StoreOperatingStatusChanged received:', data);
-      storeOperatingStatusListeners.forEach((callback) => {
-        try {
-          callback(data);
-        } catch (e) {
-          console.error('Error in SignalR store status listener:', e);
-        }
+      storeOperatingStatusListeners.forEach((cb) => {
+        try { cb(data); } catch (e) { console.error(e); }
       });
     });
 
-    // Event listener: OnPaymentVerified (CashFree Webhook -> Azure Function settlement)
+    // 7. CashFree payment verification
     hubConnection.on('OnPaymentVerified', (data) => {
       console.log('⚡ [SignalR] Real-Time PaymentVerified received:', data);
-      paymentVerifiedListeners.forEach((callback) => {
-        try {
-          callback(data);
-        } catch (e) {
-          console.error('Error in SignalR payment verified listener:', e);
-        }
+      paymentVerifiedListeners.forEach((cb) => {
+        try { cb(data); } catch (e) { console.error(e); }
       });
     });
 
@@ -195,6 +307,18 @@ export function onOrderStatusChanged(callback) {
 }
 
 /**
+ * Subscribe to real-time kitchen progress change events
+ */
+export function onKitchenProgress(callback) {
+  if (typeof callback === 'function') {
+    kitchenProgressListeners.add(callback);
+  }
+  return () => {
+    kitchenProgressListeners.delete(callback);
+  };
+}
+
+/**
  * Subscribe to real-time new order created events
  */
 export function onOrderCreated(callback) {
@@ -219,7 +343,7 @@ export function onStoreOperatingStatusChanged(callback) {
 }
 
 /**
- * Subscribe to real-time payment verified events from CashFree / Azure Function
+ * Subscribe to real-time payment verified events
  */
 export function onPaymentVerified(callback) {
   if (typeof callback === 'function') {
