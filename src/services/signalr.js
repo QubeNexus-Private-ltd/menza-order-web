@@ -154,16 +154,8 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
         0
       );
 
-      // Robust extraction of kitchen status
-      const kitchenStatus =
-        data.kitchenStatus ||
-        data.KitchenStatus ||
-        data.kitchenOrderStatus ||
-        data.KitchenOrderStatus ||
-        null;
-
       // Robust extraction of overall order status
-      const orderStatus =
+      let orderStatus =
         data.orderStatus ||
         data.OrderStatus ||
         data.status ||
@@ -171,6 +163,31 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
         data.orderState ||
         data.OrderState ||
         null;
+
+      // Robust extraction of kitchen status
+      let kitchenStatus =
+        data.kitchenStatus ||
+        data.KitchenStatus ||
+        data.kitchenOrderStatus ||
+        data.KitchenOrderStatus ||
+        null;
+
+      const oStLower = String(orderStatus || '').toLowerCase();
+      if (oStLower.includes('serve') || oStLower.includes('deliver') || oStLower.includes('complete') || oStLower.includes('settled')) {
+        kitchenStatus = 'Served';
+      } else if (!kitchenStatus && orderStatus) {
+        if (oStLower.includes('ready')) {
+          kitchenStatus = 'Ready';
+        } else if (oStLower.includes('prep') || oStLower.includes('cook')) {
+          kitchenStatus = 'Preparing';
+        } else if (oStLower.includes('confirm')) {
+          kitchenStatus = 'Confirmed';
+        }
+      }
+
+      if (!orderStatus && kitchenStatus) {
+        orderStatus = kitchenStatus;
+      }
 
       const paymentStatus =
         data.paymentStatus ||

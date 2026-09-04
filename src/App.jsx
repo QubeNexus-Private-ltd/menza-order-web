@@ -188,7 +188,12 @@ export default function App() {
 
       const changedOrderId = Number(data?.orderId || data?.OrderId || data?.id || data?.Id || 0);
       const newOrderStatus = data?.orderStatus || data?.OrderStatus || data?.status || data?.Status;
-      const newKitchenStatus = data?.kitchenStatus || data?.KitchenStatus || data?.kitchenOrderStatus;
+      let newKitchenStatus = data?.kitchenStatus || data?.KitchenStatus || data?.kitchenOrderStatus;
+
+      const oStLower = String(newOrderStatus || '').toLowerCase();
+      if (oStLower.includes('serve') || oStLower.includes('deliver') || oStLower.includes('complete') || oStLower.includes('settled')) {
+        newKitchenStatus = 'Served';
+      }
 
       // 1. Update activeOrder if it's the active one or if it matches current table
       setActiveOrderState((prev) => {
@@ -204,10 +209,17 @@ export default function App() {
         const curId = Number(prev.id || prev.orderId || 0);
         if (changedOrderId && changedOrderId !== curId) return prev;
 
+        const effectiveOrderStatus = newOrderStatus || prev.orderStatus;
+        let effectiveKitchenStatus = newKitchenStatus || prev.kitchenStatus;
+        const effLower = String(effectiveOrderStatus || '').toLowerCase();
+        if (effLower.includes('serve') || effLower.includes('deliver') || effLower.includes('complete') || effLower.includes('settled')) {
+          effectiveKitchenStatus = 'Served';
+        }
+
         const updated = {
           ...prev,
-          orderStatus: newOrderStatus || prev.orderStatus,
-          kitchenStatus: newKitchenStatus || prev.kitchenStatus,
+          orderStatus: effectiveOrderStatus,
+          kitchenStatus: effectiveKitchenStatus,
           paymentStatus: data?.paymentStatus || prev.paymentStatus,
           settledDateUtc: data?.settledDateUtc || prev.settledDateUtc,
           items: Array.isArray(data?.items) ? data.items : prev.items,
@@ -230,10 +242,16 @@ export default function App() {
         return prevList.map((o) => {
           const oId = Number(o.id || o.orderId || 0);
           if (oId === changedOrderId) {
+            const effectiveOrderStatus = newOrderStatus || o.orderStatus;
+            let effectiveKitchenStatus = newKitchenStatus || o.kitchenStatus;
+            const effLower = String(effectiveOrderStatus || '').toLowerCase();
+            if (effLower.includes('serve') || effLower.includes('deliver') || effLower.includes('complete') || effLower.includes('settled')) {
+              effectiveKitchenStatus = 'Served';
+            }
             return {
               ...o,
-              orderStatus: newOrderStatus || o.orderStatus,
-              kitchenStatus: newKitchenStatus || o.kitchenStatus,
+              orderStatus: effectiveOrderStatus,
+              kitchenStatus: effectiveKitchenStatus,
             };
           }
           return o;
@@ -241,7 +259,13 @@ export default function App() {
       });
 
       // Sync persistent local orders
-      api.updateLocalOrderStatus(changedOrderId, newOrderStatus, newKitchenStatus);
+      const resolvedOrderStatus = newOrderStatus;
+      let resolvedKitchenStatus = newKitchenStatus;
+      const resLower = String(resolvedOrderStatus || '').toLowerCase();
+      if (resLower.includes('serve') || resLower.includes('deliver') || resLower.includes('complete') || resLower.includes('settled')) {
+        resolvedKitchenStatus = 'Served';
+      }
+      api.updateLocalOrderStatus(changedOrderId, resolvedOrderStatus, resolvedKitchenStatus);
 
       // 3. User Toast Alert based on Kitchen Progression
       const st = String(newKitchenStatus || newOrderStatus || '').toLowerCase();

@@ -216,15 +216,25 @@ export default function OrderTrackerModal({
         console.log('⚡ [SignalR] Real-time order update received in-memory:', data);
 
         const newOrderStatus = data?.orderStatus || data?.OrderStatus || data?.status || data?.Status;
-        const newKitchenStatus = data?.kitchenStatus || data?.KitchenStatus || data?.kitchenOrderStatus;
+        let newKitchenStatus = data?.kitchenStatus || data?.KitchenStatus || data?.kitchenOrderStatus;
+        const oStLower = String(newOrderStatus || '').toLowerCase();
+        if (oStLower.includes('serve') || oStLower.includes('deliver') || oStLower.includes('complete') || oStLower.includes('settled')) {
+          newKitchenStatus = 'Served';
+        }
         const newPaymentStatus = data?.paymentStatus || data?.PaymentStatus;
 
         setSelectedOrder((prev) => {
           if (!prev) return prev;
+          const effOrdSt = newOrderStatus || prev.orderStatus;
+          let effKitchSt = newKitchenStatus || prev.kitchenStatus;
+          const stLower = String(effOrdSt || '').toLowerCase();
+          if (stLower.includes('serve') || stLower.includes('deliver') || stLower.includes('complete') || stLower.includes('settled')) {
+            effKitchSt = 'Served';
+          }
           return {
             ...prev,
-            orderStatus: newOrderStatus || prev.orderStatus,
-            kitchenStatus: newKitchenStatus || prev.kitchenStatus,
+            orderStatus: effOrdSt,
+            kitchenStatus: effKitchSt,
             paymentStatus: newPaymentStatus || prev.paymentStatus,
             items: Array.isArray(data?.items) ? data.items : prev.items,
             settledDateUtc: data?.settledDateUtc || prev.settledDateUtc,
@@ -237,10 +247,16 @@ export default function OrderTrackerModal({
           return prevList.map((o) => {
             const oId = Number(o.id || o.orderId || 0);
             if (oId === changedOrderId) {
+              const effOrdSt = newOrderStatus || o.orderStatus;
+              let effKitchSt = newKitchenStatus || o.kitchenStatus;
+              const stLower = String(effOrdSt || '').toLowerCase();
+              if (stLower.includes('serve') || stLower.includes('deliver') || stLower.includes('complete') || stLower.includes('settled')) {
+                effKitchSt = 'Served';
+              }
               return {
                 ...o,
-                orderStatus: newOrderStatus || o.orderStatus,
-                kitchenStatus: newKitchenStatus || o.kitchenStatus,
+                orderStatus: effOrdSt,
+                kitchenStatus: effKitchSt,
               };
             }
             return o;
@@ -333,15 +349,16 @@ export default function OrderTrackerModal({
 
     if (
       [
+        'served',
         'delivered',
         'completed',
-        'served',
+        'settled',
         'picked up',
         'pickedup',
         'closed',
       ].includes(valueLower)
     ) {
-      return 'Delivered';
+      return 'Served';
     }
 
     if (
@@ -449,11 +466,12 @@ export default function OrderTrackerModal({
       badgeBg = '#ede9fe';
       label = 'Ready to Serve';
     } else if (
+      normalizedStatus === 'Served' ||
       normalizedStatus === 'Delivered'
     ) {
       badgeColor = '#15803d';
       badgeBg = '#dcfce7';
-      label = 'Served / Done';
+      label = 'Served to Table';
     } else if (
       normalizedStatus === 'Cancelled'
     ) {
@@ -481,7 +499,7 @@ export default function OrderTrackerModal({
 
       if (activeTab === 'active') {
         if (
-          ['Delivered', 'Cancelled'].includes(
+          ['Served', 'Delivered', 'Cancelled'].includes(
             normalizedStatus
           )
         ) {
@@ -489,7 +507,7 @@ export default function OrderTrackerModal({
         }
       } else if (activeTab === 'completed') {
         if (
-          !['Delivered', 'Cancelled'].includes(
+          !['Served', 'Delivered', 'Cancelled'].includes(
             normalizedStatus
           )
         ) {
@@ -619,6 +637,8 @@ export default function OrderTrackerModal({
     const currentIdx =
       STATUSES.indexOf(normalizedStatus) >= 0
         ? STATUSES.indexOf(normalizedStatus)
+        : normalizedStatus === 'Delivered'
+        ? STATUSES.indexOf('Served')
         : 0;
 
     const items = Array.isArray(

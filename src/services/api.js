@@ -1836,10 +1836,16 @@ export const updateLocalOrderStatus = (orderId, orderStatus = null, kitchenStatu
   const updatedOrders = orders.map((o) => {
     if (Number(o.id || o.orderId) === numId) {
       changed = true;
+      const targetOrderStatus = orderStatus || o.orderStatus;
+      let targetKitchenStatus = kitchenStatus || o.kitchenStatus;
+      const stLower = String(targetOrderStatus || '').toLowerCase();
+      if (stLower.includes('serve') || stLower.includes('deliver') || stLower.includes('complete') || stLower.includes('settled')) {
+        targetKitchenStatus = 'Served';
+      }
       return {
         ...o,
-        orderStatus: orderStatus || o.orderStatus,
-        kitchenStatus: kitchenStatus || o.kitchenStatus,
+        orderStatus: targetOrderStatus,
+        kitchenStatus: targetKitchenStatus,
       };
     }
     return o;
@@ -1976,12 +1982,30 @@ export const normalizeOrder = (
         order.kitchenOrderStatus ||
         order.KitchenOrderStatus ||
         null;
-      if (rawKitchen) return rawKitchen;
 
       const stLower = String(orderStatus || '').toLowerCase();
+      // If the master order status is already Served, Delivered, Completed, or Settled, the kitchen CANNOT be Pending
+      if (stLower.includes('serve') || stLower.includes('deliver') || stLower.includes('complete') || stLower.includes('settled')) {
+        return 'Served';
+      }
+
+      if (rawKitchen) {
+        const rawLower = String(rawKitchen).toLowerCase();
+        if (rawLower.includes('serve') || rawLower.includes('deliver') || rawLower.includes('complete') || rawLower.includes('settled')) return 'Served';
+        if (rawLower.includes('ready')) return 'Ready';
+        if (rawLower.includes('prep') || rawLower.includes('cook') || rawLower.includes('kitchen')) return 'Preparing';
+        if (stLower.includes('ready')) return 'Ready';
+        if (stLower.includes('prep') || stLower.includes('cook') || stLower.includes('kitchen')) return 'Preparing';
+        if (rawLower.includes('pending') || rawLower.includes('placed') || rawLower.includes('new') || rawLower.includes('created')) {
+          if (stLower.includes('confirm')) return 'Confirmed';
+          return 'Pending';
+        }
+        return rawKitchen;
+      }
+
       if (stLower.includes('ready')) return 'Ready';
       if (stLower.includes('prep') || stLower.includes('cook') || stLower.includes('kitchen')) return 'Preparing';
-      if (stLower.includes('serve') || stLower.includes('deliver') || stLower.includes('complete')) return 'Served';
+      if (stLower.includes('confirm')) return 'Confirmed';
 
       if (typeof localStorage !== 'undefined') {
         try {
@@ -1989,6 +2013,8 @@ export const normalizeOrder = (
           if (savedRaw) {
             const parsed = JSON.parse(savedRaw);
             if (Number(parsed?.id || parsed?.orderId) === Number(order.id || order.orderId) && parsed.kitchenStatus) {
+              const savedLower = String(parsed.kitchenStatus).toLowerCase();
+              if (savedLower.includes('serve') || savedLower.includes('deliver') || savedLower.includes('complete') || savedLower.includes('settled')) return 'Served';
               return parsed.kitchenStatus;
             }
           }

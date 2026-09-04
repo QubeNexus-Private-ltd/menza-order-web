@@ -228,11 +228,17 @@ export default function CustomerView({
     if (activeOrder) {
       setLiveOrder((prev) => {
         if (!prev) return activeOrder;
+        const curOrderSt = activeOrder.orderStatus || prev.orderStatus;
+        let curKitchenSt = activeOrder.kitchenStatus || prev.kitchenStatus;
+        const oStLower = String(curOrderSt || '').toLowerCase();
+        if (oStLower.includes('serve') || oStLower.includes('deliver') || oStLower.includes('complete') || oStLower.includes('settled')) {
+          curKitchenSt = 'Served';
+        }
         return {
           ...prev,
           ...activeOrder,
-          kitchenStatus: activeOrder.kitchenStatus || prev.kitchenStatus,
-          orderStatus: activeOrder.orderStatus || prev.orderStatus,
+          kitchenStatus: curKitchenSt,
+          orderStatus: curOrderSt,
         };
       });
     }
@@ -245,10 +251,16 @@ export default function CustomerView({
         if (!prev) return prev;
         const curId = Number(prev.id || prev.orderId || 0);
         if (changedId && changedId !== curId) return prev;
+        const newOrdSt = data?.orderStatus || data?.status || prev.orderStatus;
+        let newKitchSt = data?.kitchenStatus || prev.kitchenStatus;
+        const oStLower = String(newOrdSt || '').toLowerCase();
+        if (oStLower.includes('serve') || oStLower.includes('deliver') || oStLower.includes('complete') || oStLower.includes('settled')) {
+          newKitchSt = 'Served';
+        }
         return {
           ...prev,
-          orderStatus: data?.orderStatus || data?.status || prev.orderStatus,
-          kitchenStatus: data?.kitchenStatus || prev.kitchenStatus,
+          orderStatus: newOrdSt,
+          kitchenStatus: newKitchSt,
         };
       });
     });
@@ -1155,72 +1167,81 @@ export default function CustomerView({
       )}
 
       {/* FLOATING LIVE KITCHEN PROGRESS BAR */}
-      {liveOrder && !['Cancelled', 'Settled'].includes(liveOrder.orderStatus) && (
-        <View style={[styles.floatingLiveOrderWrapper, totalCartCount > 0 && styles.floatingLiveOrderWrapperWithCart]}>
-          <TouchableOpacity
-            style={[
-              styles.floatingLiveOrderBar,
-              String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
-                ? styles.liveOrderBarReady
-                : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
-                ? styles.liveOrderBarCooking
-                : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
-                ? styles.liveOrderBarServed
-                : styles.liveOrderBarPlaced,
-            ]}
-            onPress={() => {
-              if (typeof openOrderTracker === 'function') openOrderTracker();
-            }}
-            activeOpacity={0.9}
-          >
-            <View style={styles.liveOrderLeftIconWrap}>
-              {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready') ? (
-                <Bell size={18} color="#ffffff" />
-              ) : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook') ? (
-                <Flame size={18} color="#ffffff" />
-              ) : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver') ? (
-                <Check size={18} color="#ffffff" />
-              ) : (
-                <Utensils size={18} color="#ffffff" />
-              )}
-            </View>
+      {liveOrder && !['Cancelled', 'Settled'].includes(liveOrder.orderStatus) && (() => {
+        const kSt = String(liveOrder.kitchenStatus || '').toLowerCase();
+        const oSt = String(liveOrder.orderStatus || '').toLowerCase();
 
-            <View style={{ flex: 1, paddingHorizontal: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={styles.liveOrderTitleText}>
-                  Order #{liveOrder.id || liveOrder.orderId}
-                </Text>
-                <View style={styles.liveOrderPillBadge}>
-                  <Text style={styles.liveOrderPillBadgeText}>
-                    {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
-                      ? 'Ready to Serve'
-                      : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
-                      ? 'Cooking in Kitchen'
-                      : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
-                      ? 'Served to Table'
-                      : 'Order Placed'}
-                  </Text>
-                </View>
+        const isServed = kSt.includes('serve') || oSt.includes('serve') || kSt.includes('deliver') || oSt.includes('deliver') || kSt.includes('complete') || oSt.includes('complete') || kSt.includes('settled') || oSt.includes('settled');
+        const isReady = !isServed && (kSt.includes('ready') || oSt.includes('ready'));
+        const isCooking = !isServed && !isReady && (kSt.includes('prep') || oSt.includes('prep') || kSt.includes('cook') || oSt.includes('cook') || kSt.includes('kitchen') || oSt.includes('kitchen'));
+
+        return (
+          <View style={[styles.floatingLiveOrderWrapper, totalCartCount > 0 && styles.floatingLiveOrderWrapperWithCart]}>
+            <TouchableOpacity
+              style={[
+                styles.floatingLiveOrderBar,
+                isServed
+                  ? styles.liveOrderBarServed
+                  : isReady
+                  ? styles.liveOrderBarReady
+                  : isCooking
+                  ? styles.liveOrderBarCooking
+                  : styles.liveOrderBarPlaced,
+              ]}
+              onPress={() => {
+                if (typeof openOrderTracker === 'function') openOrderTracker();
+              }}
+              activeOpacity={0.9}
+            >
+              <View style={styles.liveOrderLeftIconWrap}>
+                {isServed ? (
+                  <Check size={18} color="#ffffff" />
+                ) : isReady ? (
+                  <Bell size={18} color="#ffffff" />
+                ) : isCooking ? (
+                  <Flame size={18} color="#ffffff" />
+                ) : (
+                  <Utensils size={18} color="#ffffff" />
+                )}
               </View>
 
-              <Text style={styles.liveOrderSubtitleText} numberOfLines={1}>
-                {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
-                  ? 'Plated! Server is bringing dishes to your table.'
-                  : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
-                  ? 'Chef started preparing your hot meals (~15m).'
-                  : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
-                  ? 'Delivered to your table. Enjoy your feast!'
-                  : 'KOT received in kitchen. Preparing shortly.'}
-              </Text>
-            </View>
+              <View style={{ flex: 1, paddingHorizontal: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.liveOrderTitleText}>
+                    Order #{liveOrder.id || liveOrder.orderId}
+                  </Text>
+                  <View style={styles.liveOrderPillBadge}>
+                    <Text style={styles.liveOrderPillBadgeText}>
+                      {isServed
+                        ? 'Served to Table'
+                        : isReady
+                        ? 'Ready to Serve'
+                        : isCooking
+                        ? 'Cooking in Kitchen'
+                        : 'Order Placed'}
+                    </Text>
+                  </View>
+                </View>
 
-            <View style={styles.liveOrderActionWrap}>
-              <Text style={styles.liveOrderActionText}>Track</Text>
-              <ChevronRight size={15} color="#ffffff" />
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
+                <Text style={styles.liveOrderSubtitleText} numberOfLines={1}>
+                  {isServed
+                    ? 'Delivered to your table. Enjoy your feast!'
+                    : isReady
+                    ? 'Plated! Server is bringing dishes to your table.'
+                    : isCooking
+                    ? 'Chef started preparing your hot meals (~15m).'
+                    : 'KOT received in kitchen. Preparing shortly.'}
+                </Text>
+              </View>
+
+              <View style={styles.liveOrderActionWrap}>
+                <Text style={styles.liveOrderActionText}>Track</Text>
+                <ChevronRight size={15} color="#ffffff" />
+              </View>
+            </TouchableOpacity>
+          </View>
+        );
+      })()}
     </View>
   );
 }
