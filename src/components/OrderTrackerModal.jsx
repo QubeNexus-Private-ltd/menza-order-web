@@ -13,7 +13,6 @@ import {
 import {
   X,
   CreditCard,
-  Receipt,
   User,
   Calendar,
   Tag,
@@ -1085,11 +1084,6 @@ export default function OrderTrackerModal({
           <View
             style={styles.sectionHeader}
           >
-            <Receipt
-              size={16}
-              color="#D33401"
-            />
-
             <Text
               style={styles.cardTitle}
             >
@@ -2057,10 +2051,6 @@ export default function OrderTrackerModal({
                   styles.headerIconWrap
                 }
               >
-                <Receipt
-                  size={18}
-                  color="#D33401"
-                />
               </View>
 
               <View>
