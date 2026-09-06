@@ -43,21 +43,38 @@ function SkeletonBox({ width, height, borderRadius = 8, style }) {
   );
 }
 
-function StoreLogoImage({ uri, size = 42, style, onError }) {
-  const [hasError, setHasError] = useState(false);
+function StoreLogoImage({ uri, sources = [], size = 42, style, onError }) {
+  const candidateList = React.useMemo(() => {
+    const raw = Array.isArray(sources) && sources.length > 0 ? sources : [uri];
+    return raw.filter((u) => Boolean(u && typeof u === 'string' && u.trim().length > 0));
+  }, [uri, sources]);
 
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const candidateKey = candidateList.join('|');
   useEffect(() => {
-    setHasError(false);
-  }, [uri]);
+    setCurrentIndex(0);
+  }, [candidateKey]);
 
-  if (!uri || hasError) {
+  const activeUri = candidateList[currentIndex];
+
+  if (!activeUri || currentIndex >= candidateList.length) {
     return <Store size={20} color="#FFFFFF" />;
   }
+
+  const handleImgError = () => {
+    if (currentIndex + 1 < candidateList.length) {
+      setCurrentIndex((prev) => prev + 1);
+    } else {
+      setCurrentIndex(candidateList.length);
+      if (typeof onError === 'function') onError();
+    }
+  };
 
   if (typeof window !== 'undefined') {
     return (
       <img
-        src={uri}
+        src={activeUri}
         alt="Store Logo"
         style={{
           width: size,
@@ -66,23 +83,17 @@ function StoreLogoImage({ uri, size = 42, style, onError }) {
           borderRadius: 10,
           display: 'block',
         }}
-        onError={() => {
-          setHasError(true);
-          if (typeof onError === 'function') onError();
-        }}
+        onError={handleImgError}
       />
     );
   }
 
   return (
     <Image
-      source={{ uri }}
+      source={{ uri: activeUri }}
       style={style}
       resizeMode="cover"
-      onError={() => {
-        setHasError(true);
-        if (typeof onError === 'function') onError();
-      }}
+      onError={handleImgError}
     />
   );
 }
@@ -103,14 +114,51 @@ export default function Header({
   storeOperatingStatus,
   loading = false,
 }) {
-  const displayName = restaurantName || 'Restaurant Menu';
-  const rawImage =
-    logoUrl ||
-    restaurantLogo ||
-    imageUrl ||
-    restaurantImage ||
-    '';
-  const displayImage = rawImage ? getOriginalImageUrl(rawImage) : '';
+  const displayName =
+    restaurantName && !restaurantName.startsWith('Restaurant #')
+      ? restaurantName
+      : storeOperatingStatus?.restaurantName ||
+        restaurantName ||
+        'Restaurant Menu';
+
+  const candidateImages = React.useMemo(() => {
+    const rawList = [
+      logoUrl,
+      restaurantLogo,
+      storeOperatingStatus?.storeImageUrl,
+      storeOperatingStatus?.storeImage,
+      storeOperatingStatus?.logoUrl,
+      restaurantImage,
+      imageUrl,
+      storeOperatingStatus?.imageUrl,
+      storeOperatingStatus?.bannerImage,
+      storeOperatingStatus?.bannerUrl,
+    ];
+
+    const list = [];
+    for (const raw of rawList) {
+      if (raw && typeof raw === 'string' && raw.trim().length > 0) {
+        const resolved = getOriginalImageUrl(raw);
+        if (resolved && !list.includes(resolved)) {
+          list.push(resolved);
+        }
+      }
+    }
+    return list;
+  }, [
+    logoUrl,
+    restaurantLogo,
+    storeOperatingStatus?.storeImageUrl,
+    storeOperatingStatus?.storeImage,
+    storeOperatingStatus?.logoUrl,
+    restaurantImage,
+    imageUrl,
+    storeOperatingStatus?.imageUrl,
+    storeOperatingStatus?.bannerImage,
+    storeOperatingStatus?.bannerUrl,
+  ]);
+
+  const primaryImage = candidateImages[0] || '';
 
   const handleQrPress = React.useCallback(() => {
     if (typeof openQrModal === 'function') {
@@ -146,7 +194,8 @@ export default function Header({
           <View style={styles.brandContainer}>
             <View style={styles.logoBadge}>
               <StoreLogoImage
-                uri={displayImage}
+                uri={primaryImage}
+                sources={candidateImages}
                 size={38}
                 style={styles.logoImage}
               />
@@ -201,11 +250,11 @@ export default function Header({
 
               {/* Address & Table Seating Row (No dummy fallbacks) */}
               <View style={styles.subInfoRow}>
-                {restaurantAddress ? (
+                {(restaurantAddress || storeOperatingStatus?.restaurantAddress || storeOperatingStatus?.address) ? (
                   <View style={styles.headerAddressRow}>
                     <MapPin size={11} color="#EA580C" style={{ flexShrink: 0 }} />
                     <Text style={styles.brandSub} numberOfLines={1}>
-                      {restaurantAddress}
+                      {restaurantAddress || storeOperatingStatus?.restaurantAddress || storeOperatingStatus?.address}
                     </Text>
                   </View>
                 ) : null}
@@ -224,61 +273,74 @@ export default function Header({
         )}
 
         {/* Action Controls: QR, Orders, Cart */}
-        <View style={styles.actionsRow}>
-          {typeof openQrModal === 'function' && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.qrButton,
-                pressed && styles.qrButtonPressed,
-              ]}
-              onPress={handleQrPress}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="button"
-              accessibilityLabel="View QR Code"
-            >
-              <QrCode size={15} color="#0F172A" strokeWidth={2.2} />
-              <Text style={styles.qrButtonText}>QR</Text>
-            </Pressable>
-          )}
+        {loading ? (
+          <View style={styles.actionsRow}>
+            {/* QR Button Skeleton */}
+            <SkeletonBox width={48} height={34} borderRadius={17} />
 
-          {typeof openOrderTracker === 'function' && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.orderButton,
-                pressed && styles.orderButtonPressed,
-              ]}
-              onPress={handleOrderPress}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="button"
-              accessibilityLabel="View Orders"
-            >
-              <OrderIcon size={16} color="#D33401" strokeWidth={2.2} />
-              <Text style={styles.orderButtonText}>Orders</Text>
-              {activeOrder && <View style={styles.orderDot} />}
-            </Pressable>
-          )}
+            {/* Orders Button Skeleton */}
+            <SkeletonBox width={72} height={34} borderRadius={17} />
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.cartButton,
-              pressed && styles.cartButtonPressed,
-            ]}
-            onPress={handleCartPress}
-            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            accessibilityRole="button"
-            accessibilityLabel={`Cart with ${cartCount} items`}
-          >
-            <CartIcon size={18} color="#FFFFFF" strokeWidth={2.2} />
-
-            {cartCount > 0 && (
-              <View style={styles.cartBadge}>
-                <Text style={styles.cartBadgeText}>
-                  {cartCount > 99 ? '99+' : cartCount}
-                </Text>
-              </View>
+            {/* Cart Button Skeleton */}
+            <SkeletonBox width={36} height={36} borderRadius={18} />
+          </View>
+        ) : (
+          <View style={styles.actionsRow}>
+            {typeof openQrModal === 'function' && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.qrButton,
+                  pressed && styles.qrButtonPressed,
+                ]}
+                onPress={handleQrPress}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="View QR Code"
+              >
+                <QrCode size={15} color="#0F172A" strokeWidth={2.2} />
+                <Text style={styles.qrButtonText}>QR</Text>
+              </Pressable>
             )}
-          </Pressable>
-        </View>
+
+            {typeof openOrderTracker === 'function' && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.orderButton,
+                  pressed && styles.orderButtonPressed,
+                ]}
+                onPress={handleOrderPress}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="View Orders"
+              >
+                <OrderIcon size={16} color="#D33401" strokeWidth={2.2} />
+                <Text style={styles.orderButtonText}>Orders</Text>
+                {activeOrder && <View style={styles.orderDot} />}
+              </Pressable>
+            )}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.cartButton,
+                pressed && styles.cartButtonPressed,
+              ]}
+              onPress={handleCartPress}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Cart with ${cartCount} items`}
+            >
+              <CartIcon size={18} color="#FFFFFF" strokeWidth={2.2} />
+
+              {cartCount > 0 && (
+                <View style={styles.cartBadge}>
+                  <Text style={styles.cartBadgeText}>
+                    {cartCount > 99 ? '99+' : cartCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
+        )}
       </View>
     </View>
   );

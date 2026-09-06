@@ -163,12 +163,28 @@ export default function App() {
             status: data,
             canPlaceOrder: data === 'OPEN',
             statusMessage: data === 'OPEN' ? 'Store is open.' : 'Store is closed.',
+            isKitchenActive: data !== 'PAUSED',
+            isLiveKitchenStatusEnabled: data !== 'PAUSED',
           }
         : {
             ...data,
             isOpen: data.isOpen ?? data.status === 'OPEN',
             canPlaceOrder: data.canPlaceOrder ?? (data.status === 'OPEN' || data.isOpen === true),
             status: data.status || (data.isOpen ? 'OPEN' : 'CLOSED'),
+            isKitchenActive:
+              data.isKitchenActive !== undefined
+                ? Boolean(data.isKitchenActive)
+                : data.IsKitchenActive !== undefined
+                ? Boolean(data.IsKitchenActive)
+                : data.status !== 'PAUSED',
+            isLiveKitchenStatusEnabled:
+              data.isKitchenActive !== undefined
+                ? Boolean(data.isKitchenActive)
+                : data.IsKitchenActive !== undefined
+                ? Boolean(data.IsKitchenActive)
+                : data.isLiveKitchenStatusEnabled !== undefined
+                ? Boolean(data.isLiveKitchenStatusEnabled)
+                : data.status !== 'PAUSED',
           };
 
       setStoreOperatingStatus(normalized);
@@ -268,6 +284,7 @@ export default function App() {
       api.updateLocalOrderStatus(changedOrderId, resolvedOrderStatus, resolvedKitchenStatus);
 
       // 3. User Toast Alert based on Kitchen Progression
+      const isKitchenActive = api.isLiveKitchenActive(data, catalog, storeOperatingStatus);
       const st = String(newKitchenStatus || newOrderStatus || '').toLowerCase();
       const displayId = changedOrderId ? `#${changedOrderId}` : '';
 
@@ -275,10 +292,16 @@ export default function App() {
         showToast(`Order ${displayId} is READY! Server is bringing it to your table.`, 'ready', changedOrderId);
       } else if (st.includes('serve') || st.includes('deliver') || st.includes('complete')) {
         showToast(`Order ${displayId} has been served to your table. Enjoy your feast!`, 'served', changedOrderId);
-      } else if (st.includes('prep') || st.includes('cook')) {
+      } else if ((st.includes('prep') || st.includes('cook')) && isKitchenActive) {
         showToast(`Chef started preparing Order ${displayId} in the kitchen (~15m).`, 'cooking', changedOrderId);
       } else if (st.includes('confirm')) {
-        showToast(`Order ${displayId} confirmed and sent to kitchen KOT.`, 'info', changedOrderId);
+        showToast(
+          isKitchenActive
+            ? `Order ${displayId} confirmed and sent to kitchen KOT.`
+            : `Order ${displayId} confirmed by restaurant.`,
+          'info',
+          changedOrderId
+        );
       }
     });
 
@@ -379,7 +402,7 @@ export default function App() {
             );
 
           targetEncryptedId =
-            encResult?.encryptedRestaurantId || String(rawId);
+            encResult?.encryptedRestaurantId || api.encryptRestaurantId(rawId);
         }
 
         const targetTableNum =
@@ -391,6 +414,29 @@ export default function App() {
           targetEncryptedId,
           targetTableNum
         );
+
+        // Ensure browser address bar always uses encrypted restaurant ID parameter 'r'
+        if (typeof window !== 'undefined' && window.history?.replaceState) {
+          try {
+            const currentUrl = new URL(window.location.href);
+            if (
+              currentUrl.searchParams.has('restaurantId') ||
+              currentUrl.searchParams.has('restId') ||
+              currentUrl.searchParams.has('id')
+            ) {
+              currentUrl.searchParams.delete('restaurantId');
+              currentUrl.searchParams.delete('restId');
+              currentUrl.searchParams.delete('id');
+              if (targetEncryptedId) {
+                currentUrl.searchParams.set('r', targetEncryptedId);
+                currentUrl.searchParams.delete('encRestId');
+                currentUrl.searchParams.delete('enc');
+                currentUrl.searchParams.delete('eid');
+              }
+              window.history.replaceState({}, document.title, currentUrl.toString());
+            }
+          } catch (e) {}
+        }
 
         // If dining at a table, automatically detect and sync any active running kitchen order
         if (targetTableNum) {
@@ -555,6 +601,23 @@ export default function App() {
               cleanUrl.searchParams.delete('cf_order_id');
               cleanUrl.searchParams.delete('payment_status');
 
+              // Post-payment redirect: ensure restaurant ID in URL is ALWAYS encrypted ('r')
+              cleanUrl.searchParams.delete('restaurantId');
+              cleanUrl.searchParams.delete('restId');
+              cleanUrl.searchParams.delete('id');
+
+              const resolvedEncId =
+                targetEncryptedId ||
+                catalog?.encryptedRestaurantId ||
+                api.encryptRestaurantId(catalog?.restaurantId || urlRestId || 1);
+
+              if (resolvedEncId) {
+                cleanUrl.searchParams.set('r', resolvedEncId);
+                cleanUrl.searchParams.delete('encRestId');
+                cleanUrl.searchParams.delete('enc');
+                cleanUrl.searchParams.delete('eid');
+              }
+
               window.history.replaceState(
                 {},
                 document.title,
@@ -599,6 +662,33 @@ export default function App() {
           const statusData = await api.getStoreOperatingStatus(numericRestId);
           if (statusData) {
             setStoreOperatingStatus(statusData);
+            setCatalog((prev) => {
+              if (!prev) return prev;
+              const realName =
+                prev.restaurantName && !prev.restaurantName.startsWith('Restaurant #')
+                  ? prev.restaurantName
+                  : statusData.restaurantName || prev.restaurantName;
+              const realLogo =
+                prev.logoUrl ||
+                statusData.storeImageUrl ||
+                statusData.storeImage ||
+                statusData.logoUrl ||
+                '';
+              const realImage =
+                prev.imageUrl ||
+                statusData.storeImageUrl ||
+                statusData.storeImage ||
+                statusData.bannerImage ||
+                statusData.bannerUrl ||
+                statusData.imageUrl ||
+                '';
+              return {
+                ...prev,
+                restaurantName: realName,
+                logoUrl: realLogo,
+                imageUrl: realImage,
+              };
+            });
           }
         } catch (statusErr) {
           console.warn('Status fetch error:', statusErr);
@@ -780,14 +870,61 @@ export default function App() {
         ) ||
         null;
 
-      await api.addToCart(
-        restId,
-        itemId,
-        quantity,
-        { item: itemObj }
+      const unitPrice = Number(
+        itemObj?.unitPrice ?? itemObj?.price ?? itemObj?.amount ?? 0
       );
+      const itemName = itemObj?.itemName || `Dish #${itemId}`;
+      const isVeg = itemObj?.isVeg !== false;
+      const imageUrl = itemObj?.imageUrl || '';
+      const unitName = itemObj?.unitName || '';
 
-      await refreshCart();
+      // Instant optimistic UI update to eliminate delay/fluctuation
+      setCartItems((prevItems) => {
+        const itemsList = Array.isArray(prevItems) ? [...prevItems] : [];
+        const existingIdx = itemsList.findIndex(
+          (i) => Number(i.itemId) === Number(itemId)
+        );
+        if (existingIdx >= 0) {
+          const old = itemsList[existingIdx];
+          const newQ = Number(old.quantity || 1) + Number(quantity || 1);
+          itemsList[existingIdx] = {
+            ...old,
+            quantity: newQ,
+            totalAmount: (Number(old.unitPrice) || unitPrice) * newQ,
+          };
+        } else {
+          itemsList.push({
+            itemId: Number(itemId),
+            itemName,
+            quantity: Number(quantity || 1),
+            unitPrice,
+            amount: unitPrice,
+            totalAmount: unitPrice * Number(quantity || 1),
+            imageUrl,
+            unitName,
+            isVeg,
+          });
+        }
+        return itemsList;
+      });
+
+      try {
+        const updated = await api.addToCart(
+          restId,
+          itemId,
+          quantity,
+          { item: itemObj }
+        );
+
+        if (updated) {
+          syncCart(updated);
+        } else {
+          await refreshCart();
+        }
+      } catch (err) {
+        console.error('addToCart error:', err);
+        await refreshCart();
+      }
 
       showToast(
         'Added dish to cart'
@@ -800,13 +937,47 @@ export default function App() {
       quantity,
       cookingInstruction = null
     ) => {
-      await api.updateCartQuantity(
-        itemId,
-        quantity,
-        cookingInstruction
-      );
+      const targetQty = Number(quantity);
 
-      await refreshCart();
+      // Instant optimistic UI update to eliminate delay/fluctuation
+      setCartItems((prevItems) => {
+        const itemsList = Array.isArray(prevItems) ? [...prevItems] : [];
+        if (targetQty <= 0) {
+          return itemsList.filter((i) => Number(i.itemId) !== Number(itemId));
+        }
+        return itemsList.map((item) => {
+          if (Number(item.itemId) === Number(itemId)) {
+            const uPrice = Number(item.unitPrice || item.amount || 0);
+            return {
+              ...item,
+              quantity: targetQty,
+              totalAmount: uPrice * targetQty,
+              cookingInstruction:
+                cookingInstruction !== null
+                  ? cookingInstruction
+                  : item.cookingInstruction,
+            };
+          }
+          return item;
+        });
+      });
+
+      try {
+        const updated = await api.updateCartQuantity(
+          itemId,
+          quantity,
+          cookingInstruction
+        );
+
+        if (updated) {
+          syncCart(updated);
+        } else {
+          await refreshCart();
+        }
+      } catch (err) {
+        console.error('updateCartQuantity error:', err);
+        await refreshCart();
+      }
     };
 
   const handleRemoveFromCart =
@@ -1507,24 +1678,36 @@ export default function App() {
 
       <Header
         restaurantName={
-          catalog
+          catalog?.restaurantName && !catalog.restaurantName.startsWith('Restaurant #')
             ? catalog.restaurantName
-            : 'Restaurant Menu'
+            : storeOperatingStatus?.restaurantName ||
+              catalog?.restaurantName ||
+              'Restaurant Menu'
         }
         restaurantAddress={
           catalog?.restaurantAddress ||
           catalog?.address ||
+          storeOperatingStatus?.restaurantAddress ||
+          storeOperatingStatus?.address ||
           [catalog?.address, catalog?.city, catalog?.state].filter(Boolean).join(', ') ||
           ''
         }
         restaurantImage={
           catalog?.imageUrl ||
           catalog?.restaurantImage ||
+          storeOperatingStatus?.storeImageUrl ||
+          storeOperatingStatus?.storeImage ||
+          storeOperatingStatus?.imageUrl ||
+          storeOperatingStatus?.bannerImage ||
+          storeOperatingStatus?.bannerUrl ||
           ''
         }
         restaurantLogo={
           catalog?.logoUrl ||
           catalog?.logo ||
+          storeOperatingStatus?.storeImageUrl ||
+          storeOperatingStatus?.storeImage ||
+          storeOperatingStatus?.logoUrl ||
           ''
         }
         loading={loading}
@@ -1533,14 +1716,7 @@ export default function App() {
         openQrModal={() =>
           setQrModalOpen(true)
         }
-        cartCount={cartItems.reduce(
-          (acc, item) =>
-            acc +
-            Number(
-              item.quantity || 0
-            ),
-          0
-        )}
+        cartCount={cartItems.length}
         openCart={() =>
           setCartModalOpen(true)
         }
@@ -1687,6 +1863,7 @@ export default function App() {
         catalog={catalog}
         activeTable={activeTable}
         onRefreshOrder={handleRefreshOrder}
+        storeOperatingStatus={storeOperatingStatus}
       />
 
       <QrScannerModal

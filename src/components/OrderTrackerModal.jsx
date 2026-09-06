@@ -26,7 +26,10 @@ import {
   Layers,
   ChefHat,
   Check,
+  CheckCircle2,
   Flame,
+  Clock,
+  Utensils,
 } from 'lucide-react';
 import * as api from '../services/api';
 import * as signalrService from '../services/signalr';
@@ -47,6 +50,7 @@ export default function OrderTrackerModal({
   catalog,
   activeTable,
   onRefreshOrder,
+  storeOperatingStatus,
 }) {
   const [selectedOrder, setSelectedOrder] = useState(order || null);
   const [viewMode, setViewMode] = useState(order ? 'detail' : 'list');
@@ -54,6 +58,16 @@ export default function OrderTrackerModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [allOrdersList, setAllOrdersList] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [, setTimerTick] = useState(0);
+
+  // Live 1-second interval for real-time decreasing countdown
+  useEffect(() => {
+    if (!visible) return;
+    const timer = setInterval(() => {
+      setTimerTick((t) => (t + 1) % 10000);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [visible]);
 
   useEffect(() => {
     if (order) {
@@ -634,6 +648,18 @@ export default function OrderTrackerModal({
       selectedOrder
     );
 
+    const prepCountdown = api.getDecreasingPreparationCountdown(
+      selectedOrder,
+      catalog,
+      storeOperatingStatus
+    );
+
+    const isKitchenActive = api.isLiveKitchenActive
+      ? api.isLiveKitchenActive(selectedOrder, catalog, storeOperatingStatus)
+      : (selectedOrder?.isKitchenActive ?? catalog?.isKitchenActive ?? storeOperatingStatus?.isKitchenActive ?? true);
+
+    const isKitchenDisabled = !isKitchenActive;
+
     const currentIdx =
       STATUSES.indexOf(normalizedStatus) >= 0
         ? STATUSES.indexOf(normalizedStatus)
@@ -893,28 +919,44 @@ export default function OrderTrackerModal({
           </View>
         </View>
 
-        {/* LIVE KITCHEN PROGRESS STEPPER */}
-        <View style={styles.card}>
-          <View style={styles.sectionHeader}>
-            <ChefHat size={16} color="#D33401" />
-            <Text style={styles.cardTitle}>Live Kitchen Progress</Text>
-          </View>
+        {/* ORDER PROGRESSION (SIMPLIFIED OR LIVE KITCHEN) */}
+        {isKitchenDisabled ? (
+          <View style={styles.card}>
+            <View style={[styles.sectionHeader, { justifyContent: 'space-between', alignItems: 'center' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <CheckCircle2 size={16} color="#15803d" />
+                <Text style={styles.cardTitle}>Order Status</Text>
+              </View>
+              <View style={[styles.cardStatusBadge, { backgroundColor: badgeBg }]}>
+                <Text style={[styles.cardStatusBadgeText, { color: badgeColor }]}>
+                  {label === 'In Kitchen' ? 'Confirmed' : label}
+                </Text>
+              </View>
+            </View>
 
-          <View style={styles.stepperContainer}>
-            {STATUSES.map((step, idx) => {
-              const isDone = idx <= currentIdx;
-              const isCurrent = idx === currentIdx;
-
-              return (
-                <View key={step} style={styles.stepperStep}>
+            <View style={styles.stepperContainer}>
+              {[
+                { name: 'Placed', done: true, current: normalizedStatus === 'Pending' },
+                {
+                  name: 'Confirmed',
+                  done: ['Confirmed', 'Preparing', 'Ready', 'Served', 'Delivered'].includes(normalizedStatus),
+                  current: ['Confirmed', 'Preparing', 'Ready'].includes(normalizedStatus),
+                },
+                {
+                  name: prepCountdown.isTakeaway ? 'Picked Up' : 'Served',
+                  done: ['Served', 'Delivered'].includes(normalizedStatus),
+                  current: ['Served', 'Delivered'].includes(normalizedStatus),
+                },
+              ].map((step, idx, arr) => (
+                <View key={step.name} style={styles.stepperStep}>
                   <View
                     style={[
                       styles.stepCircle,
-                      isDone && styles.stepCircleDone,
-                      isCurrent && styles.stepCircleCurrent,
+                      step.done && styles.stepCircleDone,
+                      step.current && styles.stepCircleCurrent,
                     ]}
                   >
-                    {isDone ? (
+                    {step.done ? (
                       <Check size={12} color="#ffffff" strokeWidth={3} />
                     ) : (
                       <Text style={styles.stepNumText}>{idx + 1}</Text>
@@ -924,47 +966,144 @@ export default function OrderTrackerModal({
                   <Text
                     style={[
                       styles.stepLabelText,
-                      isDone && styles.stepLabelTextDone,
-                      isCurrent && styles.stepLabelTextCurrent,
+                      step.done && styles.stepLabelTextDone,
+                      step.current && styles.stepLabelTextCurrent,
                     ]}
                     numberOfLines={1}
                   >
-                    {step === 'Delivered' ? 'Served' : step}
+                    {step.name}
                   </Text>
 
-                  {idx < STATUSES.length - 1 && (
+                  {idx < arr.length - 1 && (
                     <View
                       style={[
                         styles.stepConnector,
-                        idx < currentIdx && styles.stepConnectorDone,
+                        arr[idx + 1].done && styles.stepConnectorDone,
                       ]}
                     />
                   )}
                 </View>
-              );
-            })}
-          </View>
+              ))}
+            </View>
 
-          <View style={styles.statusMessageCallout}>
-            <Flame size={18} color="#f59e0b" />
-            <View style={styles.statusMessageTextWrap}>
-              <Text style={styles.statusMessageTitle}>
-                {normalizedStatus === 'Preparing'
-                  ? 'Chef is cooking your dishes!'
-                  : normalizedStatus === 'Ready'
-                  ? 'Your order is ready for serving!'
-                  : normalizedStatus === 'Delivered'
-                  ? 'Order served. Enjoy your meal!'
-                  : isAwaitingPayment
-                  ? 'Awaiting payment confirmation.'
-                  : 'Order queued in kitchen.'}
-              </Text>
-              <Text style={styles.statusMessageSub}>
-                Estimated preparation: ~15 to 20 mins
-              </Text>
+            <View style={styles.statusMessageCallout}>
+              <Utensils size={18} color="#0d9488" />
+              <View style={styles.statusMessageTextWrap}>
+                <Text style={styles.statusMessageTitle}>
+                  {normalizedStatus === 'Served' || normalizedStatus === 'Delivered'
+                    ? (prepCountdown.isTakeaway ? 'Order collected. Enjoy your meal!' : 'Order served. Enjoy your meal!')
+                    : prepCountdown.isAwaitingConfirmation
+                    ? 'Order sent to cashier for acceptance.'
+                    : 'Order confirmed and received by restaurant.'}
+                </Text>
+                <Text style={styles.statusMessageSub}>
+                  {prepCountdown.statusMessage}
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.card}>
+            <View style={[styles.sectionHeader, { justifyContent: 'space-between', alignItems: 'center' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <ChefHat size={16} color="#D33401" />
+                <Text style={styles.cardTitle}>Live Kitchen Progress</Text>
+              </View>
+              {!prepCountdown.isFinished && (
+                <View style={[
+                  styles.prepCountdownBadge,
+                  prepCountdown.isOverdue && styles.prepCountdownBadgeOverdue,
+                  prepCountdown.isAwaitingConfirmation && styles.prepCountdownBadgeAwaiting,
+                ]}>
+                  <Clock
+                    size={12}
+                    color={
+                      prepCountdown.isAwaitingConfirmation
+                        ? '#b45309'
+                        : prepCountdown.isOverdue
+                        ? '#b45309'
+                        : '#c2410c'
+                    }
+                  />
+                  <Text style={[
+                    styles.prepCountdownBadgeText,
+                    prepCountdown.isOverdue && styles.prepCountdownBadgeTextOverdue,
+                    prepCountdown.isAwaitingConfirmation && styles.prepCountdownBadgeTextAwaiting,
+                  ]}>
+                    {prepCountdown.isAwaitingConfirmation ? 'Paused • ~15m prep' : prepCountdown.formatted}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.stepperContainer}>
+              {STATUSES.map((step, idx) => {
+                const isDone = idx <= currentIdx;
+                const isCurrent = idx === currentIdx;
+
+                return (
+                  <View key={step} style={styles.stepperStep}>
+                    <View
+                      style={[
+                        styles.stepCircle,
+                        isDone && styles.stepCircleDone,
+                        isCurrent && styles.stepCircleCurrent,
+                      ]}
+                    >
+                      {isDone ? (
+                        <Check size={12} color="#ffffff" strokeWidth={3} />
+                      ) : (
+                        <Text style={styles.stepNumText}>{idx + 1}</Text>
+                      )}
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.stepLabelText,
+                        isDone && styles.stepLabelTextDone,
+                        isCurrent && styles.stepLabelTextCurrent,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {step === 'Delivered' ? 'Served' : step}
+                    </Text>
+
+                    {idx < STATUSES.length - 1 && (
+                      <View
+                        style={[
+                          styles.stepConnector,
+                          idx < currentIdx && styles.stepConnectorDone,
+                        ]}
+                      />
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={styles.statusMessageCallout}>
+              <Flame size={18} color="#f59e0b" />
+              <View style={styles.statusMessageTextWrap}>
+                <Text style={styles.statusMessageTitle}>
+                  {normalizedStatus === 'Preparing'
+                    ? 'Chef is cooking your dishes!'
+                    : normalizedStatus === 'Ready'
+                    ? (prepCountdown.isTakeaway ? 'Your order is ready for pickup!' : 'Your order is ready for serving!')
+                    : normalizedStatus === 'Delivered' || normalizedStatus === 'Served'
+                    ? (prepCountdown.isTakeaway ? 'Order collected. Enjoy your meal!' : 'Order served. Enjoy your meal!')
+                    : prepCountdown.isAwaitingConfirmation
+                    ? 'Order sent to cashier for acceptance.'
+                    : isAwaitingPayment
+                    ? 'Awaiting payment confirmation.'
+                    : 'Order queued in kitchen.'}
+                </Text>
+                <Text style={styles.statusMessageSub}>
+                  {prepCountdown.statusMessage}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* CUSTOMER & DINER INFO */}
         <View style={styles.card}>
@@ -1244,6 +1383,22 @@ export default function OrderTrackerModal({
                           item.name ||
                           'Menu Dish'}
                       </Text>
+
+                      {(() => {
+                        if (isKitchenDisabled) return null;
+                        const itemPrep =
+                          item.preparationTimeMinutes ||
+                          item.PreparationTimeMinutes ||
+                          catalog?.items?.find((ci) => Number(ci.itemId || ci.id) === Number(item.itemId || item.id))?.preparationTimeMinutes;
+                        if (itemPrep && Number(itemPrep) > 0) {
+                          return (
+                            <Text style={styles.receiptItemPrepText}>
+                              ⏱ ~{itemPrep}m prep
+                            </Text>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       {item.cookingInstruction ? (
                         <Text
@@ -1782,6 +1937,8 @@ export default function OrderTrackerModal({
                       0
                   );
 
+                const ordCountdown = api.getDecreasingPreparationCountdown(ord, catalog, storeOperatingStatus);
+
                 return (
                   <TouchableOpacity
                     key={
@@ -1832,26 +1989,58 @@ export default function OrderTrackerModal({
                         <Text style={styles.orderCardId}>Order #{ord.id}</Text>
                       </View>
 
-                      <View
-                        style={[
-                          styles.cardStatusBadge,
-                          {
-                            backgroundColor:
-                              badgeBg,
-                          },
-                        ]}
-                      >
-                        <Text
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {!ordCountdown.isFinished && !ordCountdown.isKitchenStatusDisabled && (
+                          <View
+                            style={[
+                              styles.orderCardTimerPill,
+                              ordCountdown.isOverdue && styles.orderCardTimerPillOverdue,
+                              ordCountdown.isAwaitingConfirmation && styles.orderCardTimerPillAwaiting,
+                            ]}
+                          >
+                            <Clock
+                              size={11}
+                              color={
+                                ordCountdown.isAwaitingConfirmation
+                                  ? '#b45309'
+                                  : ordCountdown.isOverdue
+                                  ? '#b45309'
+                                  : '#c2410c'
+                              }
+                            />
+                            <Text
+                              style={[
+                                styles.orderCardTimerText,
+                                ordCountdown.isOverdue && styles.orderCardTimerTextOverdue,
+                                ordCountdown.isAwaitingConfirmation && styles.orderCardTimerTextAwaiting,
+                              ]}
+                            >
+                              {ordCountdown.shortFormatted}
+                            </Text>
+                          </View>
+                        )}
+
+                        <View
                           style={[
-                            styles.cardStatusBadgeText,
+                            styles.cardStatusBadge,
                             {
-                              color:
-                                badgeColor,
+                              backgroundColor:
+                                badgeBg,
                             },
                           ]}
                         >
-                          {label}
-                        </Text>
+                          <Text
+                            style={[
+                              styles.cardStatusBadgeText,
+                              {
+                                color:
+                                  badgeColor,
+                              },
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </View>
                       </View>
                     </View>
 
@@ -3136,5 +3325,71 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#94A3B8',
     marginTop: 1,
+  },
+  prepCountdownBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#fff7ed',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ffedd5',
+  },
+  prepCountdownBadgeOverdue: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a',
+  },
+  prepCountdownBadgeAwaiting: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a',
+  },
+  prepCountdownBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#c2410c',
+  },
+  prepCountdownBadgeTextOverdue: {
+    color: '#b45309',
+  },
+  prepCountdownBadgeTextAwaiting: {
+    color: '#b45309',
+  },
+  orderCardTimerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#fff7ed',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#ffedd5',
+  },
+  orderCardTimerPillOverdue: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a',
+  },
+  orderCardTimerPillAwaiting: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a',
+  },
+  orderCardTimerText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#c2410c',
+  },
+  orderCardTimerTextOverdue: {
+    color: '#b45309',
+  },
+  orderCardTimerTextAwaiting: {
+    color: '#b45309',
+  },
+  receiptItemPrepText: {
+    fontSize: 11,
+    color: '#d97706',
+    fontWeight: '600',
+    marginTop: 2,
   },
 });

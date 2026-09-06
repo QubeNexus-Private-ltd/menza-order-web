@@ -726,6 +726,13 @@ const normalizeCatalogData = (
         item.isVeg !== undefined ? item.isVeg : true
       ),
 
+      preparationTimeMinutes:
+        item.preparationTimeMinutes !== undefined && item.preparationTimeMinutes !== null
+          ? Number(item.preparationTimeMinutes)
+          : item.PreparationTimeMinutes !== undefined && item.PreparationTimeMinutes !== null
+          ? Number(item.PreparationTimeMinutes)
+          : 15,
+
       restaurantId:
         actualRestId,
     })
@@ -768,13 +775,19 @@ const normalizeCatalogData = (
       data.RestaurantImage ||
       data.restaurantImageUrl ||
       data.RestaurantImageUrl ||
+      data.bannerImage ||
+      data.bannerUrl ||
       data.image ||
       data.Image ||
+      data.storeImage ||
+      data.storeImageUrl ||
       '',
 
     logoUrl:
       data.logoUrl ||
       data.LogoUrl ||
+      data.storeImageUrl ||
+      data.storeImage ||
       data.logo ||
       data.Logo ||
       data.restaurantLogo ||
@@ -801,6 +814,28 @@ const normalizeCatalogData = (
       data.isTableBookingEnabled !==
       undefined
         ? data.isTableBookingEnabled
+        : true,
+
+    isKitchenActive:
+      data.isKitchenActive !== undefined
+        ? Boolean(data.isKitchenActive)
+        : data.IsKitchenActive !== undefined
+        ? Boolean(data.IsKitchenActive)
+        : data.isLiveKitchenStatusEnabled !== undefined
+        ? Boolean(data.isLiveKitchenStatusEnabled)
+        : data.IsLiveKitchenStatusEnabled !== undefined
+        ? Boolean(data.IsLiveKitchenStatusEnabled)
+        : true,
+
+    isLiveKitchenStatusEnabled:
+      data.isKitchenActive !== undefined
+        ? Boolean(data.isKitchenActive)
+        : data.IsKitchenActive !== undefined
+        ? Boolean(data.IsKitchenActive)
+        : data.isLiveKitchenStatusEnabled !== undefined
+        ? Boolean(data.isLiveKitchenStatusEnabled)
+        : data.IsLiveKitchenStatusEnabled !== undefined
+        ? Boolean(data.IsLiveKitchenStatusEnabled)
         : true,
 
     tables:
@@ -894,6 +929,8 @@ export const getMenuCatalogByEncryptedId =
         const pLogo =
           profile.logoUrl ||
           profile.LogoUrl ||
+          profile.storeImageUrl ||
+          profile.storeImage ||
           profile.logo ||
           profile.Logo ||
           profile.restaurantLogo ||
@@ -906,10 +943,14 @@ export const getMenuCatalogByEncryptedId =
         const pImg =
           profile.imageUrl ||
           profile.ImageUrl ||
+          profile.bannerImage ||
+          profile.bannerUrl ||
           profile.image ||
           profile.Image ||
           profile.restaurantImage ||
-          profile.restaurantImageUrl;
+          profile.restaurantImageUrl ||
+          profile.storeImageUrl ||
+          profile.storeImage;
         if (pImg) {
           normalized.imageUrl = pImg;
         }
@@ -950,6 +991,20 @@ export const getMenuCatalogByEncryptedId =
         ) {
           normalized.restaurantName = pName;
         }
+
+        if (profile.isKitchenActive !== undefined) {
+          normalized.isKitchenActive = Boolean(profile.isKitchenActive);
+        } else if (profile.IsKitchenActive !== undefined) {
+          normalized.isKitchenActive = Boolean(profile.IsKitchenActive);
+        }
+
+        if (profile.isLiveKitchenStatusEnabled !== undefined) {
+          normalized.isLiveKitchenStatusEnabled = Boolean(profile.isLiveKitchenStatusEnabled);
+        } else if (profile.IsLiveKitchenStatusEnabled !== undefined) {
+          normalized.isLiveKitchenStatusEnabled = Boolean(profile.IsLiveKitchenStatusEnabled);
+        } else if (normalized.isKitchenActive !== undefined) {
+          normalized.isLiveKitchenStatusEnabled = Boolean(normalized.isKitchenActive);
+        }
       }
     } catch (profileErr) {
       console.warn('Profile augmentation error:', profileErr?.message);
@@ -970,9 +1025,14 @@ export const getStoreProfile = async (encryptedRestaurantId, restaurantId = 1) =
   } catch (e) {
     try {
       const rId = Number(restaurantId) || 1;
-      const res2 = await api.get(`/api/RestaurantConfig/${rId}`);
+      let res2 = null;
+      try {
+        res2 = await api.get(`/api/RestaurantConfig/${rId}/OperatingStatus`);
+      } catch {
+        res2 = await api.get(`/api/RestaurantConfig/OperatingStatus?restaurantId=${rId}`);
+      }
       if (res2?.data) {
-        return res2.data;
+        return res2.data?.data ?? res2.data;
       }
     } catch {}
   }
@@ -1919,6 +1979,13 @@ export const normalizeOrder = (
           cookingInstruction:
             item.cookingInstruction ||
             null,
+
+          preparationTimeMinutes:
+            item.preparationTimeMinutes !== undefined && item.preparationTimeMinutes !== null
+              ? Number(item.preparationTimeMinutes)
+              : item.PreparationTimeMinutes !== undefined && item.PreparationTimeMinutes !== null
+              ? Number(item.PreparationTimeMinutes)
+              : undefined,
         };
       }
     );
@@ -2113,6 +2180,48 @@ export const normalizeOrder = (
       order.cashfreeOrderId ||
       order.paymentOrderId ||
       null,
+
+    createdDateUtc:
+      order.createdDateUtc ||
+      order.CreatedDateUtc ||
+      order.createdAt ||
+      order.createdOn ||
+      order.orderDate ||
+      null,
+
+    estimatedPickupTime:
+      order.estimatedPickupTime ||
+      order.EstimatedPickupTime ||
+      null,
+
+    preparationTimeMinutes:
+      order.preparationTimeMinutes !== undefined && order.preparationTimeMinutes !== null
+        ? Number(order.preparationTimeMinutes)
+        : order.PreparationTimeMinutes !== undefined && order.PreparationTimeMinutes !== null
+        ? Number(order.PreparationTimeMinutes)
+        : undefined,
+
+    isKitchenActive:
+      order.isKitchenActive !== undefined
+        ? Boolean(order.isKitchenActive)
+        : order.IsKitchenActive !== undefined
+        ? Boolean(order.IsKitchenActive)
+        : order.isLiveKitchenStatusEnabled !== undefined
+        ? Boolean(order.isLiveKitchenStatusEnabled)
+        : order.IsLiveKitchenStatusEnabled !== undefined
+        ? Boolean(order.IsLiveKitchenStatusEnabled)
+        : true,
+
+    isLiveKitchenStatusEnabled:
+      order.isKitchenActive !== undefined
+        ? Boolean(order.isKitchenActive)
+        : order.IsKitchenActive !== undefined
+        ? Boolean(order.IsKitchenActive)
+        : order.isLiveKitchenStatusEnabled !== undefined
+        ? Boolean(order.isLiveKitchenStatusEnabled)
+        : order.IsLiveKitchenStatusEnabled !== undefined
+        ? Boolean(order.IsLiveKitchenStatusEnabled)
+        : true,
 
     deviceId:
       order.deviceId ||
@@ -3308,13 +3417,28 @@ export const initiateCashfreeCheckout =
       ? String(tableNumber).trim()
       : null;
 
-    const returnUrl =
-      checkoutData.returnUrl ||
-      (typeof window !== 'undefined'
-        ? `${window.location.origin}${window.location.pathname}?order_id={order_id}&restaurantId=${restaurantId}${
-            effectiveTable ? `&tableId=${encodeURIComponent(effectiveTable)}` : ''
-          }`
-        : null);
+    const encRestId =
+      checkoutData.encryptedRestaurantId ||
+      checkoutData.encRestId ||
+      encryptRestaurantId(restaurantId);
+
+    let returnUrl = checkoutData.returnUrl;
+    if (!returnUrl && typeof window !== 'undefined') {
+      const origin = window.location.origin;
+      const pathname = window.location.pathname;
+      returnUrl = `${origin}${pathname}?order_id={order_id}&r=${encodeURIComponent(encRestId)}${
+        effectiveTable ? `&tableId=${encodeURIComponent(effectiveTable)}` : ''
+      }`;
+    } else if (returnUrl && typeof window !== 'undefined') {
+      try {
+        const parsed = new URL(returnUrl, window.location.origin);
+        parsed.searchParams.delete('restaurantId');
+        parsed.searchParams.delete('restId');
+        parsed.searchParams.delete('id');
+        parsed.searchParams.set('r', encRestId);
+        returnUrl = parsed.toString();
+      } catch (e) {}
+    }
 
     const res =
       await api.post(
@@ -3696,7 +3820,12 @@ export const getTableQrCodes =
 export const getStoreOperatingStatus = async (restaurantId = 1) => {
   try {
     const rId = Number(restaurantId) || 1;
-    const response = await api.get(`/api/RestaurantConfig/${rId}/OperatingStatus`);
+    let response = null;
+    try {
+      response = await api.get(`/api/RestaurantConfig/${rId}/OperatingStatus`);
+    } catch (routeErr) {
+      response = await api.get(`/api/RestaurantConfig/OperatingStatus?restaurantId=${rId}`);
+    }
     const data = response.data?.data ?? response.data;
     if (typeof data === 'string') {
       return {
@@ -3705,6 +3834,8 @@ export const getStoreOperatingStatus = async (restaurantId = 1) => {
         status: data,
         canPlaceOrder: data === 'OPEN',
         statusMessage: data === 'OPEN' ? 'Store is open.' : 'Store is closed.',
+        isKitchenActive: data !== 'PAUSED',
+        isLiveKitchenStatusEnabled: data !== 'PAUSED',
       };
     }
     return data ? {
@@ -3712,11 +3843,357 @@ export const getStoreOperatingStatus = async (restaurantId = 1) => {
       isOpen: data.isOpen ?? data.status === 'OPEN',
       canPlaceOrder: data.canPlaceOrder ?? (data.status === 'OPEN' || data.isOpen === true),
       status: data.status || (data.isOpen ? 'OPEN' : 'CLOSED'),
+      isKitchenActive:
+        data.isKitchenActive !== undefined
+          ? Boolean(data.isKitchenActive)
+          : data.IsKitchenActive !== undefined
+          ? Boolean(data.IsKitchenActive)
+          : data.status !== 'PAUSED',
+      isLiveKitchenStatusEnabled:
+        data.isKitchenActive !== undefined
+          ? Boolean(data.isKitchenActive)
+          : data.IsKitchenActive !== undefined
+          ? Boolean(data.IsKitchenActive)
+          : data.isLiveKitchenStatusEnabled !== undefined
+          ? Boolean(data.isLiveKitchenStatusEnabled)
+          : data.status !== 'PAUSED',
     } : null;
   } catch (e) {
     console.warn('Failed to fetch store operating status:', e?.message);
     return null;
   }
+};
+
+/* =========================================================
+   ESTIMATED PREPARATION TIME & COUNTDOWN HELPERS
+========================================================= */
+
+export const getOrderPreparationTimeMinutes = (order, catalog = null) => {
+  if (!order) return 15;
+
+  // 1. Direct order-level preparation time
+  if (order.preparationTimeMinutes && Number(order.preparationTimeMinutes) > 0) {
+    return Number(order.preparationTimeMinutes);
+  }
+  if (order.PreparationTimeMinutes && Number(order.PreparationTimeMinutes) > 0) {
+    return Number(order.PreparationTimeMinutes);
+  }
+
+  // 2. Derive from items
+  const rawItems = Array.isArray(order.items) ? order.items : [];
+  let maxMinutes = 0;
+
+  for (const it of rawItems) {
+    const itPrep = Number(it.preparationTimeMinutes || it.PreparationTimeMinutes || 0);
+    if (itPrep > 0) {
+      maxMinutes = Math.max(maxMinutes, itPrep);
+    } else if (catalog && Array.isArray(catalog.items)) {
+      const match = catalog.items.find(
+        (ci) => Number(ci.itemId || ci.id) === Number(it.itemId || it.id)
+      );
+      if (match?.preparationTimeMinutes > 0) {
+        maxMinutes = Math.max(maxMinutes, Number(match.preparationTimeMinutes));
+      }
+    }
+  }
+
+  return maxMinutes > 0 ? maxMinutes : 15;
+};
+
+export const getOrderTargetEndTimeMs = (order, catalog = null) => {
+  if (!order) return null;
+
+  // 1. Direct estimated pickup time from backend
+  const pickupTimeStr = order.estimatedPickupTime || order.EstimatedPickupTime;
+  if (pickupTimeStr) {
+    const pickupMs = new Date(pickupTimeStr).getTime();
+    if (!isNaN(pickupMs) && pickupMs > 0) {
+      return pickupMs;
+    }
+  }
+
+  // 2. Base time = creation time or client start time
+  const createdStr =
+    order.createdDateUtc ||
+    order.CreatedDateUtc ||
+    order.createdAt ||
+    order.createdOn ||
+    order.orderDate;
+
+  let baseMs = createdStr ? new Date(createdStr).getTime() : NaN;
+  if (isNaN(baseMs) || baseMs <= 0) {
+    baseMs = order._clientStartMs || Date.now();
+  }
+
+  const prepMinutes = getOrderPreparationTimeMinutes(order, catalog);
+  return baseMs + prepMinutes * 60 * 1000;
+};
+
+export const isLiveKitchenActive = (order = null, catalog = null, storeOperatingStatus = null) => {
+  if (order && order.isKitchenActive !== undefined) return Boolean(order.isKitchenActive);
+  if (order && order.IsKitchenActive !== undefined) return Boolean(order.IsKitchenActive);
+  if (order && order.isLiveKitchenStatusEnabled !== undefined) return Boolean(order.isLiveKitchenStatusEnabled);
+  if (order && order.IsLiveKitchenStatusEnabled !== undefined) return Boolean(order.IsLiveKitchenStatusEnabled);
+
+  if (catalog && catalog.isKitchenActive !== undefined) return Boolean(catalog.isKitchenActive);
+  if (catalog && catalog.IsKitchenActive !== undefined) return Boolean(catalog.IsKitchenActive);
+  if (catalog && catalog.isLiveKitchenStatusEnabled !== undefined) return Boolean(catalog.isLiveKitchenStatusEnabled);
+  if (catalog && catalog.IsLiveKitchenStatusEnabled !== undefined) return Boolean(catalog.IsLiveKitchenStatusEnabled);
+
+  if (storeOperatingStatus && storeOperatingStatus.isKitchenActive !== undefined) return Boolean(storeOperatingStatus.isKitchenActive);
+  if (storeOperatingStatus && storeOperatingStatus.IsKitchenActive !== undefined) return Boolean(storeOperatingStatus.IsKitchenActive);
+  if (storeOperatingStatus && storeOperatingStatus.isLiveKitchenStatusEnabled !== undefined) return Boolean(storeOperatingStatus.isLiveKitchenStatusEnabled);
+  if (storeOperatingStatus && storeOperatingStatus.IsLiveKitchenStatusEnabled !== undefined) return Boolean(storeOperatingStatus.IsLiveKitchenStatusEnabled);
+
+  return true;
+};
+
+export const getDecreasingPreparationCountdown = (order, catalog = null, storeOperatingStatus = null) => {
+  const isKitchenActive = isLiveKitchenActive(order, catalog, storeOperatingStatus);
+  const isKitchenDisabled = !isKitchenActive;
+
+  if (!order) {
+    return {
+      formatted: isKitchenDisabled ? 'Order received' : '~15 mins remaining',
+      shortFormatted: isKitchenDisabled ? 'Received' : '~15m left',
+      diffSec: isKitchenDisabled ? 0 : 15 * 60,
+      minutes: isKitchenDisabled ? 0 : 15,
+      seconds: 0,
+      isFinished: false,
+      isOverdue: false,
+      isAwaitingConfirmation: false,
+      isTakeaway: false,
+      isKitchenStatusDisabled: isKitchenDisabled,
+      statusMessage: isKitchenDisabled ? 'Order received by restaurant.' : 'Estimated preparation: ~15 mins',
+    };
+  }
+
+  const rawPaymentMode = String(order.paymentMode || order.paymentMethod || '').toUpperCase();
+  const isOnline =
+    rawPaymentMode.includes('ONLINE') ||
+    rawPaymentMode.includes('CASHFREE') ||
+    rawPaymentMode.includes('UPI') ||
+    order.isOnline === true;
+  const isSettled =
+    isOnline ||
+    String(order.paymentStatus || '').toLowerCase() === 'paid' ||
+    order.isSettled === true ||
+    Boolean(order.settledDateUtc);
+
+  const orderStatus = String(order.orderStatus || order.status || '').toLowerCase();
+  const kitchenStatus = String(order.kitchenStatus || '').toLowerCase();
+
+  const isTakeaway =
+    String(order.deliveryType || '').toLowerCase().includes('takeaway') ||
+    String(order.deliveryType || '').toLowerCase().includes('counter') ||
+    !order.tableId;
+
+  const tokenStr =
+    order.pickupToken ||
+    (order.tokenNumber ? `TK-${order.tokenNumber}` : `TK-${order.id || ''}`);
+
+  // Phase 3: Served or Settled
+  const isFinished =
+    orderStatus.includes('serve') ||
+    orderStatus.includes('deliver') ||
+    orderStatus.includes('complete') ||
+    orderStatus.includes('settled') ||
+    kitchenStatus.includes('serve') ||
+    kitchenStatus.includes('deliver') ||
+    kitchenStatus.includes('complete') ||
+    kitchenStatus.includes('settled');
+
+  // Ready state
+  const isReady = orderStatus.includes('ready') || kitchenStatus.includes('ready');
+
+  // Phase 1: Unconfirmed Cash Orders (Timer PAUSED until cashier approval)
+  const isAwaitingConfirmation =
+    order.requiresCashierConfirmation === true ||
+    (!isOnline &&
+      !isSettled &&
+      (orderStatus === 'placed' || orderStatus === 'pending') &&
+      (!kitchenStatus || kitchenStatus === 'pending' || kitchenStatus === 'new'));
+
+  // If the restaurant opted out of Live Kitchen Status / KDS or kitchen is inactive, return simplified status without ticking timer
+  if (isKitchenDisabled) {
+    if (isFinished) {
+      return {
+        formatted: isTakeaway ? 'Order picked up' : 'Order served',
+        shortFormatted: isTakeaway ? 'Picked Up' : 'Served',
+        diffSec: 0,
+        minutes: 0,
+        seconds: 0,
+        isFinished: true,
+        isOverdue: false,
+        isAwaitingConfirmation: false,
+        isTakeaway,
+        isKitchenStatusDisabled: true,
+        statusMessage: isTakeaway
+          ? 'Order collected. Enjoy your meal!'
+          : 'Delivered to your table. Enjoy your feast!',
+      };
+    }
+
+    if (isReady) {
+      const readyMessage = isTakeaway
+        ? `Ready! Please collect at counter (Token #${tokenStr})`
+        : 'Plated! Server is bringing dishes to your table.';
+      return {
+        formatted: isTakeaway ? 'Ready for Pickup' : 'Ready to Serve',
+        shortFormatted: 'Ready',
+        diffSec: 0,
+        minutes: 0,
+        seconds: 0,
+        isFinished: true,
+        isOverdue: false,
+        isAwaitingConfirmation: false,
+        isTakeaway,
+        isKitchenStatusDisabled: true,
+        statusMessage: readyMessage,
+      };
+    }
+
+    if (isAwaitingConfirmation) {
+      return {
+        formatted: 'Awaiting confirmation',
+        shortFormatted: 'Awaiting approval',
+        diffSec: 0,
+        minutes: 0,
+        seconds: 0,
+        isFinished: false,
+        isOverdue: false,
+        isAwaitingConfirmation: true,
+        isTakeaway,
+        isKitchenStatusDisabled: true,
+        statusMessage: 'Order received. Awaiting cashier confirmation.',
+      };
+    }
+
+    return {
+      formatted: 'Order confirmed',
+      shortFormatted: 'Confirmed',
+      diffSec: 0,
+      minutes: 0,
+      seconds: 0,
+      isFinished: false,
+      isOverdue: false,
+      isAwaitingConfirmation: false,
+      isTakeaway,
+      isKitchenStatusDisabled: true,
+      statusMessage: 'Order confirmed and received by restaurant.',
+    };
+  }
+
+  if (isFinished) {
+    return {
+      formatted: isTakeaway ? 'Order picked up' : 'Order served',
+      shortFormatted: isTakeaway ? 'Picked Up' : 'Served',
+      diffSec: 0,
+      minutes: 0,
+      seconds: 0,
+      isFinished: true,
+      isOverdue: false,
+      isAwaitingConfirmation: false,
+      isTakeaway,
+      isKitchenStatusDisabled: false,
+      statusMessage: isTakeaway
+        ? 'Order collected. Enjoy your meal!'
+        : 'Delivered to your table. Enjoy your feast!',
+    };
+  }
+
+  if (isReady) {
+    const readyMessage = isTakeaway
+      ? `Ready! Please collect at counter (Token #${tokenStr})`
+      : 'Plated! Server is bringing dishes to your table.';
+    return {
+      formatted: 'Ready to serve!',
+      shortFormatted: isTakeaway ? 'Ready for Pickup' : 'Ready to Serve',
+      diffSec: 0,
+      minutes: 0,
+      seconds: 0,
+      isFinished: true,
+      isOverdue: false,
+      isAwaitingConfirmation: false,
+      isTakeaway,
+      isKitchenStatusDisabled: false,
+      statusMessage: readyMessage,
+    };
+  }
+
+  const prepMinutes = getOrderPreparationTimeMinutes(order, catalog);
+
+  if (isAwaitingConfirmation) {
+    return {
+      formatted: `~${prepMinutes}m once approved`,
+      shortFormatted: 'Awaiting approval',
+      diffSec: prepMinutes * 60,
+      minutes: prepMinutes,
+      seconds: 0,
+      isFinished: false,
+      isOverdue: false,
+      isAwaitingConfirmation: true,
+      isTakeaway,
+      statusMessage: `Awaiting cashier confirmation (~${prepMinutes}m prep once accepted)`,
+    };
+  }
+
+  // Phase 2: Active Preparation & Countdown
+  const targetMs = getOrderTargetEndTimeMs(order, catalog);
+
+  if (!targetMs) {
+    return {
+      formatted: `~${prepMinutes} mins remaining`,
+      shortFormatted: `~${prepMinutes}m left`,
+      diffSec: prepMinutes * 60,
+      minutes: prepMinutes,
+      seconds: 0,
+      isFinished: false,
+      isOverdue: false,
+      isAwaitingConfirmation: false,
+      isTakeaway,
+      statusMessage: `Chef is cooking your dishes • ~${prepMinutes}m remaining`,
+    };
+  }
+
+  const now = Date.now();
+  const diffSec = Math.floor((targetMs - now) / 1000);
+
+  if (diffSec <= 0) {
+    return {
+      formatted: 'Finishing touches...',
+      shortFormatted: 'Almost ready!',
+      diffSec: 0,
+      minutes: 0,
+      seconds: 0,
+      isFinished: false,
+      isOverdue: true,
+      isAwaitingConfirmation: false,
+      isTakeaway,
+      statusMessage: 'Almost ready! Finishing touches in kitchen...',
+    };
+  }
+
+  const minutes = Math.floor(diffSec / 60);
+  const seconds = diffSec % 60;
+
+  const timerText =
+    minutes > 0
+      ? `${minutes}m ${seconds.toString().padStart(2, '0')}s`
+      : `${seconds}s`;
+
+  return {
+    formatted: `${timerText} remaining`,
+    shortFormatted: `${timerText} left`,
+    diffSec,
+    minutes,
+    seconds,
+    isFinished: false,
+    isOverdue: false,
+    isAwaitingConfirmation: false,
+    isTakeaway,
+    statusMessage: `Chef is cooking your dishes • ${timerText} remaining`,
+  };
 };
 
 /* =========================================================

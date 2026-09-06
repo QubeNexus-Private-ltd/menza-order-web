@@ -669,9 +669,14 @@ export default function CartModal({
             ? String(activeTable.id)
             : null;
 
+        const encRestId =
+          catalog?.encryptedRestaurantId ||
+          api.encryptRestaurantId(restId);
+
         const checkoutRes =
           await api.initiateCashfreeCheckout({
             restaurantId: restId,
+            encryptedRestaurantId: encRestId,
             amount:
               Math.round(grandTotal * 100) / 100,
             customerName: guestName.trim(),
@@ -813,12 +818,7 @@ export default function CartModal({
   const isLoadingState =
     loading || processingPayment;
 
-  const totalQuantity =
-    activeCartItems.reduce(
-      (acc, item) =>
-        acc + Number(item.quantity || 0),
-      0
-    );
+  const selectedItemsCount = activeCartItems.length;
 
   return (
     <Modal
@@ -993,8 +993,8 @@ export default function CartModal({
                         styles.sectionTitle
                       }
                     >
-                      Selected Items (
-                      {totalQuantity})
+                      {selectedItemsCount === 1 ? 'Selected Item' : 'Selected Items'} (
+                      {selectedItemsCount})
                     </Text>
 
                     <TouchableOpacity

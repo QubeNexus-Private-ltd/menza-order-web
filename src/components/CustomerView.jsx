@@ -9,6 +9,8 @@ import {
   StyleSheet,
   ActivityIndicator,
   Animated,
+  Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import {
   Search,
@@ -25,6 +27,7 @@ import {
   Flame,
   Check,
   ChevronRight,
+  X,
 } from 'lucide-react';
 import * as signalrService from '../services/signalr';
 import {
@@ -32,6 +35,8 @@ import {
   getItemImageUrl,
   getOriginalImageUrl,
   IMAGE_NOT_AVAILABLE,
+  getDecreasingPreparationCountdown,
+  isLiveKitchenActive,
 } from '../services/api';
 
 function SkeletonBox({ width, height, borderRadius = 8, style }) {
@@ -78,14 +83,14 @@ function CustomerViewSkeleton() {
       <View style={styles.controlsRow}>
         <SkeletonBox
           width="100%"
-          height={44}
-          borderRadius={14}
+          height={48}
+          borderRadius={16}
           style={{ flex: 1 }}
         />
         <SkeletonBox
-          width={72}
-          height={44}
-          borderRadius={14}
+          width={76}
+          height={48}
+          borderRadius={16}
         />
       </View>
 
@@ -158,7 +163,7 @@ const COLORS = {
   placeholder: '#F5F3F1',
 };
 
-function ItemImageWithFallback({ uri, style, resizeMode = 'cover' }) {
+const ItemImageWithFallback = React.memo(function ItemImageWithFallback({ uri, style, resizeMode = 'cover' }) {
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
@@ -199,7 +204,7 @@ function ItemImageWithFallback({ uri, style, resizeMode = 'cover' }) {
       }}
     />
   );
-}
+});
 
 export default function CustomerView({
   catalog,
@@ -220,9 +225,88 @@ export default function CustomerView({
 }) {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [vegOnly, setVegOnly] = useState(false);
   const [actionLoading, setActionLoading] = useState({});
   const [liveOrder, setLiveOrder] = useState(activeOrder || null);
+  const [, setLiveOrderTick] = useState(0);
+  const [dismissedOrderIds, setDismissedOrderIds] = useState(new Set());
+  const servedTimestampsRef = useRef({});
+  const searchInputRef = useRef(null);
+
+  // Live 1-second countdown interval for active floating order bar
+  useEffect(() => {
+    if (!liveOrder) return;
+    const st = String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase();
+    const isDone = st.includes('serve') || st.includes('deliver') || st.includes('complete') || st.includes('settled') || st.includes('ready');
+    if (isDone) return;
+
+    const timer = setInterval(() => {
+      setLiveOrderTick((t) => (t + 1) % 10000);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [liveOrder?.id, liveOrder?.kitchenStatus, liveOrder?.orderStatus]);
+
+  // Phase 3: Auto-collapse floating order bar 5 minutes after being served
+  useEffect(() => {
+    if (!liveOrder) return;
+    const orderId = Number(liveOrder.id || liveOrder.orderId || 0);
+    const kSt = String(liveOrder.kitchenStatus || '').toLowerCase();
+    const oSt = String(liveOrder.orderStatus || '').toLowerCase();
+    const isServed =
+      kSt.includes('serve') ||
+      oSt.includes('serve') ||
+      kSt.includes('deliver') ||
+      oSt.includes('deliver');
+
+    if (isServed && orderId) {
+      if (!servedTimestampsRef.current[orderId]) {
+        servedTimestampsRef.current[orderId] = Date.now();
+      }
+      const timeSinceServed = Date.now() - servedTimestampsRef.current[orderId];
+      const remainingToDismiss = Math.max(1000, 300000 - timeSinceServed);
+
+      const timeout = setTimeout(() => {
+        setDismissedOrderIds((prev) => new Set([...prev, orderId]));
+      }, remainingToDismiss);
+
+      return () => clearTimeout(timeout);
+    }
+  }, [liveOrder?.id, liveOrder?.kitchenStatus, liveOrder?.orderStatus]);
+
+  const { width: windowWidth } = useWindowDimensions();
+  const isSmallMobile = windowWidth < 380;
+  const isMobile = windowWidth < 640;
+  const isTabletOrDesktop = windowWidth >= 768;
+
+  const searchPlaceholder = isSmallMobile
+    ? 'Search dishes...'
+    : isTabletOrDesktop
+    ? 'Search dishes, drinks, desserts... (Press / to search)'
+    : 'Search dishes, drinks, desserts...';
+
+  // Desktop keyboard shortcuts: '/' or Ctrl/Cmd+K to focus, 'Escape' to blur
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleKeyDown = (e) => {
+      const activeTag = document.activeElement?.tagName?.toUpperCase();
+      const isInputActive = activeTag === 'INPUT' || activeTag === 'TEXTAREA';
+
+      if (e.key === '/' && !isInputActive) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K') && !isInputActive) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (e.key === 'Escape' && isSearchFocused) {
+        searchInputRef.current?.blur();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSearchFocused]);
 
   useEffect(() => {
     if (activeOrder) {
@@ -290,12 +374,8 @@ export default function CustomerView({
   const [logoError, setLogoError] = useState(false);
   const [coverError, setCoverError] = useState(false);
 
-  const totalCartCount =
-    (cartItems || []).reduce(
-      (acc, item) =>
-        acc + (Number(item.quantity) || 1),
-      0
-    );
+  // Selected items count (only items, not quantity)
+  const totalCartCount = (cartItems || []).length;
 
   const totalCartSubTotal =
     (cartItems || []).reduce(
@@ -383,10 +463,10 @@ export default function CustomerView({
     cartItem
   ) => {
     const value =
-      cartItem?.unitPrice ??
-      cartItem?.amount ??
       item?.unitPrice ??
       item?.price ??
+      cartItem?.unitPrice ??
+      cartItem?.amount ??
       0;
 
     const number = Number(value);
@@ -473,8 +553,9 @@ export default function CustomerView({
     }
 
     const directImageUrl =
-      cartItem?.imageUrl ||
       item?.imageUrl ||
+      item?.ImageUrl ||
+      cartItem?.imageUrl ||
       '';
 
     if (
@@ -632,30 +713,109 @@ export default function CustomerView({
           </View>
         )}
         {/* Search & Veg Filter Bar */}
-        <View style={styles.controlsRow}>
-          <View style={styles.searchBox}>
-            <Search size={18} color="#64748B" />
+        <View style={[
+          styles.controlsRow,
+          isSmallMobile && styles.controlsRowSmallMobile,
+          isTabletOrDesktop && styles.controlsRowDesktop,
+        ]}>
+          <Pressable
+            style={[
+              styles.searchBox,
+              isSmallMobile && styles.searchBoxSmallMobile,
+              isTabletOrDesktop && styles.searchBoxDesktop,
+              isSearchFocused && styles.searchBoxFocused,
+            ]}
+            onPress={() => searchInputRef.current?.focus()}
+            accessibilityRole="search"
+          >
+            <View
+              style={[
+                styles.searchIconBadge,
+                isSmallMobile && styles.searchIconBadgeSmallMobile,
+                (isSearchFocused || Boolean(searchQuery)) && styles.searchIconBadgeActive,
+              ]}
+            >
+              <Search
+                size={isSmallMobile ? 14 : 16}
+                color={(isSearchFocused || Boolean(searchQuery)) ? '#D33401' : '#64748B'}
+                strokeWidth={2.2}
+              />
+            </View>
+
             <TextInput
-              style={styles.searchInput}
-              placeholder="Search food, drinks, desserts..."
+              ref={searchInputRef}
+              style={[
+                styles.searchInput,
+                isSmallMobile && styles.searchInputSmallMobile,
+              ]}
+              placeholder={searchPlaceholder}
               placeholderTextColor="#94A3B8"
               value={searchQuery}
               onChangeText={setSearchQuery}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
             />
-          </View>
+
+            {Boolean(searchQuery) ? (
+              <View style={styles.searchRightActions}>
+                <View style={[
+                  styles.searchCountBadge,
+                  isSmallMobile && styles.searchCountBadgeSmallMobile,
+                ]}>
+                  <Text style={[
+                    styles.searchCountText,
+                    isSmallMobile && styles.searchCountTextSmallMobile,
+                  ]}>
+                    {windowWidth < 440 ? `${filteredItems.length}` : `${filteredItems.length} found`}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.searchClearBtn,
+                    isSmallMobile && styles.searchClearBtnSmallMobile,
+                  ]}
+                  onPress={() => {
+                    setSearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search input"
+                >
+                  <X size={isSmallMobile ? 11 : 12} color="#64748B" strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
+            ) : isTabletOrDesktop && !isSearchFocused ? (
+              <View style={styles.desktopKbdPill}>
+                <Text style={styles.desktopKbdText}>/</Text>
+              </View>
+            ) : null}
+          </Pressable>
 
           <TouchableOpacity
             style={[
               styles.vegToggle,
+              isSmallMobile && styles.vegToggleSmallMobile,
+              isTabletOrDesktop && styles.vegToggleDesktop,
               vegOnly && styles.vegToggleActive,
             ]}
             onPress={() => setVegOnly(!vegOnly)}
             activeOpacity={0.85}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: vegOnly }}
+            accessibilityLabel="Toggle vegetarian only filter"
           >
-            <View style={[styles.vegDot, vegOnly && styles.vegDotActive]} />
+            <View style={[styles.vegDotBorder, vegOnly && styles.vegDotBorderActive]}>
+              <View style={[styles.vegDot, vegOnly && styles.vegDotActive]} />
+            </View>
             <Text
               style={[
                 styles.vegText,
+                isSmallMobile && styles.vegTextSmallMobile,
                 vegOnly && styles.vegTextActive,
               ]}
             >
@@ -663,6 +823,27 @@ export default function CustomerView({
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Active Search Result Notification Pill */}
+        {Boolean(searchQuery.trim()) && (
+          <View style={styles.activeFilterRow}>
+            <View style={styles.activeFilterChip}>
+              <Text style={styles.activeFilterLabel} numberOfLines={1}>
+                Results for <Text style={styles.activeFilterQuery}>"{searchQuery.trim()}"</Text> ({filteredItems.length} {filteredItems.length === 1 ? 'item' : 'items'})
+              </Text>
+              <TouchableOpacity
+                onPress={() => setSearchQuery('')}
+                style={styles.activeFilterClearBtn}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search filter"
+              >
+                <X size={11} color="#D33401" strokeWidth={2.5} />
+                <Text style={styles.activeFilterClearText}>Clear</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Category Filter Pills */}
         <ScrollView
@@ -731,10 +912,29 @@ export default function CustomerView({
           </View>
         ) : filteredItems.length === 0 ? (
           <View style={styles.emptyBox}>
+            <View style={styles.emptyIconCircle}>
+              <Search size={26} color="#94A3B8" strokeWidth={2} />
+            </View>
             <Text style={styles.emptyTitle}>No Dishes Found</Text>
             <Text style={styles.emptySub}>
-              No items match your search or dietary filter.
+              {searchQuery.trim()
+                ? `We couldn't find any dish matching "${searchQuery.trim()}".`
+                : 'No items match your dietary or category filter.'}
             </Text>
+            {(Boolean(searchQuery.trim()) || vegOnly || selectedCategory !== null) && (
+              <TouchableOpacity
+                style={styles.emptyResetBtn}
+                onPress={() => {
+                  setSearchQuery('');
+                  setVegOnly(false);
+                  setSelectedCategory(null);
+                }}
+                activeOpacity={0.85}
+              >
+                <X size={13} color="#D33401" strokeWidth={2.5} />
+                <Text style={styles.emptyResetBtnText}>Clear All Filters</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
           <View
@@ -792,14 +992,13 @@ export default function CustomerView({
                     }
                   >
                     <TouchableOpacity
-                      style={
-                        styles.cardTouchable
-                      }
-                      activeOpacity={0.75}
+                      style={styles.cardTopArea}
+                      activeOpacity={0.9}
                       onPress={() => {
                         if (
                           item.isAvailable &&
-                          qty === 0
+                          qty === 0 &&
+                          (!storeOperatingStatus || storeOperatingStatus.canPlaceOrder !== false)
                         ) {
                           runItemAction(
                             item.itemId,
@@ -814,20 +1013,12 @@ export default function CustomerView({
                       }}
                     >
                       <ItemImageWithFallback
-                        uri={
-                          imageUrl
-                        }
-                        style={
-                          styles.itemImage
-                        }
+                        uri={imageUrl}
+                        style={styles.itemImage}
                         resizeMode="cover"
                       />
 
-                      <View
-                        style={
-                          styles.cardHeaderRow
-                        }
-                      >
+                      <View style={styles.cardHeaderRow}>
                         <View
                           style={[
                             styles.dietBadge,
@@ -858,232 +1049,145 @@ export default function CustomerView({
                           ]}
                           numberOfLines={1}
                         >
-                          {
-                            dietLabel
-                          }
+                          {dietLabel}
                         </Text>
 
-                        <View
-                          style={
-                            styles.ratingPill
-                          }
-                        >
-                          <Text
-                            style={
-                              styles.ratingText
-                            }
-                          >
-                            ★ 4.9
-                          </Text>
+                        <View style={styles.ratingPill}>
+                          <Text style={styles.ratingText}>★ 4.9</Text>
                         </View>
                       </View>
 
-                      <View
-                        style={
-                          styles.cardBody
-                        }
-                      >
+                      <View style={styles.cardBody}>
                         <Text
-                          style={
-                            styles.itemName
-                          }
+                          style={styles.itemName}
                           numberOfLines={2}
                         >
-                          {
-                            item.itemName
-                          }
+                          {item.itemName}
                         </Text>
 
                         {item.description ? (
                           <Text
-                            style={
-                              styles.itemDesc
-                            }
+                            style={styles.itemDesc}
                             numberOfLines={2}
                           >
-                            {
-                              item.description
-                            }
+                            {item.description}
                           </Text>
                         ) : null}
                       </View>
+                    </TouchableOpacity>
 
-                      <View
-                        style={
-                          styles.cardBottomRow
-                        }
-                      >
-                        <View
-                          style={
-                            styles.priceContainer
-                          }
-                        >
-                          <View
-                            style={
-                              styles.priceWithUnitRow
-                            }
-                          >
-                            <Text
-                              style={
-                                styles.itemPrice
-                              }
-                            >
-                              ₹
-                              {Math.round(
-                                unitPrice
-                              ) ===
-                              unitPrice
-                                ? unitPrice
-                                : unitPrice.toFixed(
-                                    0
-                                  )}
+                    <View style={styles.cardBottomRow}>
+                      <View style={styles.priceContainer}>
+                        <View style={styles.priceWithUnitRow}>
+                          <Text style={styles.itemPrice}>
+                            ₹
+                            {Math.round(unitPrice) === unitPrice
+                              ? unitPrice
+                              : unitPrice.toFixed(0)}
+                          </Text>
+
+                          {unitName ? (
+                            <Text style={styles.unitPerText}>
+                              /{unitName}
                             </Text>
-
-                            {unitName ? (
-                              <Text
-                                style={
-                                  styles.unitPerText
-                                }
-                              >
-                                /{unitName}
-                              </Text>
-                            ) : null}
-                          </View>
+                          ) : null}
                         </View>
+                      </View>
 
-                        {!item.isAvailable ? (
-                          <View
-                            style={
-                              styles.soldOutBadge
-                            }
-                          >
-                            <Text
-                              style={
-                                styles.soldOutText
-                              }
-                            >
-                              Sold Out
-                            </Text>
-                          </View>
-                        ) : qty > 0 ? (
-                          <View
-                            style={
-                              styles.qtyControlRow
-                            }
-                          >
-                            <TouchableOpacity
-                              style={[
-                                styles.qtyActionBtn,
-                                itemBusy &&
-                                  styles.qtyBtnBusy,
-                              ]}
-                              onPress={() =>
-                                runItemAction(
-                                  item.itemId,
-                                  () =>
-                                    onUpdateCartQuantity(
-                                      item.itemId,
-                                      qty - 1
-                                    )
-                                )
-                              }
-                              disabled={
-                                itemBusy
-                              }
-                            >
-                              <Minus
-                                size={13}
-                                color={
-                                  COLORS.text
-                                }
-                              />
-                            </TouchableOpacity>
-
-                            <View
-                              style={
-                                styles.qtyLabelWrap
-                              }
-                            >
-                              <Text
-                                style={
-                                  styles.qtyActionText
-                                }
-                              >
-                                {itemBusy
-                                  ? '…'
-                                  : qty}
-                              </Text>
-                            </View>
-
-                            <TouchableOpacity
-                              style={[
-                                styles.qtyActionBtn,
-                                (itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)) &&
-                                  styles.qtyBtnBusy,
-                              ]}
-                              onPress={() =>
-                                runItemAction(
-                                  item.itemId,
-                                  () =>
-                                    onUpdateCartQuantity(
-                                      item.itemId,
-                                      qty + 1
-                                    )
-                                )
-                              }
-                              disabled={
-                                itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
-                              }
-                            >
-                              <Plus
-                                size={13}
-                                color={
-                                  COLORS.text
-                                }
-                              />
-                            </TouchableOpacity>
-                          </View>
-                        ) : (
+                      {!item.isAvailable ? (
+                        <View style={styles.soldOutBadge}>
+                          <Text style={styles.soldOutText}>
+                            Sold Out
+                          </Text>
+                        </View>
+                      ) : qty > 0 ? (
+                        <View style={styles.qtyControlRow}>
                           <TouchableOpacity
-                            style={[
-                              styles.addBtn,
-                              Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) &&
-                                styles.addBtnDisabled,
-                            ]}
-                            onPress={() =>
+                            style={styles.qtyActionBtn}
+                            onPress={(e) => {
+                              e?.stopPropagation?.();
                               runItemAction(
                                 item.itemId,
                                 () =>
-                                  onAddToCart(
+                                  onUpdateCartQuantity(
                                     item.itemId,
-                                    1,
-                                    item
+                                    qty - 1
                                   )
-                              )
-                            }
-                            disabled={
-                              itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
-                            }
+                              );
+                            }}
+                            activeOpacity={0.7}
                           >
-                            {itemBusy ? (
-                              <ActivityIndicator
-                                size="small"
-                                color={
-                                  COLORS.white
-                                }
-                              />
-                            ) : (
-                              <Plus
-                                size={16}
-                                color={
-                                  COLORS.white
-                                }
-                              />
-                            )}
+                            <Minus
+                              size={13}
+                              color={COLORS.text}
+                            />
                           </TouchableOpacity>
-                        )}
-                      </View>
-                    </TouchableOpacity>
+
+                          <View style={styles.qtyLabelWrap}>
+                            <Text style={styles.qtyActionText}>
+                              {qty}
+                            </Text>
+                          </View>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.qtyActionBtn,
+                              Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) &&
+                                styles.qtyBtnBusy,
+                            ]}
+                            onPress={(e) => {
+                              e?.stopPropagation?.();
+                              runItemAction(
+                                item.itemId,
+                                () =>
+                                  onUpdateCartQuantity(
+                                    item.itemId,
+                                    qty + 1
+                                  )
+                              );
+                            }}
+                            disabled={
+                              Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
+                            }
+                            activeOpacity={0.7}
+                          >
+                            <Plus
+                              size={13}
+                              color={COLORS.text}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={[
+                            styles.addBtn,
+                            Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) &&
+                              styles.addBtnDisabled,
+                          ]}
+                          onPress={(e) => {
+                            e?.stopPropagation?.();
+                            runItemAction(
+                              item.itemId,
+                              () =>
+                                onAddToCart(
+                                  item.itemId,
+                                  1,
+                                  item
+                                )
+                            );
+                          }}
+                          disabled={
+                            Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
+                          }
+                          activeOpacity={0.8}
+                        >
+                          <Plus
+                            size={16}
+                            color={COLORS.white}
+                          />
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   </View>
                 );
               }
@@ -1168,12 +1272,21 @@ export default function CustomerView({
 
       {/* FLOATING LIVE KITCHEN PROGRESS BAR */}
       {liveOrder && !['Cancelled', 'Settled'].includes(liveOrder.orderStatus) && (() => {
+        const orderId = Number(liveOrder.id || liveOrder.orderId || 0);
+        if (orderId && dismissedOrderIds.has(orderId)) return null;
+
         const kSt = String(liveOrder.kitchenStatus || '').toLowerCase();
         const oSt = String(liveOrder.orderStatus || '').toLowerCase();
 
+        const isKitchenActive = isLiveKitchenActive(liveOrder, catalog, storeOperatingStatus);
+        const isKitchenDisabled = !isKitchenActive;
+
         const isServed = kSt.includes('serve') || oSt.includes('serve') || kSt.includes('deliver') || oSt.includes('deliver') || kSt.includes('complete') || oSt.includes('complete') || kSt.includes('settled') || oSt.includes('settled');
         const isReady = !isServed && (kSt.includes('ready') || oSt.includes('ready'));
-        const isCooking = !isServed && !isReady && (kSt.includes('prep') || oSt.includes('prep') || kSt.includes('cook') || oSt.includes('cook') || kSt.includes('kitchen') || oSt.includes('kitchen'));
+        const isCooking = !isKitchenDisabled && !isServed && !isReady && (kSt.includes('prep') || oSt.includes('prep') || kSt.includes('cook') || oSt.includes('cook') || kSt.includes('kitchen') || oSt.includes('kitchen'));
+
+        const prepCountdown = getDecreasingPreparationCountdown(liveOrder, catalog, storeOperatingStatus);
+        const isAwaiting = prepCountdown.isAwaitingConfirmation;
 
         return (
           <View style={[styles.floatingLiveOrderWrapper, totalCartCount > 0 && styles.floatingLiveOrderWrapperWithCart]}>
@@ -1186,6 +1299,8 @@ export default function CustomerView({
                   ? styles.liveOrderBarReady
                   : isCooking
                   ? styles.liveOrderBarCooking
+                  : isAwaiting
+                  ? styles.liveOrderBarAwaiting
                   : styles.liveOrderBarPlaced,
               ]}
               onPress={() => {
@@ -1200,6 +1315,8 @@ export default function CustomerView({
                   <Bell size={18} color="#ffffff" />
                 ) : isCooking ? (
                   <Flame size={18} color="#ffffff" />
+                ) : isAwaiting ? (
+                  <Clock size={18} color="#ffffff" />
                 ) : (
                   <Utensils size={18} color="#ffffff" />
                 )}
@@ -1208,29 +1325,30 @@ export default function CustomerView({
               <View style={{ flex: 1, paddingHorizontal: 8 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={styles.liveOrderTitleText}>
-                    Order #{liveOrder.id || liveOrder.orderId}
+                    Order #{orderId}
                   </Text>
-                  <View style={styles.liveOrderPillBadge}>
+                  <View style={[
+                    styles.liveOrderPillBadge,
+                    isAwaiting && styles.liveOrderPillBadgeAwaiting,
+                  ]}>
                     <Text style={styles.liveOrderPillBadgeText}>
                       {isServed
                         ? 'Served to Table'
                         : isReady
-                        ? 'Ready to Serve'
+                        ? (prepCountdown.shortFormatted || 'Ready to Serve')
+                        : isKitchenDisabled
+                        ? (isAwaiting ? 'Awaiting Approval' : 'Confirmed')
                         : isCooking
-                        ? 'Cooking in Kitchen'
-                        : 'Order Placed'}
+                        ? `Cooking • ${prepCountdown.shortFormatted}`
+                        : isAwaiting
+                        ? 'Awaiting Approval'
+                        : `Queued • ${prepCountdown.shortFormatted}`}
                     </Text>
                   </View>
                 </View>
 
                 <Text style={styles.liveOrderSubtitleText} numberOfLines={1}>
-                  {isServed
-                    ? 'Delivered to your table. Enjoy your feast!'
-                    : isReady
-                    ? 'Plated! Server is bringing dishes to your table.'
-                    : isCooking
-                    ? 'Chef started preparing your hot meals (~15m).'
-                    : 'KOT received in kitchen. Preparing shortly.'}
+                  {prepCountdown.statusMessage}
                 </Text>
               </View>
 
@@ -1238,6 +1356,19 @@ export default function CustomerView({
                 <Text style={styles.liveOrderActionText}>Track</Text>
                 <ChevronRight size={15} color="#ffffff" />
               </View>
+
+              {isServed && (
+                <TouchableOpacity
+                  style={styles.liveOrderDismissBtn}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setDismissedOrderIds((prev) => new Set([...prev, orderId]));
+                  }}
+                  accessibilityLabel="Dismiss order bar"
+                >
+                  <X size={15} color="#ffffff" />
+                </TouchableOpacity>
+              )}
             </TouchableOpacity>
           </View>
         );
@@ -1312,8 +1443,8 @@ const styles = StyleSheet.create({
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 18,
+    gap: 10,
+    marginBottom: 14,
     maxWidth: 680,
     width: '100%',
   },
@@ -1321,64 +1452,248 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor:
-      COLORS.white,
-    borderWidth: 1,
-    borderColor:
-      COLORS.border,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    height: 44,
-    shadowColor: '#000000',
+    gap: 9,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    height: 48,
+    shadowColor: '#0F172A',
     shadowOffset: {
       width: 0,
-      height: 1,
+      height: 2,
     },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  searchBoxFocused: {
+    borderColor: '#D33401',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#D33401',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  searchIconBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  searchIconBadgeActive: {
+    backgroundColor: '#FFF1EC',
   },
   searchInput: {
     flex: 1,
-    color: COLORS.text,
-    fontSize: 13,
+    color: '#0F172A',
+    fontSize: 14,
+    fontWeight: '500',
+    letterSpacing: -0.2,
+    height: '100%',
+    paddingVertical: 0,
     outlineStyle: 'none',
+  },
+  searchRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  searchCountBadge: {
+    backgroundColor: '#FFF1EC',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#F3C8BA',
+  },
+  searchCountText: {
+    color: '#D33401',
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  searchClearBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   vegToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor:
-      COLORS.white,
-    borderWidth: 1,
-    borderColor:
-      COLORS.border,
+    gap: 7,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
     paddingHorizontal: 12,
-    height: 44,
-    borderRadius: 14,
+    height: 48,
+    borderRadius: 16,
     flexShrink: 0,
+    shadowColor: '#0F172A',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   vegToggleActive: {
-    backgroundColor:
-      COLORS.greenLight,
-    borderColor: '#86EFAC',
+    backgroundColor: '#F0FDF4',
+    borderColor: '#22C55E',
+    shadowColor: '#22C55E',
+    shadowOpacity: 0.12,
+  },
+  vegDotBorder: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#94A3B8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vegDotBorderActive: {
+    borderColor: '#16A34A',
   },
   vegDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor:
-      COLORS.green,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#94A3B8',
+  },
+  vegDotActive: {
+    backgroundColor: '#16A34A',
   },
   vegText: {
-    color:
-      COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#64748B',
+    fontSize: 12.5,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
   vegTextActive: {
-    color: COLORS.green,
+    color: '#15803D',
+    fontWeight: '800',
+  },
+  activeFilterRow: {
+    maxWidth: 680,
+    width: '100%',
+    marginBottom: 14,
+  },
+  activeFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFF7F2',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  activeFilterLabel: {
+    fontSize: 12,
+    color: '#7C2D12',
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  activeFilterQuery: {
+    fontWeight: '800',
+    color: '#C2410C',
+  },
+  activeFilterClearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    marginLeft: 8,
+    flexShrink: 0,
+  },
+  activeFilterClearText: {
+    fontSize: 11,
     fontWeight: '700',
+    color: '#C2410C',
+  },
+  controlsRowSmallMobile: {
+    gap: 6,
+    marginBottom: 10,
+  },
+  controlsRowDesktop: {
+    maxWidth: 720,
+    gap: 12,
+  },
+  searchBoxSmallMobile: {
+    height: 44,
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+  searchBoxDesktop: {
+    height: 50,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+  },
+  searchIconBadgeSmallMobile: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+  },
+  searchInputSmallMobile: {
+    fontSize: 13,
+  },
+  searchCountBadgeSmallMobile: {
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+  },
+  searchCountTextSmallMobile: {
+    fontSize: 9.5,
+  },
+  searchClearBtnSmallMobile: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+  },
+  desktopKbdPill: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginRight: 2,
+  },
+  desktopKbdText: {
+    color: '#64748B',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: 'monospace',
+  },
+  vegToggleSmallMobile: {
+    height: 44,
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    gap: 4,
+  },
+  vegToggleDesktop: {
+    height: 50,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+  },
+  vegTextSmallMobile: {
+    fontSize: 11.5,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -1450,10 +1765,13 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 1,
   },
+  cardTopArea: {
+    flex: 1,
+    width: '100%',
+  },
   cardTouchable: {
     flex: 1,
-    justifyContent:
-      'space-between',
+    width: '100%',
   },
   itemImage: {
     width: '100%',
@@ -1573,12 +1891,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor:
       '#F3EFEC',
+    minHeight: 44,
     gap: 6,
   },
   priceContainer: {
     justifyContent:
       'center',
     flexShrink: 1,
+    minWidth: 0,
   },
   priceWithUnitRow: {
     flexDirection: 'column',
@@ -1590,6 +1910,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: -0.3,
+    lineHeight: 18,
   },
   unitPerText: {
     color:
@@ -1597,11 +1918,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     marginTop: 1,
+    lineHeight: 12,
   },
   addBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor:
       COLORS.orange,
     alignItems: 'center',
@@ -1625,14 +1947,14 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   qtyControlRow: {
+    height: 34,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
     backgroundColor:
       COLORS.orangeLight,
-    borderRadius: 18,
-    paddingHorizontal: 5,
-    paddingVertical: 3,
+    borderRadius: 17,
+    paddingHorizontal: 4,
     borderWidth: 1,
     borderColor:
       '#F7D9C6',
@@ -1656,7 +1978,8 @@ const styles = StyleSheet.create({
     justifyContent:
       'center',
     paddingHorizontal: 2,
-    minWidth: 24,
+    minWidth: 20,
+    height: 24,
   },
   qtyActionText: {
     color: COLORS.text,
@@ -1757,28 +2080,56 @@ const styles = StyleSheet.create({
   },
   emptyBox: {
     alignItems: 'center',
-    justifyContent:
-      'center',
-    paddingVertical: 50,
-    backgroundColor:
-      COLORS.white,
-    borderRadius: 18,
+    justifyContent: 'center',
+    paddingVertical: 44,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor:
-      COLORS.border,
+    borderColor: '#E2E8F0',
     padding: 24,
+    marginVertical: 12,
+  },
+  emptyIconCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
   },
   emptyTitle: {
-    color: COLORS.text,
-    fontSize: 16,
+    color: '#0F172A',
+    fontSize: 16.5,
     fontWeight: '800',
-    marginBottom: 4,
+    marginBottom: 6,
+    textAlign: 'center',
   },
   emptySub: {
-    color:
-      COLORS.textSecondary,
-    fontSize: 12,
+    color: '#64748B',
+    fontSize: 13,
     textAlign: 'center',
+    maxWidth: 320,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  emptyResetBtn: {
+    backgroundColor: '#FFF1EC',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F3C8BA',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  emptyResetBtnText: {
+    color: '#D33401',
+    fontSize: 12.5,
+    fontWeight: '800',
   },
   restaurantHeroCard: {
     backgroundColor: COLORS.white,
@@ -2047,6 +2398,9 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
   },
+  liveOrderBarAwaiting: {
+    backgroundColor: '#b45309',
+  },
   liveOrderBarPlaced: {
     backgroundColor: '#0284c7',
   },
@@ -2078,6 +2432,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 12,
   },
+  liveOrderPillBadgeAwaiting: {
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+  },
   liveOrderPillBadgeText: {
     color: '#ffffff',
     fontSize: 10,
@@ -2098,6 +2455,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 12,
     gap: 2,
+  },
+  liveOrderDismissBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
   liveOrderActionText: {
     color: '#ffffff',

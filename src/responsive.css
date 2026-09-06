@@ -65,6 +65,18 @@ html, body {
   }
 }
 
+/* Search input responsive enhancements */
+input[type="text"]:focus,
+input[type="search"]:focus {
+  outline: none !important;
+}
+
+@media (max-width: 375px) {
+  .search-compact {
+    font-size: 13px !important;
+  }
+}
+
 /* Modal Desktop Centering Utility */
 @media (min-width: 768px) {
   .responsive-modal-overlay {
