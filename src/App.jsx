@@ -1274,13 +1274,17 @@ export default function App() {
   ========================= */
 
   const handleCallWaiter =
-    async () => {
+    async (requestType = 'CALL_WAITER', message = '') => {
       if (!activeTable) return;
 
+      const restId = Number(catalog?.restaurantId) || Number(activeTable?.restaurantId) || undefined;
       try {
         const res =
           await api.callWaiter(
-            activeTable.id
+            activeTable.id,
+            restId,
+            requestType,
+            message
           );
 
         showToast(
@@ -1300,10 +1304,12 @@ export default function App() {
     async () => {
       if (!activeTable) return;
 
+      const restId = Number(catalog?.restaurantId) || Number(activeTable?.restaurantId) || undefined;
       try {
         const res =
           await api.requestBill(
-            activeTable.id
+            activeTable.id,
+            restId
           );
 
         showToast(

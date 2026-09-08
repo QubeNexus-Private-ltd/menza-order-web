@@ -3704,23 +3704,94 @@ export const updateTableStatus =
   };
 
 export const callWaiter =
-  async (tableId) => {
+  async (tableId, restaurantId = null, requestType = 'CALL_WAITER', message = '', customerName = '') => {
     consumeRateLimit('CALL_WAITER', String(tableId || 'default'));
-    return {
-      success: true,
-      message:
-        `Waiter has been notified for Table #${tableId}.`,
-    };
+    const tId = Number(tableId);
+    const rId = restaurantId ? Number(restaurantId) : undefined;
+    try {
+      const payload = {
+        tableId: tId,
+        restaurantId: rId,
+        requestType: requestType || 'CALL_WAITER',
+        message: message || undefined,
+        customerName: customerName || undefined
+      };
+      const response = await api.post('/api/PublicDineIn/service-request', payload);
+      const d = response.data || {};
+      const fallback = Boolean(d.fallbackToCounter);
+      const activeCount = Number(d.activeWaiterCount || 0);
+      const tableName = d.tableName || tableId;
+
+      const userMsg = fallback
+        ? `Request sent to counter staff. Help is on the way to Table ${tableName}!`
+        : `Staff notified (${activeCount > 1 ? `${activeCount} waiters on floor` : 'waiter assigned'}). Help is on the way to Table ${tableName}!`;
+
+      return {
+        success: true,
+        data: d,
+        fallbackToCounter: fallback,
+        activeWaiterCount: activeCount,
+        message: userMsg,
+      };
+    } catch (err) {
+      // Fallback: try direct Order table endpoint if available
+      try {
+        if (tId > 0) {
+          await api.post(`/api/Order/Table/${tId}/CallWaiter`);
+          return {
+            success: true,
+            message: `Staff has been notified for Table #${tableId}.`,
+          };
+        }
+      } catch {
+        // Ignore fallback error and throw original error
+      }
+      throw err;
+    }
   };
 
 export const requestBill =
-  async (tableId) => {
+  async (tableId, restaurantId = null) => {
     consumeRateLimit('REQUEST_BILL', String(tableId || 'default'));
-    return {
-      success: true,
-      message:
-        `Bill request received for Table #${tableId}.`,
-    };
+    const tId = Number(tableId);
+    const rId = restaurantId ? Number(restaurantId) : undefined;
+    try {
+      const payload = {
+        tableId: tId,
+        restaurantId: rId,
+        requestType: 'REQUEST_BILL',
+        message: 'Guest requested bill at table',
+      };
+      const response = await api.post('/api/PublicDineIn/service-request', payload);
+      const d = response.data || {};
+      const fallback = Boolean(d.fallbackToCounter);
+      const tableName = d.tableName || tableId;
+
+      const userMsg = fallback
+        ? `Pre-bill request sent to counter staff for Table ${tableName}.`
+        : `Bill request received for Table ${tableName}. Staff will bring your bill shortly.`;
+
+      return {
+        success: true,
+        data: d,
+        fallbackToCounter: fallback,
+        message: userMsg,
+      };
+    } catch (err) {
+      // Fallback: try direct Order table bill request
+      try {
+        if (tId > 0) {
+          const fbRes = await api.post(`/api/Order/Table/${tId}/RequestBill`);
+          return {
+            success: true,
+            message: fbRes.data?.message || `Bill request sent for Table #${tableId}.`,
+          };
+        }
+      } catch {
+        // Ignore fallback error and throw original error
+      }
+      throw err;
+    }
   };
 
 export const settleTable =
