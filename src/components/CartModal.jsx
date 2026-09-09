@@ -19,7 +19,7 @@ import {
   ArrowRight,
   AlertCircle,
   CreditCard,
-  Banknote,
+  IndianRupee,
   ShieldCheck,
   AlertTriangle,
   ImageOff,
@@ -1753,7 +1753,7 @@ export default function CartModal({
                         )
                       }
                     >
-                      <Banknote
+                      <IndianRupee
                         size={20}
                         color={
                           paymentMethod ===
