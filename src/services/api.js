@@ -211,6 +211,25 @@ export const decryptRestaurantId = (encryptedId) => {
   return 1;
 };
 
+export const decryptIdentifier = (token) => {
+  if (!token || typeof token !== 'string') return token;
+  if (token.startsWith('mza_')) {
+    try {
+      const hex = token.slice(4);
+      const key = 0x5a;
+      let res = '';
+      for (let i = 0; i < hex.length; i += 2) {
+        const byte = parseInt(hex.substring(i, i + 2), 16);
+        res += String.fromCharCode(byte ^ key);
+      }
+      return res;
+    } catch {
+      return token;
+    }
+  }
+  return token;
+};
+
 /* =========================================================
    AUTH (STAFF)
 ========================================================= */
@@ -1013,12 +1032,24 @@ export const getMenuCatalogByEncryptedId =
     return normalized;
   };
 
-export const getStoreProfile = async (encryptedRestaurantId, restaurantId = 1) => {
+export const getStoreProfile = async (
+  encryptedRestaurantId,
+  restaurantId = 1,
+  encryptedTableId = null,
+  tableId = null
+) => {
   try {
-    const encParam = encryptedRestaurantId
-      ? `r=${encodeURIComponent(encryptedRestaurantId)}`
-      : `restaurantId=${restaurantId}`;
-    const res = await api.get(`/api/public/store/profile?${encParam}`);
+    const params = new URLSearchParams();
+    if (encryptedRestaurantId) params.set('r', encryptedRestaurantId);
+    if (restaurantId) params.set('restaurantId', String(restaurantId));
+
+    if (encryptedTableId) {
+      params.set('t', String(encryptedTableId));
+      params.set('encryptedTableId', String(encryptedTableId));
+    }
+    if (tableId) params.set('tableId', String(tableId));
+
+    const res = await api.get(`/api/public/store/profile?${params.toString()}`);
     if (res?.data) {
       return res.data;
     }
@@ -2351,13 +2382,19 @@ export const placeOrder =
           }${orderPayload.tableId ? `&tableId=${orderPayload.tableId}` : ''}`
         : null);
 
+    const isNumericTable = orderPayload.tableId && !isNaN(Number(orderPayload.tableId)) && Number(orderPayload.tableId) > 0;
+    const rawTableIdStr = orderPayload.tableId ? String(orderPayload.tableId) : null;
+    const effectiveEncTable = !isNumericTable && rawTableIdStr ? rawTableIdStr : (orderPayload.encryptedTableId || null);
+
     const publicPlaceOrderPayload = {
       restaurantId: Number(orderPayload.restaurantId) || 1,
       encryptedRestaurantId: orderPayload.encryptedRestaurantId || '',
-      tableId: orderPayload.tableId ? Number(orderPayload.tableId) : null,
+      tableId: isNumericTable ? Number(orderPayload.tableId) : null,
+      encryptedTableId: effectiveEncTable,
+      tableToken: effectiveEncTable,
       tableNumber: orderPayload.tableNumber
         ? String(orderPayload.tableNumber)
-        : orderPayload.tableId
+        : isNumericTable
         ? String(orderPayload.tableId)
         : null,
       customerName: orderPayload.name || 'Guest Diner',
@@ -3704,19 +3741,31 @@ export const updateTableStatus =
   };
 
 export const callWaiter =
-  async (tableId, restaurantId = null, requestType = 'CALL_WAITER', message = '', customerName = '') => {
-    consumeRateLimit('CALL_WAITER', String(tableId || 'default'));
+  async (tableId, restaurantId = null, requestType = 'CALL_WAITER', message = '', customerName = '', encryptedRestaurantId = null, encryptedTableId = null) => {
+    consumeRateLimit('CALL_WAITER', String(tableId || encryptedTableId || 'default'));
     const tId = Number(tableId);
-    const rId = restaurantId ? Number(restaurantId) : undefined;
+    const isNumericTable = !isNaN(tId) && tId > 0;
+    const rId = restaurantId && !isNaN(Number(restaurantId)) ? Number(restaurantId) : undefined;
+    const effectiveEncRestId = encryptedRestaurantId || (typeof restaurantId === 'string' && isNaN(Number(restaurantId)) ? restaurantId : undefined);
+    const effectiveEncTableId = encryptedTableId || (!isNumericTable && typeof tableId === 'string' ? tableId : undefined);
+
     try {
       const payload = {
-        tableId: tId,
+        tableId: isNumericTable ? tId : undefined,
+        encryptedTableId: effectiveEncTableId || undefined,
+        tableToken: effectiveEncTableId || undefined,
         restaurantId: rId,
+        encryptedRestaurantId: effectiveEncRestId || undefined,
         requestType: requestType || 'CALL_WAITER',
         message: message || undefined,
         customerName: customerName || undefined
       };
-      const response = await api.post('/api/PublicDineIn/service-request', payload);
+      let response = null;
+      try {
+        response = await api.post('/api/public/store/service-request', payload);
+      } catch (storeErr) {
+        response = await api.post('/api/PublicDineIn/service-request', payload);
+      }
       const d = response.data || {};
       const fallback = Boolean(d.fallbackToCounter);
       const activeCount = Number(d.activeWaiterCount || 0);
@@ -3751,18 +3800,30 @@ export const callWaiter =
   };
 
 export const requestBill =
-  async (tableId, restaurantId = null) => {
-    consumeRateLimit('REQUEST_BILL', String(tableId || 'default'));
+  async (tableId, restaurantId = null, encryptedRestaurantId = null, encryptedTableId = null) => {
+    consumeRateLimit('REQUEST_BILL', String(tableId || encryptedTableId || 'default'));
     const tId = Number(tableId);
-    const rId = restaurantId ? Number(restaurantId) : undefined;
+    const isNumericTable = !isNaN(tId) && tId > 0;
+    const rId = restaurantId && !isNaN(Number(restaurantId)) ? Number(restaurantId) : undefined;
+    const effectiveEncRestId = encryptedRestaurantId || (typeof restaurantId === 'string' && isNaN(Number(restaurantId)) ? restaurantId : undefined);
+    const effectiveEncTableId = encryptedTableId || (!isNumericTable && typeof tableId === 'string' ? tableId : undefined);
+
     try {
       const payload = {
-        tableId: tId,
+        tableId: isNumericTable ? tId : undefined,
+        encryptedTableId: effectiveEncTableId || undefined,
+        tableToken: effectiveEncTableId || undefined,
         restaurantId: rId,
+        encryptedRestaurantId: effectiveEncRestId || undefined,
         requestType: 'REQUEST_BILL',
         message: 'Guest requested bill at table',
       };
-      const response = await api.post('/api/PublicDineIn/service-request', payload);
+      let response = null;
+      try {
+        response = await api.post('/api/public/store/service-request', payload);
+      } catch (storeErr) {
+        response = await api.post('/api/PublicDineIn/service-request', payload);
+      }
       const d = response.data || {};
       const fallback = Boolean(d.fallbackToCounter);
       const tableName = d.tableName || tableId;

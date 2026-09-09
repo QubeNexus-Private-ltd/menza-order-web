@@ -364,15 +364,28 @@ export default function App() {
         window.location.search
       );
 
+    // Support path-based Dine-In QR URLs: /dinein/:encRestId/:encTableId or /dinein/:encRestId
+    const pathParts = (typeof window !== 'undefined' && window.location.pathname)
+      ? window.location.pathname.split('/').filter(Boolean)
+      : [];
+    const isDineInPath = pathParts[0]?.toLowerCase() === 'dinein';
+    const pathEncRestId = isDineInPath && pathParts[1] ? decodeURIComponent(pathParts[1]) : null;
+    const pathEncTableId = isDineInPath && pathParts[2] ? decodeURIComponent(pathParts[2]) : null;
+
     // Multi-parameter table fallback
-    const urlTableId =
+    const rawUrlTableId =
+      pathEncTableId ||
       searchParams.get('tableId') ||
       searchParams.get('t') ||
       searchParams.get('table') ||
       searchParams.get('tablenum');
 
+    // Decode or decrypt table if client-obfuscated
+    const urlTableId = rawUrlTableId ? api.decryptIdentifier(rawUrlTableId) : null;
+
     // Multi-parameter encrypted restaurant ID fallback
     const encRestId =
+      pathEncRestId ||
       searchParams.get('r') ||
       searchParams.get('encRestId') ||
       searchParams.get('enc') ||
@@ -694,33 +707,77 @@ export default function App() {
           console.warn('Status fetch error:', statusErr);
         }
 
-        const tablesData =
-          await api.getTables(
-            numericRestId
+        let storeProfile = null;
+        try {
+          storeProfile = await api.getStoreProfile(
+            encryptedRestId,
+            numericRestId,
+            targetTableId
           );
+        } catch (profileErr) {
+          console.warn('Store profile fetch error:', profileErr);
+        }
 
-        setTables(
-          tablesData || []
-        );
+        const localTables = await api.getTables(numericRestId);
+        const profileTables = Array.isArray(storeProfile?.availableTables) ? storeProfile.availableTables : [];
+        const tablesData = profileTables.length > 0 ? profileTables : (localTables || []);
+
+        setTables(tablesData);
 
         if (targetTableId) {
-          const found =
-            tablesData.find(
-              (t) =>
-                t.id ===
-                targetTableId
-            );
+          const cleanTarget = String(targetTableId).trim();
+          let resolvedTable = null;
 
-          if (found) {
-            setActiveTable(found);
-          } else {
-            setActiveTable({
-              id: targetTableId,
-              tableName:
-                `Table #${targetTableId}`,
+          // 1. Check if backend decrypted the table in storeProfile
+          if (storeProfile?.tableId) {
+            resolvedTable = {
+              id: Number(storeProfile.tableId),
+              tableName: storeProfile.tableName || `Table ${storeProfile.tableId}`,
+              tableNumber: storeProfile.tableName || String(storeProfile.tableId),
+              restaurantId: numericRestId,
               rId: numericRestId,
-            });
+              encryptedTableId: targetTableId,
+            };
           }
+
+          // 2. Check if matching table in tablesData
+          if (!resolvedTable) {
+            const found = tablesData.find(
+              (t) =>
+                t.id === targetTableId ||
+                String(t.id) === cleanTarget ||
+                (t.tableName && String(t.tableName).toLowerCase() === cleanTarget.toLowerCase()) ||
+                (t.tableNumber && String(t.tableNumber).toLowerCase() === cleanTarget.toLowerCase())
+            );
+            if (found) {
+              resolvedTable = {
+                ...found,
+                id: Number(found.id),
+                tableName: found.tableName || `Table ${found.id}`,
+                tableNumber: found.tableNumber || found.tableName || String(found.id),
+                restaurantId: numericRestId,
+                rId: numericRestId,
+                encryptedTableId: targetTableId,
+              };
+            }
+          }
+
+          // 3. Fallback: numeric or unresolvable placeholder
+          if (!resolvedTable) {
+            const isNumeric = !isNaN(Number(targetTableId)) && Number(targetTableId) > 0;
+            resolvedTable = {
+              id: isNumeric ? Number(targetTableId) : targetTableId,
+              tableName: isNumeric
+                ? `Table #${cleanTarget}`
+                : 'Selected Table',
+              tableNumber: cleanTarget,
+              restaurantId: numericRestId,
+              rId: numericRestId,
+              encryptedTableId: targetTableId,
+            };
+          }
+
+          setActiveTable(resolvedTable);
         } else {
           setActiveTable(null);
         }
@@ -1278,13 +1335,18 @@ export default function App() {
       if (!activeTable) return;
 
       const restId = Number(catalog?.restaurantId) || Number(activeTable?.restaurantId) || undefined;
+      const encRestId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || undefined;
+      const encTableId = activeTable?.encryptedTableId || undefined;
       try {
         const res =
           await api.callWaiter(
             activeTable.id,
             restId,
             requestType,
-            message
+            message,
+            '',
+            encRestId,
+            encTableId
           );
 
         showToast(
@@ -1305,11 +1367,15 @@ export default function App() {
       if (!activeTable) return;
 
       const restId = Number(catalog?.restaurantId) || Number(activeTable?.restaurantId) || undefined;
+      const encRestId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || undefined;
+      const encTableId = activeTable?.encryptedTableId || undefined;
       try {
         const res =
           await api.requestBill(
             activeTable.id,
-            restId
+            restId,
+            encRestId,
+            encTableId
           );
 
         showToast(
