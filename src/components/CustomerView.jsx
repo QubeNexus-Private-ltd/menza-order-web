@@ -25,6 +25,7 @@ import {
   Flame,
   Check,
   ChevronRight,
+  Lock,
 } from 'lucide-react';
 import * as signalrService from '../services/signalr';
 import {
@@ -215,6 +216,7 @@ export default function CustomerView({
   onUpdateCartQuantity,
   onCallWaiter,
   onRequestBill,
+  openCallWaiter,
   loading,
   storeOperatingStatus,
 }) {
@@ -692,6 +694,77 @@ export default function CustomerView({
             </View>
           </View>
         )}
+
+        {/* Dine-In Table Seating & Waiter Request Bar / Occupied Notice */}
+        {activeTable && (
+          activeTable.occupiedByOther ? (
+            <View style={styles.tableOccupiedBannerCard}>
+              <View style={styles.tableOccupiedBannerTop}>
+                <View style={styles.tableOccupiedBadge}>
+                  <Lock size={12} color="#ffffff" strokeWidth={2.5} />
+                  <Text style={styles.tableOccupiedBadgeText}>TABLE OCCUPIED</Text>
+                </View>
+                <Text style={styles.tableOccupiedTableName}>
+                  {activeTable.tableName || activeTable.name || `Table #${activeTable.id}`}
+                </Text>
+              </View>
+              <Text style={styles.tableOccupiedNoticeText}>
+                This table is currently occupied by another party. Ordering is locked. Please scan your own table QR code or speak to staff.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.tableBannerCard}>
+              <View style={styles.tableBannerLeft}>
+                <View style={styles.tableBadgeContainer}>
+                  <Utensils size={13} color="#D33401" />
+                  <Text style={styles.tableBadgeText}>
+                    {activeTable.tableName || activeTable.name || `Table #${activeTable.id}`}
+                  </Text>
+                </View>
+                <Text style={styles.tableBannerSub}>
+                  {activeTable.isOccupied ? 'Your Table Session' : 'Dine-In'}
+                </Text>
+              </View>
+
+              <View style={styles.tableActionButtonsRow}>
+                <TouchableOpacity
+                  style={styles.heroActionBtn}
+                  onPress={() => {
+                    if (typeof openCallWaiter === 'function') {
+                      openCallWaiter('CALL_WAITER');
+                    } else if (typeof onCallWaiter === 'function') {
+                      onCallWaiter('CALL_WAITER');
+                    }
+                  }}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel="Call Waiter"
+                >
+                  <Bell size={13} color="#C2410C" strokeWidth={2.2} />
+                  <Text style={styles.heroActionBtnText}>Call Waiter</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.heroBillBtn}
+                  onPress={() => {
+                    if (typeof openCallWaiter === 'function') {
+                      openCallWaiter('REQUEST_BILL');
+                    } else if (typeof onRequestBill === 'function') {
+                      onRequestBill();
+                    }
+                  }}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel="Request Bill"
+                >
+                  <Receipt size={13} color="#0369A1" strokeWidth={2.2} />
+                  <Text style={styles.heroBillBtnText}>Bill</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )
+        )}
+
         {/* Search & Veg Filter Bar */}
         <View style={styles.controlsRow}>
           <View style={styles.searchBox}>
@@ -859,11 +932,13 @@ export default function CustomerView({
                     }
                   >
                     <TouchableOpacity
-                      style={
-                        styles.cardTouchable
-                      }
-                      activeOpacity={0.75}
+                      style={[
+                        styles.cardTouchable,
+                        activeTable?.occupiedByOther && styles.cardTouchableOccupied,
+                      ]}
+                      activeOpacity={activeTable?.occupiedByOther ? 1 : 0.75}
                       onPress={() => {
+                        if (activeTable?.occupiedByOther) return;
                         if (
                           item.isAvailable &&
                           qty === 0
@@ -1060,6 +1135,11 @@ export default function CustomerView({
                             >
                               Sold Out
                             </Text>
+                          </View>
+                        ) : activeTable?.occupiedByOther ? (
+                          <View style={styles.lockedItemBadge}>
+                            <Lock size={12} color="#94a3b8" />
+                            <Text style={styles.lockedItemText}>Locked</Text>
                           </View>
                         ) : qty > 0 ? (
                           <View
@@ -2054,6 +2134,36 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 8,
   },
+  tableBannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 8,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: '#F1E8DF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  tableBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tableBannerSub: {
+    fontSize: 11,
+    color: '#78716C',
+    fontWeight: '600',
+  },
   tableBadgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2079,17 +2189,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: '#F5F2EE',
+    backgroundColor: '#FFF7ED',
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E5DFD7',
+    borderColor: '#FED7AA',
   },
   heroActionBtnText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#383431',
+    color: '#C2410C',
+  },
+  heroBillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#F0F9FF',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  heroBillBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0369A1',
   },
   storeStatusBanner: {
     flexDirection: 'row',
@@ -2217,5 +2343,63 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '800',
+  },
+  tableOccupiedBannerCard: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    padding: 14,
+    backgroundColor: '#fff1f2',
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+    borderRadius: 14,
+  },
+  tableOccupiedBannerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 6,
+  },
+  tableOccupiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e11d48',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    gap: 4,
+  },
+  tableOccupiedBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  tableOccupiedTableName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#9f1239',
+  },
+  tableOccupiedNoticeText: {
+    fontSize: 12,
+    color: '#be123c',
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  cardTouchableOccupied: {
+    opacity: 0.85,
+  },
+  lockedItemBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 4,
+  },
+  lockedItemText: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '600',
   },
 });

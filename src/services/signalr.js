@@ -10,6 +10,7 @@ const orderCreatedListeners = new Set();
 const storeOperatingStatusListeners = new Set();
 const paymentVerifiedListeners = new Set();
 const kitchenProgressListeners = new Set();
+const serviceRequestResolvedListeners = new Set();
 
 /* =========================================================
    AUDIO CHIME & BROWSER NOTIFICATIONS
@@ -294,6 +295,22 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
       });
     });
 
+    // 8. Waiter / Service Request Acknowledged from MenzaServe
+    const dispatchServiceRequestResolved = (data) => {
+      console.log('⚡ [SignalR] Real-Time ServiceRequestResolved received:', data);
+      playNotificationChime('ready');
+      sendBrowserNotification(
+        '🔔 Waiter Update',
+        'Staff has acknowledged your table request and is on their way.',
+        'waiter-resolved'
+      );
+      serviceRequestResolvedListeners.forEach((cb) => {
+        try { cb(data); } catch (e) { console.error(e); }
+      });
+    };
+    hubConnection.on('ServiceRequestResolved', dispatchServiceRequestResolved);
+    hubConnection.on('OnServiceRequestResolved', dispatchServiceRequestResolved);
+
     await hubConnection.start();
     console.log('⚡ [SignalR] OrderNotificationHub Connected successfully to', hubUrl);
 
@@ -427,3 +444,16 @@ export function onPaymentVerified(callback) {
     paymentVerifiedListeners.delete(callback);
   };
 }
+
+/**
+ * Subscribe to real-time service request / waiter call resolved events
+ */
+export function onServiceRequestResolved(callback) {
+  if (typeof callback === 'function') {
+    serviceRequestResolvedListeners.add(callback);
+  }
+  return () => {
+    serviceRequestResolvedListeners.delete(callback);
+  };
+}
+

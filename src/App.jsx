@@ -24,6 +24,7 @@ import CartModal from './components/CartModal';
 import OrderTrackerModal from './components/OrderTrackerModal';
 import QrScannerModal from './components/QrScannerModal';
 import RestaurantQrModal from './components/RestaurantQrModal';
+import CallWaiterModal from './components/CallWaiterModal';
 
 import * as api from './services/api';
 import * as signalrService from './services/signalr';
@@ -125,6 +126,14 @@ export default function App() {
     qrModalOpen,
     setQrModalOpen,
   ] = useState(false);
+
+  const [callWaiterModalOpen, setCallWaiterModalOpen] = useState(false);
+  const [callWaiterInitialType, setCallWaiterInitialType] = useState('CALL_WAITER');
+
+  const handleOpenCallWaiter = useCallback((type = 'CALL_WAITER') => {
+    setCallWaiterInitialType(type || 'CALL_WAITER');
+    setCallWaiterModalOpen(true);
+  }, []);
 
   const [loading, setLoading] =
     useState(true);
@@ -305,9 +314,16 @@ export default function App() {
       }
     });
 
+    const unsubServiceRequest = signalrService.onServiceRequestResolved((data) => {
+      if (!data) return;
+      console.log('⚡ [App.jsx] Real-Time ServiceRequestResolved received:', data);
+      showToast('🔔 Waiter has acknowledged your request and is heading to your table!', 'success');
+    });
+
     return () => {
       if (typeof unsubStore === 'function') unsubStore();
       if (typeof unsubOrder === 'function') unsubOrder();
+      if (typeof unsubServiceRequest === 'function') unsubServiceRequest();
     };
   }, [catalog?.restaurantId, selectedRestaurant?.id, activeOrder?.id]);
 
@@ -777,6 +793,40 @@ export default function App() {
             };
           }
 
+          const isOccupied = Boolean(
+            storeProfile?.isTableOccupied ||
+            resolvedTable?.isOccupied ||
+            ['Occupied', 'KOT_Active', 'Billed', 'Reserved'].includes(resolvedTable?.status || storeProfile?.tableStatus)
+          );
+
+          let savedOrder = activeOrder;
+          if (!savedOrder && typeof localStorage !== 'undefined') {
+            try {
+              const raw = localStorage.getItem('menza_active_order');
+              if (raw) savedOrder = JSON.parse(raw);
+            } catch {}
+          }
+
+          const isOwnActiveOrder = Boolean(
+            savedOrder &&
+            !['Cancelled', 'Settled'].includes(savedOrder.orderStatus) &&
+            (
+              (storeProfile?.activeOrderId && Number(savedOrder.id) === Number(storeProfile.activeOrderId)) ||
+              (resolvedTable?.id && Number(savedOrder.tableId) === Number(resolvedTable.id))
+            )
+          );
+
+          const occupiedByOther = isOccupied && !isOwnActiveOrder;
+
+          resolvedTable = {
+            ...resolvedTable,
+            isOccupied,
+            isAvailable: !isOccupied,
+            occupiedByOther,
+            activeOrderId: storeProfile?.activeOrderId || (isOwnActiveOrder ? savedOrder?.id : null),
+            activeOrderPhoneLast4: storeProfile?.activeOrderPhoneLast4 || null,
+          };
+
           setActiveTable(resolvedTable);
         } else {
           setActiveTable(null);
@@ -913,6 +963,13 @@ export default function App() {
       quantity = 1,
       itemData = null
     ) => {
+      if (activeTable?.occupiedByOther) {
+        showToast(
+          `Table ${activeTable.tableName || activeTable.id} is occupied by another party. Ordering is locked.`
+        );
+        return;
+      }
+
       const restId =
         catalog
           ? catalog.restaurantId
@@ -994,6 +1051,13 @@ export default function App() {
       quantity,
       cookingInstruction = null
     ) => {
+      if (activeTable?.occupiedByOther) {
+        showToast(
+          `Table ${activeTable.tableName || activeTable.id} is occupied by another party. Ordering is locked.`
+        );
+        return;
+      }
+
       const targetQty = Number(quantity);
 
       // Instant optimistic UI update to eliminate delay/fluctuation
@@ -1066,6 +1130,12 @@ export default function App() {
       setLoading(true);
 
       try {
+        if (activeTable?.occupiedByOther) {
+          throw new Error(
+            `Table ${activeTable.tableName || activeTable.id} is currently occupied by another customer. Orders cannot be placed for this table.`
+          );
+        }
+
         if (storeOperatingStatus && storeOperatingStatus.canPlaceOrder === false) {
           const msg = storeOperatingStatus.statusMessage ||
             (storeOperatingStatus.status === 'PAUSED'
@@ -1332,7 +1402,10 @@ export default function App() {
 
   const handleCallWaiter =
     async (requestType = 'CALL_WAITER', message = '') => {
-      if (!activeTable) return;
+      if (!activeTable) {
+        handleOpenCallWaiter(requestType);
+        return null;
+      }
 
       const restId = Number(catalog?.restaurantId) || Number(activeTable?.restaurantId) || undefined;
       const encRestId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || undefined;
@@ -1350,21 +1423,26 @@ export default function App() {
           );
 
         showToast(
-          res.message ||
+          res?.message ||
             'Waiter has been notified.'
         );
+        return res;
       } catch (err) {
         if (err?.isRateLimited) {
           showToast(`⏳ ${err.message}`);
         } else {
           showToast('Failed to notify waiter. Please try again.');
         }
+        throw err;
       }
     };
 
   const handleRequestBill =
     async () => {
-      if (!activeTable) return;
+      if (!activeTable) {
+        handleOpenCallWaiter('REQUEST_BILL');
+        return null;
+      }
 
       const restId = Number(catalog?.restaurantId) || Number(activeTable?.restaurantId) || undefined;
       const encRestId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || undefined;
@@ -1379,15 +1457,17 @@ export default function App() {
           );
 
         showToast(
-          res.message ||
+          res?.message ||
             'Bill requested.'
         );
+        return res;
       } catch (err) {
         if (err?.isRateLimited) {
           showToast(`⏳ ${err.message}`);
         } else {
           showToast('Failed to request bill. Please try again.');
         }
+        throw err;
       }
     };
 
@@ -1788,6 +1868,9 @@ export default function App() {
         openQrModal={() =>
           setQrModalOpen(true)
         }
+        openCallWaiter={() =>
+          handleOpenCallWaiter('CALL_WAITER')
+        }
         cartCount={cartItems.length}
         openCart={() =>
           setCartModalOpen(true)
@@ -1817,6 +1900,9 @@ export default function App() {
           }
           openQrModal={() =>
             setQrModalOpen(true)
+          }
+          openCallWaiter={
+            handleOpenCallWaiter
           }
           cartItems={cartItems}
           openCart={() =>
@@ -1966,6 +2052,17 @@ export default function App() {
         }
         activeTable={activeTable}
         tables={tables}
+      />
+
+      <CallWaiterModal
+        visible={callWaiterModalOpen}
+        onClose={() => setCallWaiterModalOpen(false)}
+        activeTable={activeTable}
+        catalog={catalog}
+        initialRequestType={callWaiterInitialType}
+        onCallWaiter={handleCallWaiter}
+        onRequestBill={handleRequestBill}
+        openScanner={() => setScannerOpen(true)}
       />
     </View>
   );

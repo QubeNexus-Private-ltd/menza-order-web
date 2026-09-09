@@ -7,6 +7,8 @@ import {
   QrCode,
   MapPin,
   Utensils,
+  Bell,
+  Lock,
 } from 'lucide-react';
 import { getOriginalImageUrl } from '../services/api';
 
@@ -109,6 +111,7 @@ export default function Header({
   openCart,
   openOrderTracker,
   openQrModal,
+  openCallWaiter,
   activeOrder,
   activeTable,
   storeOperatingStatus,
@@ -165,6 +168,12 @@ export default function Header({
       openQrModal();
     }
   }, [openQrModal]);
+
+  const handleCallWaiterPress = React.useCallback(() => {
+    if (typeof openCallWaiter === 'function') {
+      openCallWaiter();
+    }
+  }, [openCallWaiter]);
 
   const handleOrderPress = React.useCallback(() => {
     if (typeof openOrderTracker === 'function') {
@@ -260,10 +269,14 @@ export default function Header({
                 ) : null}
 
                 {activeTable?.tableName ? (
-                  <View style={styles.headerTableBadge}>
-                    <Utensils size={10} color="#D33401" />
-                    <Text style={styles.headerTableText} numberOfLines={1}>
-                      {activeTable.tableName}
+                  <View style={[styles.headerTableBadge, activeTable?.occupiedByOther && styles.headerTableBadgeOccupied]}>
+                    {activeTable?.occupiedByOther ? (
+                      <Lock size={10} color="#e11d48" />
+                    ) : (
+                      <Utensils size={10} color="#D33401" />
+                    )}
+                    <Text style={[styles.headerTableText, activeTable?.occupiedByOther && styles.headerTableTextOccupied]} numberOfLines={1}>
+                      {activeTable.tableName} {activeTable?.occupiedByOther ? '(Occupied)' : ''}
                     </Text>
                   </View>
                 ) : null}
@@ -299,6 +312,22 @@ export default function Header({
               >
                 <QrCode size={15} color="#0F172A" strokeWidth={2.2} />
                 <Text style={styles.qrButtonText}>QR</Text>
+              </Pressable>
+            )}
+
+            {typeof openCallWaiter === 'function' && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.bellButton,
+                  pressed && styles.bellButtonPressed,
+                ]}
+                onPress={handleCallWaiterPress}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Call Waiter"
+              >
+                <Bell size={15} color="#EA580C" strokeWidth={2.2} />
+                <Text style={styles.bellButtonText}>Bell</Text>
               </Pressable>
             )}
 
@@ -502,6 +531,13 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     fontWeight: '800',
   },
+  headerTableBadgeOccupied: {
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+  },
+  headerTableTextOccupied: {
+    color: '#e11d48',
+  },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -527,6 +563,27 @@ const styles = StyleSheet.create({
   },
   qrButtonText: {
     color: '#0F172A',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  bellButton: {
+    height: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    borderRadius: 17,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    gap: 3.5,
+  },
+  bellButtonPressed: {
+    backgroundColor: '#FFEDD5',
+    transform: [{ scale: 0.97 }],
+  },
+  bellButtonText: {
+    color: '#EA580C',
     fontSize: 11,
     fontWeight: '800',
   },

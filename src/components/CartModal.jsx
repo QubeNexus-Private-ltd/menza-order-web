@@ -568,6 +568,13 @@ export default function CartModal({
       }
     }
 
+    if (activeTable?.occupiedByOther) {
+      setErrorMsg(
+        `Table ${activeTable.tableName || activeTable.id} is currently occupied by another party. Orders cannot be placed for this table.`
+      );
+      return;
+    }
+
     if (hasUnavailableItems) {
       setErrorMsg(
         'Please remove out-of-stock items from your cart before proceeding.'
@@ -958,6 +965,27 @@ export default function CartModal({
               </View>
             ) : (
               <>
+                {activeTable?.occupiedByOther && (
+                  <View
+                    style={
+                      styles.tableOccupiedCartBanner
+                    }
+                  >
+                    <AlertCircle
+                      size={18}
+                      color="#e11d48"
+                    />
+
+                    <Text
+                      style={
+                        styles.tableOccupiedCartBannerText
+                      }
+                    >
+                      Table {activeTable.tableName || activeTable.id} is occupied by another party. Online ordering is locked for this table.
+                    </Text>
+                  </View>
+                )}
+
                 {hasUnavailableItems && (
                   <View
                     style={
@@ -2023,7 +2051,8 @@ export default function CartModal({
                   styles.checkoutBtn,
                   (isLoadingState ||
                     hasUnavailableItems ||
-                    (storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)) &&
+                    (storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) ||
+                    activeTable?.occupiedByOther) &&
                     styles.checkoutBtnDisabled,
                 ]}
                 onPress={
@@ -2032,7 +2061,8 @@ export default function CartModal({
                 disabled={
                   isLoadingState ||
                   hasUnavailableItems ||
-                  Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
+                  Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) ||
+                  Boolean(activeTable?.occupiedByOther)
                 }
                 activeOpacity={0.85}
               >
@@ -2048,7 +2078,9 @@ export default function CartModal({
                         styles.checkoutBtnText
                       }
                     >
-                      {storeOperatingStatus && !storeOperatingStatus.canPlaceOrder
+                      {activeTable?.occupiedByOther
+                        ? 'TABLE OCCUPIED • ORDERING LOCKED'
+                        : storeOperatingStatus && !storeOperatingStatus.canPlaceOrder
                         ? (storeOperatingStatus.status === 'PAUSED'
                             ? `KITCHEN PAUSED (${storeOperatingStatus.remainingPauseMinutes || 0}M LEFT)`
                             : 'KITCHEN CLOSED FOR ORDERING')
@@ -2882,5 +2914,23 @@ const styles = StyleSheet.create({
     color: '#D33401',
     fontSize: 11,
     fontWeight: '700',
+  },
+  tableOccupiedCartBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff1f2',
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+    gap: 10,
+  },
+  tableOccupiedCartBannerText: {
+    flex: 1,
+    color: '#be123c',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 18,
   },
 });
