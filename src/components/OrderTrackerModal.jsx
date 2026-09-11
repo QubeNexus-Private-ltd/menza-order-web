@@ -30,6 +30,10 @@ import {
   Flame,
   Clock,
   Utensils,
+  Bell,
+  Droplets,
+  Receipt,
+  Sparkles,
 } from 'lucide-react';
 import * as api from '../services/api';
 import * as signalrService from '../services/signalr';
@@ -51,6 +55,9 @@ export default function OrderTrackerModal({
   activeTable,
   onRefreshOrder,
   storeOperatingStatus,
+  openCallWaiter,
+  onCallWaiter,
+  onRequestBill,
 }) {
   const [selectedOrder, setSelectedOrder] = useState(order || null);
   const [viewMode, setViewMode] = useState(order ? 'detail' : 'list');
@@ -753,6 +760,19 @@ export default function OrderTrackerModal({
         ? `Dine-In • Table #${selectedOrder.tableId}`
         : 'Quick Order (Counter / Takeaway)';
 
+    const isTableOrder = Boolean(
+      selectedOrder.tableName ||
+      selectedOrder.tableId ||
+      activeTable?.tableName ||
+      activeTable?.id
+    );
+
+    const displayTableName =
+      selectedOrder.tableName ||
+      activeTable?.tableName ||
+      activeTable?.name ||
+      (selectedOrder.tableId ? `Table #${selectedOrder.tableId}` : activeTable?.id ? `Table #${activeTable.id}` : 'Table');
+
     return (
       <ScrollView
         style={styles.scrollBody}
@@ -918,6 +938,83 @@ export default function OrderTrackerModal({
             </Text>
           </View>
         </View>
+
+        {/* TABLE SERVICE & CALL WAITER ACTIONS */}
+        {isTableOrder && (
+          <View style={styles.waiterCard}>
+            <View style={styles.waiterCardHeader}>
+              <View style={styles.waiterCardHeaderLeft}>
+                <View style={styles.waiterIconBadge}>
+                  <Bell size={15} color="#D33401" strokeWidth={2.4} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.waiterCardTitle}>Table Assistance</Text>
+                  <Text style={styles.waiterCardSubtitle}>
+                    {displayTableName} • Need service or assistance from floor staff?
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.waiterActionsGrid}>
+              <TouchableOpacity
+                style={[styles.waiterActionBtn, styles.waiterActionBtnPrimary]}
+                onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('CALL_WAITER') : typeof onCallWaiter === 'function' ? onCallWaiter('CALL_WAITER') : null)}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel="Call Waiter"
+              >
+                <View style={[styles.waiterActionIconWrap, { backgroundColor: '#FFEDD5' }]}>
+                  <Bell size={16} color="#EA580C" strokeWidth={2.4} />
+                </View>
+                <Text style={styles.waiterActionBtnTitle}>Call Waiter</Text>
+                <Text style={styles.waiterActionBtnDesc}>Assistance</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.waiterActionBtn, styles.waiterActionBtnWater]}
+                onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('REQUEST_WATER') : typeof onCallWaiter === 'function' ? onCallWaiter('REQUEST_WATER') : null)}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel="Request Drinking Water"
+              >
+                <View style={[styles.waiterActionIconWrap, { backgroundColor: '#E0F2FE' }]}>
+                  <Droplets size={16} color="#0284C7" strokeWidth={2.4} />
+                </View>
+                <Text style={styles.waiterActionBtnTitle}>Water</Text>
+                <Text style={styles.waiterActionBtnDesc}>Refill</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.waiterActionBtn, styles.waiterActionBtnBill]}
+                onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('REQUEST_BILL') : typeof onRequestBill === 'function' ? onRequestBill() : typeof onCallWaiter === 'function' ? onCallWaiter('REQUEST_BILL') : null)}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel="Request Bill"
+              >
+                <View style={[styles.waiterActionIconWrap, { backgroundColor: '#DCFCE7' }]}>
+                  <Receipt size={16} color="#16A34A" strokeWidth={2.4} />
+                </View>
+                <Text style={styles.waiterActionBtnTitle}>Bill</Text>
+                <Text style={styles.waiterActionBtnDesc}>Invoice</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.waiterActionBtn, styles.waiterActionBtnClean]}
+                onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('CLEAN_TABLE') : typeof onCallWaiter === 'function' ? onCallWaiter('CLEAN_TABLE') : null)}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel="Clean Table"
+              >
+                <View style={[styles.waiterActionIconWrap, { backgroundColor: '#EDE9FE' }]}>
+                  <Sparkles size={16} color="#7C3AED" strokeWidth={2.4} />
+                </View>
+                <Text style={styles.waiterActionBtnTitle}>Clean</Text>
+                <Text style={styles.waiterActionBtnDesc}>Wipe table</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* ORDER PROGRESSION (SIMPLIFIED OR LIVE KITCHEN) */}
         {isKitchenDisabled ? (
@@ -2234,6 +2331,13 @@ export default function OrderTrackerModal({
     );
   };
 
+  const isTableOrderForSelected = Boolean(
+    selectedOrder?.tableName ||
+    selectedOrder?.tableId ||
+    activeTable?.tableName ||
+    activeTable?.id
+  );
+
   return (
     <Modal
       visible={visible}
@@ -2334,6 +2438,19 @@ export default function OrderTrackerModal({
                     {allOrdersList.length})
                   </Text>
                 </TouchableOpacity>
+
+                {isTableOrderForSelected && (
+                  <TouchableOpacity
+                    style={styles.waiterFooterBtn}
+                    onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('CALL_WAITER') : typeof onCallWaiter === 'function' ? onCallWaiter('CALL_WAITER') : null)}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel="Call Waiter"
+                  >
+                    <Bell size={14} color="#EA580C" strokeWidth={2.4} />
+                    <Text style={styles.waiterFooterBtnText}>Call Waiter</Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={
@@ -3288,6 +3405,115 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#ffffff',
   },
+
+  waiterCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    shadowColor: '#EA580C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  waiterCardHeader: {
+    marginBottom: 12,
+  },
+  waiterCardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  waiterIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  waiterCardTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1B1C1C',
+  },
+  waiterCardSubtitle: {
+    fontSize: 11.5,
+    color: '#747878',
+    marginTop: 1,
+  },
+  waiterActionsGrid: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  waiterActionBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  waiterActionBtnPrimary: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FED7AA',
+  },
+  waiterActionBtnWater: {
+    backgroundColor: '#F0F9FF',
+    borderColor: '#BAE6FD',
+  },
+  waiterActionBtnBill: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  waiterActionBtnClean: {
+    backgroundColor: '#F5F3FF',
+    borderColor: '#DDD6FE',
+  },
+  waiterActionIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  waiterActionBtnTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#1B1C1C',
+    textAlign: 'center',
+  },
+  waiterActionBtnDesc: {
+    fontSize: 9.5,
+    color: '#747878',
+    textAlign: 'center',
+    marginTop: 1,
+  },
+  waiterFooterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1.5,
+    borderColor: '#FED7AA',
+  },
+  waiterFooterBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#EA580C',
+  },
+
   restaurantBrandCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,

@@ -20,6 +20,7 @@ import {
   Utensils,
   Clock,
   Bell,
+  Droplets,
   Receipt,
   Sparkles,
   Flame,
@@ -696,8 +697,21 @@ export default function CustomerView({
         )}
 
         {/* Dine-In Table Seating & Waiter Request Bar / Occupied Notice */}
-        {activeTable && (
-          activeTable.occupiedByOther ? (
+        {(() => {
+          const currentTable = activeTable || (
+            activeOrder?.tableId || activeOrder?.tableName
+              ? {
+                  id: activeOrder.tableId,
+                  tableName: activeOrder.tableName || `Table #${activeOrder.tableId}`,
+                  restaurantId: activeOrder.restaurantId || catalog?.restaurantId,
+                  isOccupied: true,
+                }
+              : null
+          );
+
+          if (!currentTable) return null;
+
+          return currentTable.occupiedByOther ? (
             <View style={styles.tableOccupiedBannerCard}>
               <View style={styles.tableOccupiedBannerTop}>
                 <View style={styles.tableOccupiedBadge}>
@@ -705,7 +719,7 @@ export default function CustomerView({
                   <Text style={styles.tableOccupiedBadgeText}>TABLE OCCUPIED</Text>
                 </View>
                 <Text style={styles.tableOccupiedTableName}>
-                  {activeTable.tableName || activeTable.name || `Table #${activeTable.id}`}
+                  {currentTable.tableName || currentTable.name || `Table #${currentTable.id}`}
                 </Text>
               </View>
               <Text style={styles.tableOccupiedNoticeText}>
@@ -718,11 +732,11 @@ export default function CustomerView({
                 <View style={styles.tableBadgeContainer}>
                   <Utensils size={13} color="#D33401" />
                   <Text style={styles.tableBadgeText}>
-                    {activeTable.tableName || activeTable.name || `Table #${activeTable.id}`}
+                    {currentTable.tableName || currentTable.name || `Table #${currentTable.id}`}
                   </Text>
                 </View>
                 <Text style={styles.tableBannerSub}>
-                  {activeTable.isOccupied ? 'Your Table Session' : 'Dine-In'}
+                  {currentTable.isOccupied ? 'Your Table Session' : 'Dine-In'}
                 </Text>
               </View>
 
@@ -745,6 +759,23 @@ export default function CustomerView({
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  style={styles.heroWaterBtn}
+                  onPress={() => {
+                    if (typeof openCallWaiter === 'function') {
+                      openCallWaiter('REQUEST_WATER');
+                    } else if (typeof onCallWaiter === 'function') {
+                      onCallWaiter('REQUEST_WATER');
+                    }
+                  }}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel="Request Drinking Water"
+                >
+                  <Droplets size={13} color="#0284C7" strokeWidth={2.2} />
+                  <Text style={styles.heroWaterBtnText}>Water</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={styles.heroBillBtn}
                   onPress={() => {
                     if (typeof openCallWaiter === 'function') {
@@ -762,8 +793,8 @@ export default function CustomerView({
                 </TouchableOpacity>
               </View>
             </View>
-          )
-        )}
+          );
+        })()}
 
         {/* Search & Veg Filter Bar */}
         <View style={styles.controlsRow}>
@@ -2201,7 +2232,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#C2410C',
   },
-  heroBillBtn: {
+  heroWaterBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
@@ -2212,10 +2243,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#BAE6FD',
   },
+  heroWaterBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0284C7',
+  },
+  heroBillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#F0FDF4',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
   heroBillBtnText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#0369A1',
+    color: '#15803D',
   },
   storeStatusBanner: {
     flexDirection: 'row',

@@ -1400,20 +1400,35 @@ export default function App() {
      TABLE
   ========================= */
 
+  const effectiveTable = React.useMemo(() => {
+    if (activeTable) return activeTable;
+    if (activeOrder?.tableId || activeOrder?.tableName) {
+      return {
+        id: activeOrder.tableId,
+        tableName: activeOrder.tableName || `Table #${activeOrder.tableId}`,
+        restaurantId: activeOrder.restaurantId || catalog?.restaurantId,
+        encryptedTableId: activeOrder.encryptedTableId,
+        isOccupied: true,
+      };
+    }
+    return null;
+  }, [activeTable, activeOrder?.tableId, activeOrder?.tableName, activeOrder?.restaurantId, activeOrder?.encryptedTableId, catalog?.restaurantId]);
+
   const handleCallWaiter =
     async (requestType = 'CALL_WAITER', message = '') => {
-      if (!activeTable) {
+      const targetTable = activeTable || effectiveTable;
+      if (!targetTable) {
         handleOpenCallWaiter(requestType);
         return null;
       }
 
-      const restId = Number(catalog?.restaurantId) || Number(activeTable?.restaurantId) || undefined;
+      const restId = Number(catalog?.restaurantId) || Number(targetTable?.restaurantId) || undefined;
       const encRestId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || undefined;
-      const encTableId = activeTable?.encryptedTableId || undefined;
+      const encTableId = targetTable?.encryptedTableId || undefined;
       try {
         const res =
           await api.callWaiter(
-            activeTable.id,
+            targetTable.id,
             restId,
             requestType,
             message,
@@ -1439,18 +1454,19 @@ export default function App() {
 
   const handleRequestBill =
     async () => {
-      if (!activeTable) {
+      const targetTable = activeTable || effectiveTable;
+      if (!targetTable) {
         handleOpenCallWaiter('REQUEST_BILL');
         return null;
       }
 
-      const restId = Number(catalog?.restaurantId) || Number(activeTable?.restaurantId) || undefined;
+      const restId = Number(catalog?.restaurantId) || Number(targetTable?.restaurantId) || undefined;
       const encRestId = catalog?.encryptedRestaurantId || selectedRestaurant?.encryptedRestaurantId || undefined;
-      const encTableId = activeTable?.encryptedTableId || undefined;
+      const encTableId = targetTable?.encryptedTableId || undefined;
       try {
         const res =
           await api.requestBill(
-            activeTable.id,
+            targetTable.id,
             restId,
             encRestId,
             encTableId
@@ -1864,7 +1880,7 @@ export default function App() {
         }
         loading={loading}
         storeOperatingStatus={storeOperatingStatus}
-        activeTable={activeTable}
+        activeTable={effectiveTable}
         openQrModal={() =>
           setQrModalOpen(true)
         }
@@ -1892,7 +1908,7 @@ export default function App() {
           catalog={catalog}
           categories={categories}
           items={items}
-          activeTable={activeTable}
+          activeTable={effectiveTable}
           activeOrder={activeOrder}
           openOrderTracker={() => setOrderTrackerOpen(true)}
           openScanner={() =>
@@ -2001,7 +2017,7 @@ export default function App() {
         onPlaceOrder={
           handlePlaceOrder
         }
-        activeTable={activeTable}
+        activeTable={effectiveTable}
         catalog={catalog}
         loading={loading}
         storeOperatingStatus={storeOperatingStatus}
@@ -2019,9 +2035,12 @@ export default function App() {
         order={activeOrder}
         orders={orders}
         catalog={catalog}
-        activeTable={activeTable}
+        activeTable={effectiveTable}
         onRefreshOrder={handleRefreshOrder}
         storeOperatingStatus={storeOperatingStatus}
+        openCallWaiter={handleOpenCallWaiter}
+        onCallWaiter={handleCallWaiter}
+        onRequestBill={handleRequestBill}
       />
 
       <QrScannerModal
@@ -2050,14 +2069,14 @@ export default function App() {
             ? catalog.restaurantName
             : 'Menza Fine Dining'
         }
-        activeTable={activeTable}
+        activeTable={effectiveTable}
         tables={tables}
       />
 
       <CallWaiterModal
         visible={callWaiterModalOpen}
         onClose={() => setCallWaiterModalOpen(false)}
-        activeTable={activeTable}
+        activeTable={effectiveTable}
         catalog={catalog}
         initialRequestType={callWaiterInitialType}
         onCallWaiter={handleCallWaiter}
