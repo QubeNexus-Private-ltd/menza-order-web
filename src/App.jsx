@@ -320,12 +320,104 @@ export default function App() {
       showToast('🔔 Waiter has acknowledged your request and is heading to your table!', 'success');
     });
 
+    const unsubItemAvailability = signalrService.onMenuItemAvailabilityChanged((data) => {
+      if (!data) return;
+      console.log('⚡ [App.jsx] Real-Time MenuItemAvailabilityChanged received:', data);
+      const targetItemId = Number(data.itemId || data.ItemId || 0);
+      const isAvailable = Boolean(data.isAvailable ?? data.IsAvailable ?? (data.status === 'Active'));
+
+      setItems((prevItems) => {
+        if (!Array.isArray(prevItems)) return prevItems;
+        return prevItems.map((item) => {
+          const currentId = Number(item.itemId || item.id || 0);
+          if (currentId === targetItemId) {
+            return {
+              ...item,
+              isAvailable,
+              isActive: isAvailable,
+              status: isAvailable ? 'Active' : 'Inactive',
+            };
+          }
+          return item;
+        });
+      });
+
+      setCatalog((prevCatalog) => {
+        if (!prevCatalog || !Array.isArray(prevCatalog.items)) return prevCatalog;
+        return {
+          ...prevCatalog,
+          items: prevCatalog.items.map((item) => {
+            const currentId = Number(item.itemId || item.id || 0);
+            if (currentId === targetItemId) {
+              return {
+                ...item,
+                isAvailable,
+                isActive: isAvailable,
+                status: isAvailable ? 'Active' : 'Inactive',
+              };
+            }
+            return item;
+          }),
+        };
+      });
+    });
+
+    const unsubTableStatus = signalrService.onTableStatusChanged((data) => {
+      if (!data) return;
+      console.log('⚡ [App.jsx] Real-Time TableStatusChanged received:', data);
+      const targetTableId = Number(data.tableId || data.TableId || 0);
+      const isOccupied = Boolean(data.isOccupied ?? data.IsOccupied ?? (data.status === 'Occupied' || data.status === 'KOT_Active'));
+      const status = data.status || data.Status || (isOccupied ? 'Occupied' : 'Available');
+
+      setTables((prevTables) => {
+        if (!Array.isArray(prevTables)) return prevTables;
+        return prevTables.map((t) => {
+          const tid = Number(t.id || t.tableId || 0);
+          if (tid === targetTableId) {
+            return {
+              ...t,
+              isOccupied,
+              status,
+              activeOrderId: data.activeOrderId ?? t.activeOrderId,
+            };
+          }
+          return t;
+        });
+      });
+
+      setActiveTable((prevTable) => {
+        if (!prevTable) return prevTable;
+        const currentTid = Number(prevTable.id || 0);
+        if (currentTid === targetTableId) {
+          const isOwnOrder = Boolean(
+            activeOrder &&
+            !['Cancelled', 'Settled'].includes(activeOrder.orderStatus) &&
+            (
+              (data.activeOrderId && Number(activeOrder.id) === Number(data.activeOrderId)) ||
+              Number(activeOrder.tableId) === currentTid
+            )
+          );
+          const occupiedByOther = isOccupied && !isOwnOrder;
+          return {
+            ...prevTable,
+            isOccupied,
+            status,
+            occupiedByOther,
+            activeOrderId: data.activeOrderId ?? prevTable.activeOrderId,
+          };
+        }
+        return prevTable;
+      });
+    });
+
     return () => {
       if (typeof unsubStore === 'function') unsubStore();
       if (typeof unsubOrder === 'function') unsubOrder();
       if (typeof unsubServiceRequest === 'function') unsubServiceRequest();
+      if (typeof unsubItemAvailability === 'function') unsubItemAvailability();
+      if (typeof unsubTableStatus === 'function') unsubTableStatus();
     };
-  }, [catalog?.restaurantId, selectedRestaurant?.id, activeOrder?.id]);
+  }, [catalog?.restaurantId, selectedRestaurant?.id, activeOrder?.id, activeOrder?.orderStatus, activeOrder?.tableId]);
 
   /* =========================
      CART

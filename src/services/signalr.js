@@ -11,6 +11,8 @@ const storeOperatingStatusListeners = new Set();
 const paymentVerifiedListeners = new Set();
 const kitchenProgressListeners = new Set();
 const serviceRequestResolvedListeners = new Set();
+const tableStatusListeners = new Set();
+const menuItemAvailabilityListeners = new Set();
 
 /* =========================================================
    AUDIO CHIME & BROWSER NOTIFICATIONS
@@ -259,19 +261,7 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
     hubConnection.on('OnKitchenStatusChanged', dispatchStatusChanged);
     hubConnection.on('KitchenStatusChanged', dispatchStatusChanged);
 
-    // 3. Ready and Served explicit events
-    hubConnection.on('OnOrderReady', dispatchStatusChanged);
-    hubConnection.on('OrderReady', dispatchStatusChanged);
-    hubConnection.on('OnOrderServed', dispatchStatusChanged);
-    hubConnection.on('OrderServed', dispatchStatusChanged);
-
-    // 4. Generic order/ticket updates
-    hubConnection.on('OnOrderUpdated', dispatchStatusChanged);
-    hubConnection.on('OrderUpdated', dispatchStatusChanged);
-    hubConnection.on('OnKitchenTicketUpdated', dispatchStatusChanged);
-    hubConnection.on('KitchenTicketUpdated', dispatchStatusChanged);
-
-    // 5. Order Created (New KOT received from Table QR or Counter)
+    // 3. Order Created (New KOT received from Table QR or Counter)
     hubConnection.on('OnOrderCreated', dispatchOrderCreated);
     hubConnection.on('OrderCreated', dispatchOrderCreated);
 
@@ -310,6 +300,28 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
     };
     hubConnection.on('ServiceRequestResolved', dispatchServiceRequestResolved);
     hubConnection.on('OnServiceRequestResolved', dispatchServiceRequestResolved);
+
+    // 9. Table Status Changed
+    const dispatchTableStatusChanged = (raw) => {
+      console.log('⚡ [SignalR] Real-Time TableStatusChanged received:', raw);
+      const data = (raw && typeof raw === 'object' && raw.data) ? raw.data : raw;
+      tableStatusListeners.forEach((cb) => {
+        try { cb(data); } catch (e) { console.error(e); }
+      });
+    };
+    hubConnection.on('OnTableStatusChanged', dispatchTableStatusChanged);
+    hubConnection.on('TableStatusChanged', dispatchTableStatusChanged);
+
+    // 10. Menu Item Availability Changed (In-stock / Sold-out real-time sync)
+    const dispatchMenuItemAvailabilityChanged = (raw) => {
+      console.log('⚡ [SignalR] Real-Time MenuItemAvailabilityChanged received:', raw);
+      const data = (raw && typeof raw === 'object' && raw.data) ? raw.data : raw;
+      menuItemAvailabilityListeners.forEach((cb) => {
+        try { cb(data); } catch (e) { console.error(e); }
+      });
+    };
+    hubConnection.on('OnMenuItemAvailabilityChanged', dispatchMenuItemAvailabilityChanged);
+    hubConnection.on('MenuItemAvailabilityChanged', dispatchMenuItemAvailabilityChanged);
 
     await hubConnection.start();
     console.log('⚡ [SignalR] OrderNotificationHub Connected successfully to', hubUrl);
@@ -456,4 +468,29 @@ export function onServiceRequestResolved(callback) {
     serviceRequestResolvedListeners.delete(callback);
   };
 }
+
+/**
+ * Subscribe to real-time table status change events
+ */
+export function onTableStatusChanged(callback) {
+  if (typeof callback === 'function') {
+    tableStatusListeners.add(callback);
+  }
+  return () => {
+    tableStatusListeners.delete(callback);
+  };
+}
+
+/**
+ * Subscribe to real-time menu item availability change events
+ */
+export function onMenuItemAvailabilityChanged(callback) {
+  if (typeof callback === 'function') {
+    menuItemAvailabilityListeners.add(callback);
+  }
+  return () => {
+    menuItemAvailabilityListeners.delete(callback);
+  };
+}
+
 
