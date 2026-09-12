@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import * as api from '../services/api';
 import * as signalrService from '../services/signalr';
+import { Order, Catalog, Table, StoreOperatingStatus } from '../types';
 
 const STATUSES = [
   'Pending',
@@ -373,6 +374,21 @@ const getOrderTabCounts = (ordersList) => {
   return { activeCount, completedCount };
 };
 
+export interface OrderTrackerModalProps {
+  visible: boolean;
+  onClose: () => void;
+  order?: Order | null;
+  targetOrder?: Order | null;
+  orders?: Order[];
+  catalog?: Catalog | null;
+  activeTable?: Table | null;
+  onRefreshOrder?: (orderId: number) => Promise<any> | any;
+  storeOperatingStatus?: StoreOperatingStatus | null;
+  openCallWaiter?: (action?: string) => void;
+  onCallWaiter?: (action?: string) => void;
+  onRequestBill?: () => void;
+}
+
 export default function OrderTrackerModal({
   visible,
   onClose,
@@ -386,12 +402,12 @@ export default function OrderTrackerModal({
   openCallWaiter,
   onCallWaiter,
   onRequestBill,
-}) {
-  const [selectedOrder, setSelectedOrder] = useState(() => {
+}: OrderTrackerModalProps) {
+  const [selectedOrder, setSelectedOrder] = useState<any>(() => {
     const init = targetOrder || order || api.getSavedActiveOrder() || null;
     return init && api.normalizeOrder ? api.normalizeOrder(init) : init;
   });
-  const [viewMode, setViewMode] = useState(() => (targetOrder || order || api.getSavedActiveOrder() ? 'detail' : 'list'));
+  const [viewMode, setViewMode] = useState<'detail' | 'list'>(() => (targetOrder || order || api.getSavedActiveOrder() ? 'detail' : 'list'));
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [allOrdersList, setAllOrdersList] = useState([]);
@@ -495,9 +511,9 @@ export default function OrderTrackerModal({
       }
 
       const list = Array.from(uniqueMap.values()).sort(
-        (a, b) =>
-          new Date(b?.createdAt || b?.createdDateUtc || b?.CreatedAt || b?.CreatedDateUtc || 0) -
-          new Date(a?.createdAt || a?.createdDateUtc || a?.CreatedAt || a?.CreatedDateUtc || 0)
+        (a: any, b: any) =>
+          new Date(b?.createdAt || b?.createdDateUtc || b?.CreatedAt || b?.CreatedDateUtc || 0).getTime() -
+          new Date(a?.createdAt || a?.createdDateUtc || a?.CreatedAt || a?.CreatedDateUtc || 0).getTime()
       );
 
       setAllOrdersList(list);
@@ -761,9 +777,9 @@ export default function OrderTrackerModal({
       }
 
       const normalizedOrd = api.normalizeOrder ? api.normalizeOrder(activeOrd) : activeOrd;
-      const selectedOrder = normalizedOrd || activeOrd;
+      const curOrder = normalizedOrd || activeOrd;
 
-      const isKitchenActive = resolveIsKitchenActive(selectedOrder, null, catalog, storeOperatingStatus);
+      const isKitchenActive = resolveIsKitchenActive(curOrder, null, catalog, storeOperatingStatus);
       const isKitchenDisabled = !isKitchenActive;
 
       const {
@@ -775,7 +791,7 @@ export default function OrderTrackerModal({
         badgeBg,
         label,
       } = getOrderStatusInfo(
-        selectedOrder,
+        curOrder,
         isKitchenActive,
         catalog,
         storeOperatingStatus
@@ -797,7 +813,7 @@ export default function OrderTrackerModal({
       try {
         if (typeof api?.getDecreasingPreparationCountdown === 'function') {
           const res = api.getDecreasingPreparationCountdown(
-            selectedOrder,
+            curOrder,
             catalog,
             storeOperatingStatus
           );
@@ -814,7 +830,7 @@ export default function OrderTrackerModal({
         ? STATUSES.indexOf('Served')
         : 0;
 
-    const items = getOrderItems(selectedOrder);
+    const items = getOrderItems(curOrder);
 
     const itemsSum = items.reduce(
       (sum, item) => {
@@ -828,16 +844,16 @@ export default function OrderTrackerModal({
 
     const subtotal =
       Number(
-        (selectedOrder.subTotal > 0 ? selectedOrder.subTotal : null) ??
-          (selectedOrder.orderAmount > 0 ? selectedOrder.orderAmount : null) ??
-          (selectedOrder.itemTotal > 0 ? selectedOrder.itemTotal : null) ??
+        (curOrder.subTotal > 0 ? curOrder.subTotal : null) ??
+          (curOrder.orderAmount > 0 ? curOrder.orderAmount : null) ??
+          (curOrder.itemTotal > 0 ? curOrder.itemTotal : null) ??
           (itemsSum > 0 ? itemsSum : 0)
       ) || 0;
 
     const cgst =
       Number(
-        (selectedOrder.cgstAmount > 0 ? selectedOrder.cgstAmount : null) ??
-          (selectedOrder.cgst > 0 ? selectedOrder.cgst : null) ??
+        (curOrder.cgstAmount > 0 ? curOrder.cgstAmount : null) ??
+          (curOrder.cgst > 0 ? curOrder.cgst : null) ??
           Math.round(
             subtotal * 0.025 * 100
           ) / 100
@@ -845,8 +861,8 @@ export default function OrderTrackerModal({
 
     const sgst =
       Number(
-        (selectedOrder.sgstAmount > 0 ? selectedOrder.sgstAmount : null) ??
-          (selectedOrder.sgst > 0 ? selectedOrder.sgst : null) ??
+        (curOrder.sgstAmount > 0 ? curOrder.sgstAmount : null) ??
+          (curOrder.sgst > 0 ? curOrder.sgst : null) ??
           Math.round(
             subtotal * 0.025 * 100
           ) / 100
@@ -854,22 +870,22 @@ export default function OrderTrackerModal({
 
     const grandTotal =
       Number(
-        (selectedOrder.totalAmount > 0 ? selectedOrder.totalAmount : null) ??
+        (curOrder.totalAmount > 0 ? curOrder.totalAmount : null) ??
           (subtotal + cgst + sgst)
       ) || 0;
 
-    const tokenNumber = getOrderTokenNumber(selectedOrder);
+    const tokenNumber = getOrderTokenNumber(curOrder);
 
-    const formattedDate = formatOrderDate(selectedOrder);
+    const formattedDate = formatOrderDate(curOrder);
 
-    const hasTable = hasOrderTableId(selectedOrder);
-    const isTableOrder = isDineInOrder(selectedOrder) && hasTable;
-    const channelText = getOrderChannelText(selectedOrder);
-    const diningType = getOrderDiningType(selectedOrder);
+    const hasTable = hasOrderTableId(curOrder);
+    const isTableOrder = isDineInOrder(curOrder) && hasTable;
+    const channelText = getOrderChannelText(curOrder);
+    const diningType = getOrderDiningType(curOrder);
 
     const displayTableName =
-      selectedOrder.tableName ||
-      (hasTable ? `Table #${selectedOrder.tableId}` : 'Table');
+      curOrder.tableName ||
+      (hasTable ? `Table #${curOrder.tableId}` : 'Table');
 
     return (
       <ScrollView
@@ -927,29 +943,29 @@ export default function OrderTrackerModal({
 
         {/* RESTAURANT BRAND & ADDRESS HEADER */}
         <View style={styles.restaurantBrandCard}>
-          {(selectedOrder.logoUrl || catalog?.logoUrl || selectedOrder.imageUrl || catalog?.imageUrl) ? (
+          {(curOrder.logoUrl || catalog?.logoUrl || curOrder.imageUrl || catalog?.imageUrl) ? (
             <Image
-              source={{ uri: selectedOrder.logoUrl || catalog?.logoUrl || selectedOrder.imageUrl || catalog?.imageUrl }}
+              source={{ uri: curOrder.logoUrl || catalog?.logoUrl || curOrder.imageUrl || catalog?.imageUrl }}
               style={styles.restaurantBrandLogo}
               resizeMode="cover"
             />
           ) : null}
           <View style={{ flex: 1 }}>
             <Text style={styles.restaurantBrandName}>
-              {selectedOrder.restaurantName || catalog?.restaurantName || ''}
+              {curOrder.restaurantName || catalog?.restaurantName || ''}
             </Text>
-            {((selectedOrder.address || catalog?.address) || (selectedOrder.city || catalog?.city)) ? (
+            {((curOrder.address || catalog?.address) || (curOrder.city || catalog?.city)) ? (
               <Text style={styles.restaurantBrandAddress}>
                 {[
-                  selectedOrder.address || catalog?.address,
-                  selectedOrder.city || catalog?.city,
-                  selectedOrder.state || catalog?.state
+                  curOrder.address || catalog?.address,
+                  curOrder.city || catalog?.city,
+                  curOrder.state || catalog?.state
                 ].filter(Boolean).join(', ')}
               </Text>
             ) : null}
-            {(selectedOrder.contactPhone || catalog?.contactNumber) ? (
+            {(curOrder.contactPhone || catalog?.contactNumber) ? (
               <Text style={styles.restaurantBrandContact}>
-                Ph: {selectedOrder.contactPhone || catalog?.contactNumber}
+                Ph: {curOrder.contactPhone || catalog?.contactNumber}
               </Text>
             ) : null}
           </View>
@@ -991,7 +1007,7 @@ export default function OrderTrackerModal({
                   {tokenNumber}
                 </Text>
               </View>
-              <Text style={styles.orderIdHeroText}>Order #{selectedOrder.id || selectedOrder.orderId || selectedOrder.Id || selectedOrder.OrderId}</Text>
+              <Text style={styles.orderIdHeroText}>Order #{curOrder.id || curOrder.orderId || curOrder.Id || curOrder.OrderId}</Text>
             </View>
 
             <View
@@ -1352,8 +1368,8 @@ export default function OrderTrackerModal({
                   styles.infoTableValue
                 }
               >
-                {selectedOrder.customerName ||
-                  selectedOrder.name ||
+                {curOrder.customerName ||
+                  curOrder.name ||
                   ''}
               </Text>
             </View>
@@ -1376,7 +1392,7 @@ export default function OrderTrackerModal({
                   styles.infoTableValue
                 }
               >
-                {maskPhoneLast4(selectedOrder.maskedMobileNumber || selectedOrder.mobileNumber || selectedOrder.customerPhone) || ''}
+                {maskPhoneLast4(curOrder.maskedMobileNumber || curOrder.mobileNumber || curOrder.customerPhone) || ''}
               </Text>
             </View>
 
@@ -1423,7 +1439,7 @@ export default function OrderTrackerModal({
               </Text>
             </View>
 
-            {selectedOrder.remarks ? (
+            {curOrder.remarks ? (
               <View
                 style={
                   styles.remarksBanner
@@ -1440,7 +1456,7 @@ export default function OrderTrackerModal({
                   }
                 >
                   Special Note:{' '}
-                  {selectedOrder.remarks}
+                  {curOrder.remarks}
                 </Text>
               </View>
             ) : null}
@@ -1846,7 +1862,7 @@ export default function OrderTrackerModal({
                 styles.paymentCardSubText
               }
             >
-              Delivery Type: {diningType} • Mode: {selectedOrder.paymentMode || (isOnline ? 'ONLINE' : 'CASH')}
+              Delivery Type: {diningType} • Mode: {curOrder.paymentMode || (isOnline ? 'ONLINE' : 'CASH')}
             </Text>
 
             <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: (isPaid || isOnline) ? '#f0fdf4' : '#fffbeb' }}>
@@ -1857,16 +1873,16 @@ export default function OrderTrackerModal({
               </Text>
             </View>
 
-            {selectedOrder.paymentOrderId ||
-            selectedOrder.cashfreeOrderId ? (
+            {curOrder.paymentOrderId ||
+            curOrder.cashfreeOrderId ? (
               <Text
                 style={
                   styles.paymentTxnText
                 }
               >
                 Ref:{' '}
-                {selectedOrder.paymentOrderId ||
-                  selectedOrder.cashfreeOrderId}
+                {curOrder.paymentOrderId ||
+                  curOrder.cashfreeOrderId}
               </Text>
             ) : null}
           </View>
@@ -2787,6 +2803,15 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
+  emptyItems: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 13,
+    color: '#94A3B8',
+    fontStyle: 'italic',
+  },
   emptySubtitle: {
     fontSize: 12,
     color: '#64748b',

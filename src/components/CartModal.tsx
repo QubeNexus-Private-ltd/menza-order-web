@@ -32,13 +32,21 @@ import {
 } from 'lucide-react';
 import * as api from '../services/api';
 import { joinOrderGroup } from '../services/signalr';
+import { Catalog, Table, StoreOperatingStatus, OrderItem } from '../types';
+
+interface ItemImageWithFallbackProps {
+  uri?: string;
+  isVeg?: boolean;
+  style?: any;
+  resizeMode?: 'cover' | 'contain' | 'stretch' | 'repeat' | 'center';
+}
 
 function ItemImageWithFallback({
   uri,
   isVeg,
   style,
   resizeMode = 'cover',
-}) {
+}: ItemImageWithFallbackProps) {
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
@@ -69,7 +77,7 @@ function ItemImageWithFallback({
   );
 }
 
-const getOrderTypeIcon = (typeName) => {
+const getOrderTypeIcon = (typeName?: string): string => {
   const lower = (typeName || '').toLowerCase();
 
   if (lower.includes('dine')) return '🍽️';
@@ -91,7 +99,7 @@ const getOrderTypeIcon = (typeName) => {
   return '📋';
 };
 
-const money = (value) => {
+const money = (value: number | string | undefined | null): string => {
   const number = Number(value);
 
   return Number.isFinite(number)
@@ -99,10 +107,10 @@ const money = (value) => {
     : '0.00';
 };
 
-const getQuantityUnitText = (quantity, item, catalog = null) => {
+const getQuantityUnitText = (quantity: any, item: any, catalog: any = null): string => {
   const qty = Number(quantity || 1);
   const catalogItem = Array.isArray(catalog?.items)
-    ? catalog.items.find((ci) => Number(ci.itemId || ci.id) === Number(item?.itemId || item?.id))
+    ? catalog.items.find((ci: any) => Number(ci.itemId || ci.id) === Number(item?.itemId || item?.id))
     : null;
 
   let unit =
@@ -138,6 +146,23 @@ const getQuantityUnitText = (quantity, item, catalog = null) => {
   return `${qty} ${cleanUnit}`;
 };
 
+export interface CartModalProps {
+  visible: boolean;
+  onClose: () => void;
+  cart?: any;
+  cartItems?: OrderItem[] | any[];
+  onUpdateCartQuantity?: (itemId: number | string, quantity: number, instruction?: string | null) => Promise<any> | any;
+  onRemoveFromCart?: (itemId: number | string) => Promise<any> | any;
+  onClearCart?: () => Promise<any> | any;
+  onPlaceOrder?: (orderPayload: any) => Promise<any> | any;
+  onRefreshCart?: () => Promise<any> | any;
+  activeTable?: Table | any;
+  catalog?: Catalog | any;
+  orderTypes?: any[];
+  loading?: boolean;
+  storeOperatingStatus?: StoreOperatingStatus | any;
+}
+
 export default function CartModal({
   visible,
   onClose,
@@ -153,30 +178,29 @@ export default function CartModal({
   orderTypes = [],
   loading,
   storeOperatingStatus,
-}) {
-  const [guestName, setGuestName] = useState('');
-  const [mobileNumber, setMobileNumber] = useState('');
-  const [remarks, setRemarks] = useState('');
-  const [orderTypeId, setOrderTypeId] = useState(1);
-  const [paymentMethod, setPaymentMethod] = useState('cashfree');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [processingPayment, setProcessingPayment] =
-    useState(false);
-  const [fetchingCart, setFetchingCart] = useState(false);
-  const [updatingItemId, setUpdatingItemId] = useState(null);
-  const [removingItemId, setRemovingItemId] = useState(null);
-  const [clearingCart, setClearingCart] = useState(false);
-  const [liveOrderTypes, setLiveOrderTypes] = useState([]);
+}: CartModalProps) {
+  const [guestName, setGuestName] = useState<string>('');
+  const [mobileNumber, setMobileNumber] = useState<string>('');
+  const [remarks, setRemarks] = useState<string>('');
+  const [orderTypeId, setOrderTypeId] = useState<number>(1);
+  const [paymentMethod, setPaymentMethod] = useState<string>('cashfree');
+  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [processingPayment, setProcessingPayment] = useState<boolean>(false);
+  const [fetchingCart, setFetchingCart] = useState<boolean>(false);
+  const [updatingItemId, setUpdatingItemId] = useState<any>(null);
+  const [removingItemId, setRemovingItemId] = useState<any>(null);
+  const [clearingCart, setClearingCart] = useState<boolean>(false);
+  const [liveOrderTypes, setLiveOrderTypes] = useState<any[]>([]);
 
   /* Customer OTP Verification State */
-  const [isVerified, setIsVerified] = useState(false);
-  const [isOtpSent, setIsOtpSent] = useState(false);
-  const [otpCode, setOtpCode] = useState('');
-  const [otpCountdown, setOtpCountdown] = useState(0);
-  const [isSendingOtp, setIsSendingOtp] = useState(false);
-  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
-  const [otpSuccessMsg, setOtpSuccessMsg] = useState('');
-  const [verifiedCustomer, setVerifiedCustomer] = useState(null);
+  const [isVerified, setIsVerified] = useState<boolean>(false);
+  const [isOtpSent, setIsOtpSent] = useState<boolean>(false);
+  const [otpCode, setOtpCode] = useState<string>('');
+  const [otpCountdown, setOtpCountdown] = useState<number>(0);
+  const [isSendingOtp, setIsSendingOtp] = useState<boolean>(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState<boolean>(false);
+  const [otpSuccessMsg, setOtpSuccessMsg] = useState<string>('');
+  const [verifiedCustomer, setVerifiedCustomer] = useState<any>(null);
 
   // Check saved customer login on mount or modal open
   useEffect(() => {
@@ -220,7 +244,7 @@ export default function CartModal({
       setIsOtpSent(true);
       setOtpCountdown(60);
       setOtpSuccessMsg(`OTP sent to +91 ${cleanMobile}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Send OTP error:', err);
       if (err?.isRateLimited) {
         if (err.retryAfterSeconds) {
@@ -281,7 +305,7 @@ export default function CartModal({
       } else {
         setErrorMsg('Invalid or expired OTP code.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Verify OTP error:', err);
       if (err?.isRateLimited) {
         setErrorMsg(err.message);
@@ -400,7 +424,7 @@ export default function CartModal({
 
   // Items Subtotal calculated from active items
   const itemsSubTotal = (activeCartItems || []).reduce(
-    (sum, item) =>
+    (sum: number, item: any) =>
       sum +
       (Number(
         item.unitPrice ??
@@ -456,16 +480,16 @@ export default function CartModal({
   const hasUnavailableItems =
     Boolean(cart?.hasUnavailableItems) ||
     activeCartItems.some(
-      (item) => item.isAvailable === false
+      (item: any) => item.isAvailable === false
     );
 
-  const isItemBusy = (itemId) =>
+  const isItemBusy = (itemId: any) =>
     updatingItemId === itemId ||
     removingItemId === itemId;
 
   const handleQuantityChange = async (
-    item,
-    nextQuantity
+    item: any,
+    nextQuantity: number
   ) => {
     if (
       !onUpdateCartQuantity ||
@@ -488,7 +512,7 @@ export default function CartModal({
         nextQuantity,
         item.cookingInstruction || null
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error(
         'Update cart quantity error:',
         error
@@ -504,7 +528,7 @@ export default function CartModal({
     }
   };
 
-  const handleRemoveItem = async (itemId) => {
+  const handleRemoveItem = async (itemId: any) => {
     if (
       !onRemoveFromCart ||
       isItemBusy(itemId)
@@ -517,7 +541,7 @@ export default function CartModal({
       setRemovingItemId(itemId);
 
       await onRemoveFromCart(itemId);
-    } catch (error) {
+    } catch (error: any) {
       console.error(
         'Remove cart item error:',
         error
@@ -541,7 +565,7 @@ export default function CartModal({
       setClearingCart(true);
 
       await onClearCart();
-    } catch (error) {
+    } catch (error: any) {
       console.error(
         'Clear cart error:',
         error
@@ -657,7 +681,7 @@ export default function CartModal({
       (catalog ? catalog.restaurantId : 1);
 
     const orderItems = activeCartItems.map(
-      (item) => {
+      (item: any) => {
         const itemPrice = Number(item.price ?? item.unitPrice ?? item.amount ?? 0);
         const itemQty = Number(item.quantity || 1);
         const itemLineTotal = Number(item.totalAmount ?? (itemPrice * itemQty));
@@ -751,7 +775,7 @@ export default function CartModal({
           effectiveTable ? `&tableId=${encodeURIComponent(effectiveTable)}` : ''
         }`;
 
-        const checkoutRes =
+        const checkoutRes: any =
           await api.initiateCashfreeCheckout({
             restaurantId: restId,
             encryptedRestaurantId: encRestId,
@@ -853,7 +877,7 @@ export default function CartModal({
 
         if (
           typeof window !== 'undefined' &&
-          window.Cashfree &&
+          (window as any).Cashfree &&
           paymentSessionId
         ) {
           try {
@@ -864,7 +888,7 @@ export default function CartModal({
                 : 'sandbox';
 
             const cashfree =
-              window.Cashfree({
+              (window as any).Cashfree({
                 mode: cfMode,
               });
 
@@ -888,7 +912,7 @@ export default function CartModal({
             paymentLink;
           return;
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error(
           'Cashfree checkout API error:',
           err
@@ -1147,7 +1171,7 @@ export default function CartModal({
                   </View>
 
                   {activeCartItems.map(
-                    (item) => {
+                    (item: any) => {
                       const itemUnitPrice =
                         Number(
                           item.unitPrice ??
@@ -1164,14 +1188,6 @@ export default function CartModal({
                                   0
                               )
                         );
-
-                      const unitDescription =
-                        api.getUnitDescription
-                          ? api.getUnitDescription(
-                              item
-                            )
-                          : item.unitName ||
-                            'Piece';
 
                       return (
                         <View
@@ -1273,10 +1289,6 @@ export default function CartModal({
                                 </View>
                               </View>
 
-
-
-                              {/* Unit Price row removed */}
-
                               {Array.isArray(
                                 item.modifiers
                               ) &&
@@ -1289,7 +1301,7 @@ export default function CartModal({
                                   }
                                 >
                                   {item.modifiers.map(
-                                    (m) => (
+                                    (m: any) => (
                                       <View
                                         key={
                                           m.modifierId
@@ -1492,7 +1504,7 @@ export default function CartModal({
                     }
                   >
                     {effectiveOrderTypes.map(
-                      (type) => {
+                      (type: any) => {
                         const isSelected =
                           orderTypeId ===
                           type.id;
@@ -1546,7 +1558,7 @@ export default function CartModal({
 
                     <TextInput
                       style={
-                        styles.textInput
+                        styles.textInput as any
                       }
                       placeholder="Enter guest / diner name"
                       placeholderTextColor="#64748b"
@@ -1598,7 +1610,7 @@ export default function CartModal({
                           style={[
                             styles.textInput,
                             styles.phoneInputFlex,
-                          ]}
+                          ] as any}
                           placeholder="Enter 10-digit mobile number *"
                           placeholderTextColor="#64748b"
                           keyboardType="phone-pad"
@@ -1663,7 +1675,7 @@ export default function CartModal({
 
                           <View style={styles.otpInputRow}>
                             <TextInput
-                              style={styles.otpInput}
+                              style={styles.otpInput as any}
                               placeholder="• • • • • •"
                               placeholderTextColor="#94a3b8"
                               keyboardType="number-pad"
@@ -1733,7 +1745,7 @@ export default function CartModal({
                       style={[
                         styles.textInput,
                         styles.multilineInput,
-                      ]}
+                      ] as any}
                       placeholder="Cutlery needed, quick service, etc..."
                       placeholderTextColor="#64748b"
                       multiline

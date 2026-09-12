@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   Image,
   StyleSheet,
   ActivityIndicator,
-  Animated,
 } from 'react-native';
 import {
   Search,
@@ -16,7 +15,6 @@ import {
   Minus,
   Store,
   ChevronUp,
-  MapPin,
   Utensils,
   Clock,
   Bell,
@@ -36,8 +34,16 @@ import {
   getOriginalImageUrl,
   IMAGE_NOT_AVAILABLE,
 } from '../services/api';
+import { Catalog, Category, MenuItem, Order, OrderItem, StoreOperatingStatus, Table } from '../types';
 
-function SkeletonBox({ width, height, borderRadius = 8, style }) {
+interface SkeletonBoxProps {
+  width: number | string;
+  height: number | string;
+  borderRadius?: number;
+  style?: any;
+}
+
+function SkeletonBox({ width, height, borderRadius = 8, style }: SkeletonBoxProps) {
   if (typeof window !== 'undefined') {
     return (
       <div
@@ -58,8 +64,8 @@ function SkeletonBox({ width, height, borderRadius = 8, style }) {
     <View
       style={[
         {
-          width,
-          height,
+          width: width as any,
+          height: height as any,
           borderRadius,
           backgroundColor: '#E2E8F0',
           opacity: 0.6,
@@ -161,8 +167,14 @@ const COLORS = {
   placeholder: '#F5F3F1',
 };
 
-function ItemImageWithFallback({ uri, style, resizeMode = 'cover' }) {
-  const [hasError, setHasError] = useState(false);
+interface ItemImageWithFallbackProps {
+  uri?: string;
+  style?: any;
+  resizeMode?: 'cover' | 'contain' | 'stretch' | 'repeat' | 'center';
+}
+
+function ItemImageWithFallback({ uri, style, resizeMode = 'cover' }: ItemImageWithFallbackProps) {
+  const [hasError, setHasError] = useState<boolean>(false);
 
   useEffect(() => {
     setHasError(false);
@@ -204,6 +216,26 @@ function ItemImageWithFallback({ uri, style, resizeMode = 'cover' }) {
   );
 }
 
+export interface CustomerViewProps {
+  catalog?: Catalog | null;
+  categories?: Category[];
+  items?: MenuItem[];
+  activeTable?: Table | null;
+  activeOrder?: Order | null;
+  openOrderTracker?: (order?: Order | any) => void;
+  openScanner?: () => void;
+  openQrModal?: () => void;
+  cartItems?: OrderItem[];
+  openCart?: () => void;
+  onAddToCart?: (itemId: number | string, quantity: number, item?: MenuItem) => void | Promise<any>;
+  onUpdateCartQuantity?: (itemId: number | string, quantity: number) => void | Promise<any>;
+  onCallWaiter?: (requestType?: string) => void | Promise<any>;
+  onRequestBill?: () => void | Promise<any>;
+  openCallWaiter?: (requestType?: string) => void;
+  loading?: boolean;
+  storeOperatingStatus?: StoreOperatingStatus | null;
+}
+
 export default function CustomerView({
   catalog,
   categories,
@@ -212,6 +244,7 @@ export default function CustomerView({
   activeOrder,
   openOrderTracker,
   openScanner,
+  openQrModal,
   cartItems = [],
   openCart,
   onAddToCart,
@@ -221,12 +254,12 @@ export default function CustomerView({
   openCallWaiter,
   loading,
   storeOperatingStatus,
-}) {
-  const [selectedCategory, setSelectedCategory] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [vegOnly, setVegOnly] = useState(false);
-  const [actionLoading, setActionLoading] = useState({});
-  const [liveOrder, setLiveOrder] = useState(() => activeOrder || api.getSavedActiveOrder() || null);
+}: CustomerViewProps) {
+  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [vegOnly, setVegOnly] = useState<boolean>(false);
+  const [actionLoading, setActionLoading] = useState<Record<string | number, boolean>>({});
+  const [liveOrder, setLiveOrder] = useState<Order | null>(() => activeOrder || api.getSavedActiveOrder() || null);
 
   useEffect(() => {
     const target = activeOrder || api.getSavedActiveOrder();
@@ -244,7 +277,7 @@ export default function CustomerView({
   }, [activeOrder]);
 
   useEffect(() => {
-    const unsub = signalrService.onKitchenProgress((data) => {
+    const unsub = signalrService.onKitchenProgress((data: any) => {
       const changedId = Number(data?.orderId || data?.id || 0);
       setLiveOrder((prev) => {
         if (!prev) return prev;
@@ -261,27 +294,6 @@ export default function CustomerView({
       if (typeof unsub === 'function') unsub();
     };
   }, []);
-
-  const restaurantName =
-    catalog
-      ? catalog.restaurantName ||
-        (catalog.restaurantId ? `Restaurant #${catalog.restaurantId}` : 'Restaurant Menu')
-      : 'Restaurant Menu';
-
-  const restaurantAddress =
-    catalog?.restaurantAddress ||
-    catalog?.address ||
-    [catalog?.address, catalog?.city, catalog?.state].filter(Boolean).join(', ') ||
-    '';
-
-  const rawCover = catalog?.imageUrl || catalog?.restaurantImage || '';
-  const restaurantImageUrl = rawCover ? getOriginalImageUrl(rawCover) : '';
-
-  const rawLogo = catalog?.logoUrl || catalog?.logo || '';
-  const restaurantLogoUrl = rawLogo ? getOriginalImageUrl(rawLogo) : '';
-
-  const [logoError, setLogoError] = useState(false);
-  const [coverError, setCoverError] = useState(false);
 
   const totalCartCount =
     (cartItems || []).reduce(
@@ -353,7 +365,7 @@ export default function CustomerView({
       return true;
     });
 
-  const getCartItem = (itemId) => {
+  const getCartItem = (itemId: any) => {
     return (
       (cartItems || []).find(
         (cartItem) =>
@@ -362,7 +374,7 @@ export default function CustomerView({
     );
   };
 
-  const getCartQuantity = (itemId) => {
+  const getCartQuantity = (itemId: any) => {
     const found =
       getCartItem(itemId);
 
@@ -372,8 +384,8 @@ export default function CustomerView({
   };
 
   const getUnitPrice = (
-    item,
-    cartItem
+    item: any,
+    cartItem: any
   ) => {
     const value =
       cartItem?.unitPrice ??
@@ -390,8 +402,8 @@ export default function CustomerView({
   };
 
   const getUnitName = (
-    item,
-    cartItem
+    item: any,
+    cartItem: any
   ) => {
     const unitName =
       item?.unitName ||
@@ -415,16 +427,9 @@ export default function CustomerView({
     return unitDescription || '';
   };
 
-  /*
-   * Item preparation/cooking time comes only from the item/cart API payload.
-   * No hard-coded/default preparation time is used here.
-   *
-   * The helper accepts the common API property names used for preparation
-   * duration and also handles numeric/string values returned by the API.
-   */
   const getItemPreparationTime = (
-    item,
-    cartItem = null
+    item: any,
+    cartItem: any = null
   ) => {
     const source = item || cartItem || {};
 
@@ -457,8 +462,6 @@ export default function CustomerView({
       return '';
     }
 
-    // If the API already returns a readable value such as "15 min",
-    // preserve it instead of modifying the business/API value.
     if (typeof value === 'string') {
       const cleanValue = value.trim();
 
@@ -489,8 +492,8 @@ export default function CustomerView({
   };
 
   const runItemAction = async (
-    itemId,
-    action
+    itemId: any,
+    action: () => Promise<any> | void
   ) => {
     if (
       actionLoading[itemId]
@@ -528,8 +531,8 @@ export default function CustomerView({
   };
 
   const getDisplayImage = (
-    item,
-    cartItem = null
+    item: any,
+    cartItem: any = null
   ) => {
     if (
       !item &&
@@ -700,7 +703,7 @@ export default function CustomerView({
 
         {/* Dine-In Table Seating & Waiter Request Bar / Occupied Notice */}
         {(() => {
-          const currentTable = activeTable || (
+          const currentTable: any = activeTable || (
             activeOrder?.tableId || activeOrder?.tableName
               ? {
                   id: activeOrder.tableId,
@@ -845,7 +848,7 @@ export default function CustomerView({
           <View style={styles.searchBox}>
             <Search size={18} color="#64748B" />
             <TextInput
-              style={styles.searchInput}
+              style={styles.searchInput as any}
               placeholder="Search food, drinks, desserts..."
               placeholderTextColor="#94A3B8"
               value={searchQuery}
@@ -861,7 +864,7 @@ export default function CustomerView({
             onPress={() => setVegOnly(!vegOnly)}
             activeOpacity={0.85}
           >
-            <View style={[styles.vegDot, vegOnly && styles.vegDotActive]} />
+            <View style={[styles.vegDot, vegOnly && (styles as any).vegDotActive]} />
             <Text
               style={[
                 styles.vegText,
@@ -905,7 +908,7 @@ export default function CustomerView({
                 styles.categoryChip,
                 selectedCategory === cat.categoryId && styles.categoryChipActive,
               ]}
-              onPress={() => setSelectedCategory(cat.categoryId)}
+              onPress={() => setSelectedCategory(cat.categoryId ?? null)}
               activeOpacity={0.85}
             >
               <Text
@@ -983,7 +986,7 @@ export default function CustomerView({
 
                 const itemBusy =
                   !!actionLoading[
-                    item.itemId
+                    item.itemId ?? ''
                   ];
 
                 const imageUrl =
@@ -1016,13 +1019,14 @@ export default function CustomerView({
                         if (activeTable?.occupiedByOther || activeTable?.isLocked) return;
                         if (
                           item.isAvailable &&
-                          qty === 0
+                          qty === 0 &&
+                          onAddToCart
                         ) {
                           runItemAction(
                             item.itemId,
                             () =>
                               onAddToCart(
-                                item.itemId,
+                                item.itemId ?? 0,
                                 1,
                                 item
                               )
@@ -1230,16 +1234,18 @@ export default function CustomerView({
                                 itemBusy &&
                                   styles.qtyBtnBusy,
                               ]}
-                              onPress={() =>
-                                runItemAction(
-                                  item.itemId,
-                                  () =>
-                                    onUpdateCartQuantity(
-                                      item.itemId,
-                                      qty - 1
-                                    )
-                                )
-                              }
+                              onPress={() => {
+                                if (onUpdateCartQuantity) {
+                                  runItemAction(
+                                    item.itemId,
+                                    () =>
+                                      onUpdateCartQuantity(
+                                        item.itemId ?? 0,
+                                        qty - 1
+                                      )
+                                  );
+                                }
+                              }}
                               disabled={
                                 itemBusy
                               }
@@ -1274,16 +1280,18 @@ export default function CustomerView({
                                 (itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)) &&
                                   styles.qtyBtnBusy,
                               ]}
-                              onPress={() =>
-                                runItemAction(
-                                  item.itemId,
-                                  () =>
-                                    onUpdateCartQuantity(
-                                      item.itemId,
-                                      qty + 1
-                                    )
-                                )
-                              }
+                              onPress={() => {
+                                if (onUpdateCartQuantity) {
+                                  runItemAction(
+                                    item.itemId,
+                                    () =>
+                                      onUpdateCartQuantity(
+                                        item.itemId ?? 0,
+                                        qty + 1
+                                      )
+                                  );
+                                }
+                              }}
                               disabled={
                                 itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
                               }
@@ -1303,17 +1311,19 @@ export default function CustomerView({
                               Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) &&
                                 styles.addBtnDisabled,
                             ]}
-                            onPress={() =>
-                              runItemAction(
-                                item.itemId,
-                                () =>
-                                  onAddToCart(
-                                    item.itemId,
-                                    1,
-                                    item
-                                  )
-                              )
-                            }
+                            onPress={() => {
+                              if (onAddToCart) {
+                                runItemAction(
+                                  item.itemId,
+                                  () =>
+                                    onAddToCart(
+                                      item.itemId ?? 0,
+                                      1,
+                                      item
+                                    )
+                                );
+                              }
+                            }}
                             disabled={
                               itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
                             }
@@ -1420,12 +1430,11 @@ export default function CustomerView({
       )}
 
       {/* FLOATING LIVE KITCHEN PROGRESS BAR */}
-      {/* FLOATING LIVE KITCHEN PROGRESS BAR */}
       {(() => {
-        if (!liveOrder || ['Cancelled', 'Settled'].includes(liveOrder.orderStatus)) return null;
+        if (!liveOrder || ['Cancelled', 'Settled'].includes(liveOrder.orderStatus || '')) return null;
 
-        const isKitchenActive = typeof api?.isLiveKitchenActive === 'function'
-          ? api.isLiveKitchenActive(liveOrder, catalog, storeOperatingStatus)
+        const isKitchenActive = typeof (api as any)?.isLiveKitchenActive === 'function'
+          ? (api as any).isLiveKitchenActive(liveOrder, catalog, storeOperatingStatus)
           : (liveOrder?.isKitchenActive ?? catalog?.isKitchenActive ?? true);
 
         let barStyle = styles.liveOrderBarPlaced;

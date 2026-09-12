@@ -1,13 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, TextInput, Modal, StyleSheet } from 'react-native';
-import { X, QrCode, Camera, Check, Building, Lock } from 'lucide-react';
+import { X, QrCode, Check } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { decryptRestaurantId, encryptRestaurantId, KNOWN_ENCRYPTED_IDS } from '../services/api';
+import { encryptRestaurantId, KNOWN_ENCRYPTED_IDS } from '../services/api';
 
-export default function QrScannerModal({ visible, onClose, onSelectScanResult, activeEncryptedId, activeRestaurantId }) {
-  const [manualText, setManualText] = useState('');
+export interface QrScannerModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onSelectScanResult: (encId: string, tableId: number) => void;
+  activeEncryptedId?: string;
+  activeRestaurantId?: number | string;
+}
 
-  const parseQrText = (decodedText) => {
+export default function QrScannerModal({
+  visible,
+  onClose,
+  onSelectScanResult,
+  activeEncryptedId,
+  activeRestaurantId,
+}: QrScannerModalProps) {
+  const [manualText, setManualText] = useState<string>('');
+
+  const parseQrText = (decodedText: string): { encId: string; tableId: number } => {
     let encId = activeEncryptedId || 'uqQTzsGyDJy4_TBVeYXCfg';
     let tableId = 1;
 
@@ -54,13 +68,13 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
       );
 
       scanner.render(
-        (decodedText) => {
+        (decodedText: string) => {
           scanner.clear();
           const parsed = parseQrText(decodedText);
           onSelectScanResult(parsed.encId, parsed.tableId);
           onClose();
         },
-        (error) => {
+        (_error: any) => {
           // ignore scan frame errors
         }
       );
@@ -148,7 +162,7 @@ export default function QrScannerModal({ visible, onClose, onSelectScanResult, a
           {/* Manual Input Fallback */}
           <View style={styles.manualSection}>
             <TextInput
-              style={styles.manualInput}
+              style={styles.manualInput as any}
               placeholder="Paste QR URL e.g. ?encRestId=uqQTzsGyDJy4_TBVeYXCfg&tableId=3"
               placeholderTextColor="#64748b"
               value={manualText}

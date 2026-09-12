@@ -19,6 +19,29 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { encryptRestaurantId } from '../services/api';
+import { Catalog, Table } from '../types';
+
+export interface DownloadQrCodeImageOptions {
+  svgElementId: string;
+  title?: string;
+  subtitle?: string;
+  fileName?: string;
+  tableNumber?: string | number | null;
+}
+
+export interface DownloadQrCodeSvgOptions {
+  svgElementId: string;
+  fileName?: string;
+}
+
+export interface RestaurantQrModalProps {
+  visible: boolean;
+  onClose: () => void;
+  catalog?: Catalog | null;
+  restaurantName?: string;
+  activeTable?: Table | null;
+  tables?: Table[];
+}
 
 /**
  * Utility to generate a high-res branded PNG image from an SVG QR code element
@@ -29,7 +52,7 @@ export function downloadQrCodeImage({
   subtitle = 'Scan with Phone to View Menu & Order',
   fileName = 'restaurant-qr.png',
   tableNumber = null,
-}) {
+}: DownloadQrCodeImageOptions) {
   const svg = document.getElementById(svgElementId);
   if (!svg) {
     console.warn(`SVG element with id "${svgElementId}" not found for download.`);
@@ -39,6 +62,7 @@ export function downloadQrCodeImage({
   const svgData = new XMLSerializer().serializeToString(svg);
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
+  if (!ctx) return;
   const img = new Image();
 
   img.onload = () => {
@@ -141,7 +165,7 @@ export function downloadQrCodeImage({
 export function downloadQrCodeSvg({
   svgElementId,
   fileName = 'restaurant-qr.svg',
-}) {
+}: DownloadQrCodeSvgOptions) {
   const svg = document.getElementById(svgElementId);
   if (!svg) return;
 
@@ -167,8 +191,8 @@ export default function RestaurantQrModal({
   restaurantName,
   activeTable,
   tables = [],
-}) {
-  const [selectedTableId, setSelectedTableId] = useState(
+}: RestaurantQrModalProps) {
+  const [selectedTableId, setSelectedTableId] = useState<number | string | null>(
     activeTable ? activeTable.id : null
   );
   const [copied, setCopied] = useState(false);
@@ -234,7 +258,7 @@ export default function RestaurantQrModal({
       } else {
         await handleCopyLink();
       }
-    } catch (error) {
+    } catch (error: any) {
       if (error?.name !== 'AbortError') {
         console.error('QR share error:', error);
 

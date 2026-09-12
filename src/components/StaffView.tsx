@@ -8,7 +8,6 @@ import {
   StyleSheet,
   ActivityIndicator,
   Modal,
-  Image,
 } from 'react-native';
 import {
   LayoutGrid,
@@ -17,39 +16,57 @@ import {
   QrCode as QrIcon,
   Plus,
   CheckCircle,
-  Clock,
   User,
   Phone,
   Lock,
   ArrowRight,
   RefreshCw,
-  Sliders,
   IndianRupee,
   AlertTriangle,
-  Send,
   Building,
   Download,
   Printer,
   Copy,
   Check,
   Store,
-  ExternalLink,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { encryptRestaurantId } from '../services/api';
 import { downloadQrCodeImage, downloadQrCodeSvg } from './RestaurantQrModal';
+import { Catalog, MenuItem, Order, Restaurant, StaffUser, Table } from '../types';
+
+export interface StaffViewProps {
+  staffUser?: StaffUser | null;
+  restaurants?: Restaurant[];
+  selectedRestaurant?: Restaurant | any;
+  catalog?: Catalog | null;
+  onSelectRestaurant?: (restaurant: Restaurant | any) => void;
+  onGenerateOtp: (mobile: string) => Promise<any> | any;
+  onLogin: (mobile: string, otp: string) => Promise<any> | any;
+  tables?: Table[];
+  orders?: Order[];
+  items?: MenuItem[];
+  onUpdateTableStatus?: (tableId: number | string, status: string) => Promise<any> | any;
+  onSettleTable?: (tableId: number | string) => Promise<any> | any;
+  onUpdateOrderStatus?: (orderId: number | string, status: string) => Promise<any> | any;
+  onUpdateKitchenStatus?: (orderId: number | string, status: string) => Promise<any> | any;
+  onAddItemToOrder: (orderPayload: any, itemId?: any, qty?: any, price?: any) => Promise<any> | any;
+  onRefreshData?: () => void;
+  onOpenQrGenerator?: () => void;
+  orderTypes?: any[];
+}
 
 export default function StaffView({
   staffUser,
-  restaurants,
+  restaurants = [],
   selectedRestaurant,
   catalog,
   onSelectRestaurant,
   onGenerateOtp,
   onLogin,
-  tables,
-  orders,
-  items,
+  tables = [],
+  orders = [],
+  items = [],
   onUpdateTableStatus,
   onSettleTable,
   onUpdateOrderStatus,
@@ -58,15 +75,15 @@ export default function StaffView({
   onRefreshData,
   onOpenQrGenerator,
   orderTypes = [],
-}) {
+}: StaffViewProps) {
   // Login State
-  const [mobile, setMobile] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [devOtpHint, setDevOtpHint] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError] = useState('');
-  const [otpCountdown, setOtpCountdown] = useState(0);
+  const [mobile, setMobile] = useState<string>('');
+  const [otpCode, setOtpCode] = useState<string>('');
+  const [otpSent, setOtpSent] = useState<boolean>(false);
+  const [devOtpHint, setDevOtpHint] = useState<string>('');
+  const [loginLoading, setLoginLoading] = useState<boolean>(false);
+  const [loginError, setLoginError] = useState<string>('');
+  const [otpCountdown, setOtpCountdown] = useState<number>(0);
 
   // OTP Countdown Timer
   useEffect(() => {
@@ -78,21 +95,21 @@ export default function StaffView({
   }, [otpCountdown]);
 
   // Dashboard Tabs
-  const [activeTab, setActiveTab] = useState('tables'); // 'tables', 'orders', 'kds', 'qr'
-  const [orderStatusFilter, setOrderStatusFilter] = useState('All');
-  const [copiedQrId, setCopiedQrId] = useState(null);
+  const [activeTab, setActiveTab] = useState<string>('tables'); // 'tables', 'orders', 'kds', 'qr'
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('All');
+  const [copiedQrId, setCopiedQrId] = useState<string | null>(null);
 
   // Modal State for Adding Items to Order
-  const [selectedOrderForAdd, setSelectedOrderForAdd] = useState(null);
-  const [selectedItemToAdd, setSelectedItemToAdd] = useState(null);
-  const [addQty, setAddQty] = useState(1);
+  const [selectedOrderForAdd, setSelectedOrderForAdd] = useState<any>(null);
+  const [selectedItemToAdd, setSelectedItemToAdd] = useState<any>(null);
+  const [addQty, setAddQty] = useState<number>(1);
 
   // Modal State for Creating Order for Table directly by Staff
-  const [createOrderTable, setCreateOrderTable] = useState(null);
-  const [selectedStaffItems, setSelectedStaffItems] = useState([]);
-  const [staffGuestName, setStaffGuestName] = useState('');
-  const [staffGuestMobile, setStaffGuestMobile] = useState('');
-  const [staffOrderTypeId, setStaffOrderTypeId] = useState(1);
+  const [createOrderTable, setCreateOrderTable] = useState<any>(null);
+  const [selectedStaffItems, setSelectedStaffItems] = useState<any[]>([]);
+  const [staffGuestName, setStaffGuestName] = useState<string>('');
+  const [staffGuestMobile, setStaffGuestMobile] = useState<string>('');
+  const [staffOrderTypeId, setStaffOrderTypeId] = useState<number>(1);
 
   // Handle OTP request
   const handleRequestOtp = async () => {
@@ -101,14 +118,14 @@ export default function StaffView({
     setLoginLoading(true);
     setLoginError('');
     try {
-      const res = await onGenerateOtp(mobile);
+      const res: any = await onGenerateOtp(mobile);
       setOtpSent(true);
       setOtpCountdown(30);
       if (res && res.otpCode) {
         setDevOtpHint(res.otpCode);
         setOtpCode(res.otpCode); // Pre-fill in dev mode for smooth experience!
       }
-    } catch (err) {
+    } catch (err: any) {
       if (err?.isRateLimited) {
         if (err.retryAfterSeconds) {
           setOtpCountdown(err.retryAfterSeconds);
@@ -129,7 +146,7 @@ export default function StaffView({
     setLoginError('');
     try {
       await onLogin(mobile, otpCode);
-    } catch (err) {
+    } catch (err: any) {
       if (err?.isRateLimited) {
         setLoginError(err.message);
       } else {
@@ -141,7 +158,7 @@ export default function StaffView({
   };
 
   // Staff POS item add toggle
-  const toggleStaffItem = (item) => {
+  const toggleStaffItem = (item: any) => {
     const existing = selectedStaffItems.find((i) => i.itemId === item.itemId);
     if (existing) {
       setSelectedStaffItems(selectedStaffItems.filter((i) => i.itemId !== item.itemId));
@@ -150,7 +167,7 @@ export default function StaffView({
     }
   };
 
-  const updateStaffItemQty = (itemId, qty) => {
+  const updateStaffItemQty = (itemId: any, qty: number) => {
     if (qty <= 0) {
       setSelectedStaffItems(selectedStaffItems.filter((i) => i.itemId !== itemId));
     } else {
@@ -203,7 +220,7 @@ export default function StaffView({
               <View style={styles.loginInputWrapper}>
                 <Phone size={18} color="#64748b" />
                 <TextInput
-                  style={styles.loginInput}
+                  style={styles.loginInput as any}
                   placeholder="Enter 10-digit mobile"
                   placeholderTextColor="#64748b"
                   keyboardType="phone-pad"
@@ -219,7 +236,7 @@ export default function StaffView({
                 <View style={styles.loginInputWrapper}>
                   <Lock size={18} color="#64748b" />
                   <TextInput
-                    style={styles.loginInput}
+                    style={styles.loginInput as any}
                     placeholder="Enter 6-digit OTP"
                     placeholderTextColor="#64748b"
                     keyboardType="number-pad"
@@ -421,10 +438,10 @@ export default function StaffView({
                         <Text style={styles.tableActionBtnPrimaryText}>New Order</Text>
                       </TouchableOpacity>
 
-                      {table.status === 'Occupied' && (
+                      {table.status === 'Occupied' && onSettleTable && (
                         <TouchableOpacity
                           style={styles.tableActionBtnSettle}
-                          onPress={() => onSettleTable(table.id)}
+                          onPress={() => onSettleTable(table.id ?? '')}
                         >
                           <IndianRupee size={14} color="#10b981" />
                           <Text style={styles.tableActionBtnSettleText}>Settle Table</Text>
@@ -519,7 +536,7 @@ export default function StaffView({
 
                       {/* Items List */}
                       <View style={styles.orderItemsBox}>
-                        {ord.items && ord.items.map((it, idx) => (
+                        {ord.items && ord.items.map((it: any, idx: number) => (
                           <View key={idx} style={styles.orderItemLine}>
                             <Text style={styles.orderItemQty}>{it.quantity}x</Text>
                             <Text style={styles.orderItemName}>{it.itemName}{it.unitName ? ` (${it.unitName})` : ''}</Text>
@@ -541,37 +558,37 @@ export default function StaffView({
                             <Text style={styles.addMoreBtnText}>+ Add Dish</Text>
                           </TouchableOpacity>
 
-                          {(ord.orderStatus === 'Pending' || ord.orderStatus === 'Placed') && (
+                          {(ord.orderStatus === 'Pending' || ord.orderStatus === 'Placed') && onUpdateOrderStatus && (
                             <TouchableOpacity
                               style={styles.statusUpdateBtnConfirm}
-                              onPress={() => onUpdateOrderStatus(ord.id, 'Confirmed')}
+                              onPress={() => onUpdateOrderStatus(ord.id ?? '', 'Confirmed')}
                             >
                               <Text style={styles.statusUpdateBtnText}>✓ Confirm Order</Text>
                             </TouchableOpacity>
                           )}
 
-                          {ord.orderStatus === 'Confirmed' && (
+                          {ord.orderStatus === 'Confirmed' && onUpdateOrderStatus && (
                             <TouchableOpacity
                               style={styles.statusUpdateBtnPrep}
-                              onPress={() => onUpdateOrderStatus(ord.id, 'Preparing')}
+                              onPress={() => onUpdateOrderStatus(ord.id ?? '', 'Preparing')}
                             >
                               <Text style={styles.statusUpdateBtnText}>Start Cooking</Text>
                             </TouchableOpacity>
                           )}
 
-                          {ord.orderStatus === 'Preparing' && (
+                          {ord.orderStatus === 'Preparing' && onUpdateOrderStatus && (
                             <TouchableOpacity
                               style={styles.statusUpdateBtnReady}
-                              onPress={() => onUpdateOrderStatus(ord.id, 'Ready')}
+                              onPress={() => onUpdateOrderStatus(ord.id ?? '', 'Ready')}
                             >
                               <Text style={styles.statusUpdateBtnText}>Mark Ready</Text>
                             </TouchableOpacity>
                           )}
 
-                          {ord.orderStatus === 'Ready' && (
+                          {ord.orderStatus === 'Ready' && onUpdateOrderStatus && (
                             <TouchableOpacity
                               style={styles.statusUpdateBtnServe}
-                              onPress={() => onUpdateOrderStatus(ord.id, 'Delivered')}
+                              onPress={() => onUpdateOrderStatus(ord.id ?? '', 'Delivered')}
                             >
                               <Text style={styles.statusUpdateBtnText}>Serve Table</Text>
                             </TouchableOpacity>
@@ -596,7 +613,7 @@ export default function StaffView({
 
             <View style={styles.kdsGrid}>
               {orders
-                .filter((o) => ['Pending', 'Confirmed', 'Preparing'].includes(o.orderStatus))
+                .filter((o) => ['Pending', 'Confirmed', 'Preparing'].includes(o.orderStatus ?? ''))
                 .map((ticket) => (
                   <View key={ticket.id} style={styles.kdsCard}>
                     <View style={styles.kdsHeader}>
@@ -605,7 +622,7 @@ export default function StaffView({
                     </View>
 
                     <ScrollView style={styles.kdsItemsList}>
-                      {ticket.items && ticket.items.map((it, idx) => (
+                      {ticket.items && ticket.items.map((it: any, idx: number) => (
                         <View key={idx} style={styles.kdsItemLine}>
                           <Text style={styles.kdsQty}>{it.quantity}x</Text>
                           <Text style={styles.kdsItemName}>{it.itemName}</Text>
@@ -619,13 +636,15 @@ export default function StaffView({
                       </View>
                     ) : null}
 
-                    <TouchableOpacity
-                      style={styles.kdsReadyBtn}
-                      onPress={() => onUpdateKitchenStatus(ticket.id, 'Ready')}
-                    >
-                      <CheckCircle size={16} color="#0f172a" />
-                      <Text style={styles.kdsReadyBtnText}>BUMP ORDER READY</Text>
-                    </TouchableOpacity>
+                    {onUpdateKitchenStatus && (
+                      <TouchableOpacity
+                        style={styles.kdsReadyBtn}
+                        onPress={() => onUpdateKitchenStatus(ticket.id ?? '', 'Ready')}
+                      >
+                        <CheckCircle size={16} color="#0f172a" />
+                        <Text style={styles.kdsReadyBtnText}>BUMP ORDER READY</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ))}
             </View>
@@ -649,7 +668,6 @@ export default function StaffView({
                     // Download all table QRs sequentially
                     tables.forEach((table, idx) => {
                       setTimeout(() => {
-                        const rId = table.rId || table.restaurantId || (selectedRestaurant ? selectedRestaurant.id : 1);
                         const restName = selectedRestaurant?.name || catalog?.restaurantName || 'Menza Fine Dining';
                         const cleanName = restName.toLowerCase().replace(/[^a-z0-9]/g, '-');
                         downloadQrCodeImage({
@@ -851,14 +869,14 @@ export default function StaffView({
 
               <View style={styles.posInputsRow}>
                 <TextInput
-                  style={styles.posInput}
+                  style={styles.posInput as any}
                   placeholder="Guest Name *"
                   placeholderTextColor="#64748b"
                   value={staffGuestName}
                   onChangeText={setStaffGuestName}
                 />
                 <TextInput
-                  style={styles.posInput}
+                  style={styles.posInput as any}
                   placeholder="Guest Mobile *"
                   placeholderTextColor="#64748b"
                   keyboardType="phone-pad"
@@ -875,7 +893,7 @@ export default function StaffView({
                     { id: 2, typeName: 'Self Pickup' },
                     { id: 3, typeName: 'Delivery' },
                     { id: 4, typeName: 'Counter POS' }
-                  ]).map((t) => (
+                  ]).map((t: any) => (
                     <TouchableOpacity
                       key={t.id}
                       style={[styles.staffOrderTypePill, staffOrderTypeId === t.id && styles.staffOrderTypePillActive]}

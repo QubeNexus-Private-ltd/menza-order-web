@@ -23,8 +23,21 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { checkRateLimit } from '../services/rateLimiter';
+import { Catalog, Table } from '../types';
 
-const SERVICE_OPTIONS = [
+export interface ServiceOption {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: any;
+  badge?: string;
+  color: string;
+  bg: string;
+  border: string;
+  activeBg: string;
+}
+
+const SERVICE_OPTIONS: ServiceOption[] = [
   {
     id: 'CALL_WAITER',
     title: 'Call Waiter',
@@ -68,6 +81,23 @@ const SERVICE_OPTIONS = [
   },
 ];
 
+export interface SuccessInfo {
+  message: string;
+  fallbackToCounter: boolean;
+  activeWaiterCount: number;
+}
+
+export interface CallWaiterModalProps {
+  visible: boolean;
+  onClose: () => void;
+  activeTable?: Table | null;
+  catalog?: Catalog | null;
+  initialRequestType?: string;
+  onCallWaiter?: (requestType: string, customNote: string) => Promise<any> | any;
+  onRequestBill?: () => Promise<any> | any;
+  openScanner?: () => void;
+}
+
 export default function CallWaiterModal({
   visible,
   onClose,
@@ -77,13 +107,13 @@ export default function CallWaiterModal({
   onCallWaiter,
   onRequestBill,
   openScanner,
-}) {
-  const [selectedType, setSelectedType] = useState(initialRequestType || 'CALL_WAITER');
-  const [customNote, setCustomNote] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [successInfo, setSuccessInfo] = useState(null);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+}: CallWaiterModalProps) {
+  const [selectedType, setSelectedType] = useState<string>(initialRequestType || 'CALL_WAITER');
+  const [customNote, setCustomNote] = useState<string>('');
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [successInfo, setSuccessInfo] = useState<SuccessInfo | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
 
   // Sync initial type when opening
   useEffect(() => {
@@ -140,7 +170,7 @@ export default function CallWaiterModal({
     setErrorMessage('');
 
     try {
-      let result = null;
+      let result: any = null;
       if (selectedType === 'REQUEST_BILL' && typeof onRequestBill === 'function') {
         result = await onRequestBill();
       } else if (typeof onCallWaiter === 'function') {
@@ -159,7 +189,7 @@ export default function CallWaiterModal({
           onClose();
         }
       }, 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Call waiter error:', err);
       if (err?.isRateLimited) {
         setErrorMessage(err.message || 'Rate limit active. Please wait a moment.');
@@ -490,6 +520,9 @@ const styles = StyleSheet.create({
   bodyContent: {
     padding: 20,
     paddingBottom: 28,
+  },
+  formContainer: {
+    gap: 0,
   },
   tableBadgeRow: {
     flexDirection: 'row',
