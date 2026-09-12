@@ -35,6 +35,7 @@ import {
   IMAGE_NOT_AVAILABLE,
 } from '../services/api';
 import { Catalog, Category, MenuItem, Order, OrderItem, StoreOperatingStatus, Table } from '../types';
+import Dish3DShuffle from './Dish3DShuffle';
 
 interface SkeletonBoxProps {
   width: number | string;
@@ -875,6 +876,16 @@ export default function CustomerView({
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* 3D Shuffle Deck for Chef's Specials & Top Dishes */}
+        {!searchQuery.trim() && selectedCategory === null && (
+          <Dish3DShuffle
+            items={items || []}
+            onAddToCart={onAddToCart}
+            cartItems={cartItems}
+            currencySymbol={catalog?.currencySymbol || '₹'}
+          />
+        )}
 
         {/* Category Filter Pills */}
         <ScrollView
