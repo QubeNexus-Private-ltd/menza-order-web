@@ -99,6 +99,45 @@ const money = (value) => {
     : '0.00';
 };
 
+const getQuantityUnitText = (quantity, item, catalog = null) => {
+  const qty = Number(quantity || 1);
+  const catalogItem = Array.isArray(catalog?.items)
+    ? catalog.items.find((ci) => Number(ci.itemId || ci.id) === Number(item?.itemId || item?.id))
+    : null;
+
+  let unit =
+    item?.unitName ||
+    item?.unitDescription ||
+    catalogItem?.unitName ||
+    catalogItem?.unitDescription;
+
+  if (!unit || !isNaN(Number(unit))) {
+    if (typeof api.getUnitDescription === 'function') {
+      unit = api.getUnitDescription(item || catalogItem);
+    }
+  }
+
+  if (!unit || typeof unit !== 'string' || unit.trim() === '') {
+    unit = 'no.';
+  }
+
+  const cleanUnit = unit.trim();
+  const lower = cleanUnit.toLowerCase();
+
+  if (
+    lower === 'no.' ||
+    lower === 'no' ||
+    lower === 'nos' ||
+    lower === 'nos.' ||
+    lower === 'pc' ||
+    lower === 'pcs'
+  ) {
+    return `${qty}${cleanUnit}`;
+  }
+
+  return `${qty} ${cleanUnit}`;
+};
+
 export default function CartModal({
   visible,
   onClose,
@@ -568,6 +607,20 @@ export default function CartModal({
       }
     }
 
+    if (activeTable?.isCleaning) {
+      setErrorMsg(
+        `Table ${activeTable.tableName || activeTable.id} is currently being sanitized. Please wait for staff to complete turnover.`
+      );
+      return;
+    }
+
+    if (activeTable?.isReserved) {
+      setErrorMsg(
+        `Table ${activeTable.tableName || activeTable.id} is reserved for scheduled guests. Please speak to staff to be seated.`
+      );
+      return;
+    }
+
     if (activeTable?.occupiedByOther) {
       setErrorMsg(
         `Table ${activeTable.tableName || activeTable.id} is currently occupied by another party. Orders cannot be placed for this table.`
@@ -604,13 +657,25 @@ export default function CartModal({
       (catalog ? catalog.restaurantId : 1);
 
     const orderItems = activeCartItems.map(
-      (item) => ({
-        itemId: item.itemId,
-        quantity: item.quantity,
-        unitId: item.unit || 1,
-        cookingInstruction:
-          item.cookingInstruction || null,
-      })
+      (item) => {
+        const itemPrice = Number(item.price ?? item.unitPrice ?? item.amount ?? 0);
+        const itemQty = Number(item.quantity || 1);
+        const itemLineTotal = Number(item.totalAmount ?? (itemPrice * itemQty));
+
+        return {
+          itemId: item.itemId,
+          itemName: item.itemName || item.name || '',
+          quantity: itemQty,
+          unitId: item.unit || 1,
+          unitName: item.unitName || null,
+          price: itemPrice,
+          unitPrice: itemPrice,
+          amount: itemPrice,
+          totalAmount: itemLineTotal,
+          cookingInstruction:
+            item.cookingInstruction || null,
+        };
+      }
     );
 
     const orderPayload = {
@@ -680,6 +745,12 @@ export default function CartModal({
           catalog?.encryptedRestaurantId ||
           api.encryptRestaurantId(restId);
 
+        const returnOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+        const returnPathname = typeof window !== 'undefined' ? window.location.pathname : '';
+        const customReturnUrl = `${returnOrigin}${returnPathname}?order_id={order_id}&r=${encodeURIComponent(encRestId)}${
+          effectiveTable ? `&tableId=${encodeURIComponent(effectiveTable)}` : ''
+        }`;
+
         const checkoutRes =
           await api.initiateCashfreeCheckout({
             restaurantId: restId,
@@ -694,6 +765,7 @@ export default function CartModal({
             isTableOrderingEnabled:
               isTableOrdering,
             orderNotes: remarks.trim(),
+            returnUrl: customReturnUrl,
           });
 
         const paymentSessionId =
@@ -715,11 +787,21 @@ export default function CartModal({
         // Store pending order in session/local storage to be placed ONLY AFTER payment is confirmed
         const pendingOrderPayload = {
           ...orderPayload,
+          restaurantId: restId,
+          encryptedRestaurantId: encRestId,
+          customerName: guestName.trim() || 'Guest Diner',
+          name: guestName.trim() || 'Guest Diner',
+          customerPhone: cleanPhone,
+          mobileNumber: cleanPhone,
+          customerEmail: `${cleanPhone}@menza.customer`,
+          otpCode: isVerified ? null : (otpCode.trim() || null),
+          customerUserId: verifiedCustomer?.userId || null,
           tableId:
             isTableOrdering && activeTable
               ? activeTable.id
               : null,
           tableNumber: effectiveTable,
+          deliveryType: activeTable ? 'Dine-In' : 'Takeaway / Counter',
           paymentMode: 'CASHFREE',
           paymentType: 'ONLINE_CASHFREE',
           paymentStatus: 'Paid',
@@ -727,23 +809,43 @@ export default function CartModal({
           paymentOrderId: cashfreeOrderId,
           cashfreeOrderId,
           subTotal: subTotal,
+          itemTotal: subTotal,
+          orderAmount: subTotal,
           cgstAmount: cgst,
           sgstAmount: sgst,
+          taxAmount: cgst + sgst,
           totalAmount: grandTotal,
+          items: orderItems,
+          createdAt: new Date().toISOString(),
         };
 
-        if (typeof window !== 'undefined' && cashfreeOrderId) {
+        if (typeof window !== 'undefined') {
           try {
-            sessionStorage.setItem(
-              'pending_cf_order_' + cashfreeOrderId,
-              JSON.stringify(pendingOrderPayload)
-            );
+            if (cashfreeOrderId) {
+              sessionStorage.setItem(
+                'pending_cf_order_' + cashfreeOrderId,
+                JSON.stringify(pendingOrderPayload)
+              );
+              localStorage.setItem(
+                'pending_cf_order_' + cashfreeOrderId,
+                JSON.stringify(pendingOrderPayload)
+              );
+            }
             localStorage.setItem(
-              'pending_cf_order_' + cashfreeOrderId,
+              'pending_cf_order_latest',
               JSON.stringify(pendingOrderPayload)
             );
+            localStorage.setItem('menza_last_rest_id', String(restId));
+            if (encRestId) {
+              localStorage.setItem('menza_last_enc_rest_id', String(encRestId));
+            }
+            if (effectiveTable) {
+              localStorage.setItem('menza_last_table_id', String(effectiveTable));
+            }
             // Join real-time SignalR order group for instant settlement updates
-            joinOrderGroup(cashfreeOrderId);
+            if (cashfreeOrderId) {
+              joinOrderGroup(cashfreeOrderId);
+            }
           } catch (storageErr) {
             console.warn('Could not cache pending order payload:', storageErr);
           }
@@ -795,28 +897,15 @@ export default function CartModal({
         setErrorMsg(
           err?.response?.data?.message ||
             err?.message ||
-            'Unable to initiate Cashfree payment. Please try again or choose Pay at Counter.'
+            'Unable to initiate online payment. Please try again or ask your waiter to take your order.'
         );
 
         setProcessingPayment(false);
       }
     } else {
-      try {
-        await onPlaceOrder(
-          orderPayload
-        );
-      } catch (error) {
-        console.error(
-          'Place order error:',
-          error
-        );
-
-        setErrorMsg(
-          error?.response?.data?.message ||
-            error?.message ||
-            'Unable to place order.'
-        );
-      }
+      setErrorMsg(
+        'QR ordering requires Online Payment (Cashfree/UPI) before order creation. Prefer to pay with Cash? Your waiter can take your order directly at your table/Give order at POS Counter.'
+      );
     }
   };
 
@@ -965,26 +1054,35 @@ export default function CartModal({
               </View>
             ) : (
               <>
-                {activeTable?.occupiedByOther && (
-                  <View
-                    style={
-                      styles.tableOccupiedCartBanner
-                    }
-                  >
-                    <AlertCircle
-                      size={18}
-                      color="#e11d48"
-                    />
-
-                    <Text
-                      style={
-                        styles.tableOccupiedCartBannerText
-                      }
-                    >
+                {activeTable?.isCleaning ? (
+                  <View style={[styles.tableOccupiedCartBanner, { backgroundColor: '#f0f9ff', borderColor: '#bae6fd' }]}>
+                    <AlertCircle size={18} color="#0284c7" />
+                    <Text style={[styles.tableOccupiedCartBannerText, { color: '#0369a1' }]}>
+                      Table {activeTable.tableName || activeTable.id} is being sanitized. Please wait a moment.
+                    </Text>
+                  </View>
+                ) : activeTable?.isReserved ? (
+                  <View style={[styles.tableOccupiedCartBanner, { backgroundColor: '#faf5ff', borderColor: '#e9d5ff' }]}>
+                    <AlertCircle size={18} color="#7c3aed" />
+                    <Text style={[styles.tableOccupiedCartBannerText, { color: '#6d28d9' }]}>
+                      Table {activeTable.tableName || activeTable.id} is reserved. Please consult staff.
+                    </Text>
+                  </View>
+                ) : activeTable?.occupiedByOther ? (
+                  <View style={styles.tableOccupiedCartBanner}>
+                    <AlertCircle size={18} color="#e11d48" />
+                    <Text style={styles.tableOccupiedCartBannerText}>
                       Table {activeTable.tableName || activeTable.id} is occupied by another party. Online ordering is locked for this table.
                     </Text>
                   </View>
-                )}
+                ) : activeTable?.isOccupied ? (
+                  <View style={[styles.tableOccupiedCartBanner, { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }]}>
+                    <Check size={18} color="#15803d" />
+                    <Text style={[styles.tableOccupiedCartBannerText, { color: '#166534' }]}>
+                      Table {activeTable.tableName || activeTable.id} (Active Session) • Items will be added to your table bill.
+                    </Text>
+                  </View>
+                ) : null}
 
                 {hasUnavailableItems && (
                   <View
@@ -1155,22 +1253,6 @@ export default function CartModal({
                                 </Text>
                               ) : null}
 
-                              {/* Changed:
-                                  "Unit: Plate"
-                                  is now simply "Plate"
-                              */}
-                              {unitDescription ? (
-                                <Text
-                                  style={
-                                    styles.itemMetaText
-                                  }
-                                >
-                                  {
-                                    unitDescription
-                                  }
-                                </Text>
-                              ) : null}
-
                               <View
                                 style={
                                   styles.quantityBadgeRow
@@ -1183,26 +1265,15 @@ export default function CartModal({
                                 >
                                   <Text
                                     style={
-                                      styles.quantityBadgeText
+                                      styles.quantityBadgeBold
                                     }
                                   >
-                                    Quantity:{' '}
-                                    <Text
-                                      style={
-                                        styles.quantityBadgeBold
-                                      }
-                                    >
-                                      {
-                                        item.quantity
-                                      }
-                                    </Text>
-
-                                    {unitDescription
-                                      ? ` • ${unitDescription}`
-                                      : ''}
+                                    {getQuantityUnitText(item.quantity, item, catalog)}
                                   </Text>
                                 </View>
                               </View>
+
+
 
                               {/* Unit Price row removed */}
 
@@ -1355,13 +1426,9 @@ export default function CartModal({
                                     styles.itemTotalLabel
                                   }
                                 >
-                                  {
-                                    item.quantity
-                                  }{' '}
-                                  × ₹
-                                  {money(
-                                    itemUnitPrice
-                                  )}
+                                  {Number(item.quantity) > 1
+                                    ? `${item.quantity} × ₹${money(itemUnitPrice)}`
+                                    : `₹${money(itemUnitPrice)} each`}
                                 </Text>
 
                                 <Text
@@ -1692,36 +1759,23 @@ export default function CartModal({
                       styles.paymentMethodRow
                     }
                   >
-                    <TouchableOpacity
+                    <View
                       style={[
                         styles.paymentCard,
-                        paymentMethod ===
-                          'cashfree' &&
-                          styles.paymentCardActive,
+                        styles.paymentCardActive,
+                        { flex: 1 }
                       ]}
-                      onPress={() =>
-                        setPaymentMethod(
-                          'cashfree'
-                        )
-                      }
                     >
                       <CreditCard
-                        size={20}
-                        color={
-                          paymentMethod ===
-                          'cashfree'
-                            ? '#10b981'
-                            : '#94a3b8'
-                        }
+                        size={22}
+                        color="#10b981"
                       />
 
                       <View style={{ flex: 1 }}>
                         <Text
                           style={[
                             styles.paymentCardTitle,
-                            paymentMethod ===
-                              'cashfree' &&
-                              styles.paymentCardTitleActive,
+                            styles.paymentCardTitleActive,
                           ]}
                         >
                           Online Direct Pay
@@ -1732,81 +1786,36 @@ export default function CartModal({
                             styles.paymentCardSub
                           }
                         >
-                          UPI • Cards • NetBanking
+                          UPI (GPay / PhonePe / Paytm) • Cards • NetBanking
                         </Text>
-                        <Text style={{ fontSize: 10, color: '#10b981', fontWeight: '700', marginTop: 3 }}>
-                          ⚡ Instant Auto-Confirmed & Settled
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.paymentCard,
-                        paymentMethod ===
-                          'counter' &&
-                          styles.paymentCardActive,
-                      ]}
-                      onPress={() =>
-                        setPaymentMethod(
-                          'counter'
-                        )
-                      }
-                    >
-                      <IndianRupee
-                        size={20}
-                        color={
-                          paymentMethod ===
-                          'counter'
-                            ? '#10b981'
-                            : '#94a3b8'
-                        }
-                      />
-
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[
-                            styles.paymentCardTitle,
-                            paymentMethod ===
-                              'counter' &&
-                              styles.paymentCardTitleActive,
-                          ]}
-                        >
-                          Pay with Cash
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.paymentCardSub
-                          }
-                        >
-                          Pay at Counter / Table
-                        </Text>
-                        <Text style={{ fontSize: 10, color: '#f59e0b', fontWeight: '700', marginTop: 3 }}>
-                          ⏳ Needs Cashier Confirmation
+                        <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '700', marginTop: 4 }}>
+                          ⚡ Instant Auto-Confirmed & Kitchen Dispatched
                         </Text>
                       </View>
-                    </TouchableOpacity>
+                    </View>
                   </View>
 
-                  {/* Payment Mode Callout Box */}
+                  {/* Prefer to Pay with Cash Banner */}
                   <View style={{
-                    marginTop: 10,
-                    padding: 10,
-                    borderRadius: 8,
-                    backgroundColor: paymentMethod === 'cashfree' ? '#f0fdf4' : '#fffbeb',
+                    marginTop: 12,
+                    padding: 12,
+                    borderRadius: 10,
+                    backgroundColor: '#fffbeb',
                     borderWidth: 1,
-                    borderColor: paymentMethod === 'cashfree' ? '#bbf7d0' : '#fde68a',
+                    borderColor: '#fde68a',
+                    flexDirection: 'row',
+                    alignItems: 'flex-start',
+                    gap: 10,
                   }}>
+                    <AlertCircle size={18} color="#b45309" style={{ marginTop: 2, flexShrink: 0 }} />
                     <Text style={{
-                      fontSize: 11,
-                      color: paymentMethod === 'cashfree' ? '#166534' : '#92400e',
-                      lineHeight: 16,
-                      fontWeight: '500'
+                      flex: 1,
+                      fontSize: 12,
+                      color: '#92400e',
+                      lineHeight: 18,
+                      fontWeight: '600'
                     }}>
-                      {paymentMethod === 'cashfree'
-                        ? '✓ Online payment is immediately settled and confirmed. Order is dispatched directly to the kitchen for preparation.'
-                        : 'ℹ️ Cash orders are placed in queue and must be confirmed/accepted by the Cashier or Restaurant Owner before cooking.'}
+                      Prefer to pay with Cash? Your waiter can take your order directly at your table/Give order at POS Counter.
                     </Text>
                   </View>
                 </View>
@@ -2052,6 +2061,7 @@ export default function CartModal({
                   (isLoadingState ||
                     hasUnavailableItems ||
                     (storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) ||
+                    activeTable?.isLocked ||
                     activeTable?.occupiedByOther) &&
                     styles.checkoutBtnDisabled,
                 ]}
@@ -2062,7 +2072,7 @@ export default function CartModal({
                   isLoadingState ||
                   hasUnavailableItems ||
                   Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) ||
-                  Boolean(activeTable?.occupiedByOther)
+                  Boolean(activeTable?.isLocked || activeTable?.occupiedByOther)
                 }
                 activeOpacity={0.85}
               >
@@ -2078,15 +2088,19 @@ export default function CartModal({
                         styles.checkoutBtnText
                       }
                     >
-                      {activeTable?.occupiedByOther
+                      {activeTable?.isCleaning
+                        ? 'TABLE BEING SANITIZED • PLEASE WAIT'
+                        : activeTable?.isReserved
+                        ? 'TABLE RESERVED • CONTACT STAFF'
+                        : activeTable?.occupiedByOther
                         ? 'TABLE OCCUPIED • ORDERING LOCKED'
                         : storeOperatingStatus && !storeOperatingStatus.canPlaceOrder
                         ? (storeOperatingStatus.status === 'PAUSED'
                             ? `KITCHEN PAUSED (${storeOperatingStatus.remainingPauseMinutes || 0}M LEFT)`
                             : 'KITCHEN CLOSED FOR ORDERING')
-                        : (paymentMethod === 'cashfree'
-                            ? 'PAY VIA CASHFREE'
-                            : 'CONFIRM & PLACE ORDER') + ` • ₹${money(grandTotal)}`}
+                        : (activeTable?.isOccupied
+                            ? 'PAY ONLINE & ADD TO TABLE TAB'
+                            : 'PAY ONLINE & PLACE ORDER (UPI / CARDS)') + ` • ₹${money(grandTotal)}`}
                     </Text>
 
                     <ArrowRight

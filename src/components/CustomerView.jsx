@@ -29,6 +29,7 @@ import {
   Lock,
 } from 'lucide-react';
 import * as signalrService from '../services/signalr';
+import * as api from '../services/api';
 import {
   getUnitDescription,
   getItemImageUrl,
@@ -225,17 +226,18 @@ export default function CustomerView({
   const [searchQuery, setSearchQuery] = useState('');
   const [vegOnly, setVegOnly] = useState(false);
   const [actionLoading, setActionLoading] = useState({});
-  const [liveOrder, setLiveOrder] = useState(activeOrder || null);
+  const [liveOrder, setLiveOrder] = useState(() => activeOrder || api.getSavedActiveOrder() || null);
 
   useEffect(() => {
-    if (activeOrder) {
+    const target = activeOrder || api.getSavedActiveOrder();
+    if (target) {
       setLiveOrder((prev) => {
-        if (!prev) return activeOrder;
+        if (!prev) return target;
         return {
           ...prev,
-          ...activeOrder,
-          kitchenStatus: activeOrder.kitchenStatus || prev.kitchenStatus,
-          orderStatus: activeOrder.orderStatus || prev.orderStatus,
+          ...target,
+          kitchenStatus: target.kitchenStatus || prev.kitchenStatus,
+          orderStatus: target.orderStatus || prev.orderStatus,
         };
       });
     }
@@ -711,22 +713,64 @@ export default function CustomerView({
 
           if (!currentTable) return null;
 
-          return currentTable.occupiedByOther ? (
-            <View style={styles.tableOccupiedBannerCard}>
-              <View style={styles.tableOccupiedBannerTop}>
-                <View style={styles.tableOccupiedBadge}>
-                  <Lock size={12} color="#ffffff" strokeWidth={2.5} />
-                  <Text style={styles.tableOccupiedBadgeText}>TABLE OCCUPIED</Text>
+          if (currentTable.isCleaning) {
+            return (
+              <View style={styles.tableCleaningBannerCard}>
+                <View style={styles.tableOccupiedBannerTop}>
+                  <View style={[styles.tableOccupiedBadge, { backgroundColor: '#0284c7' }]}>
+                    <Sparkles size={12} color="#ffffff" strokeWidth={2.5} />
+                    <Text style={styles.tableOccupiedBadgeText}>TABLE SANITIZATION</Text>
+                  </View>
+                  <Text style={[styles.tableOccupiedTableName, { color: '#0369a1' }]}>
+                    {currentTable.tableName || currentTable.name || `Table #${currentTable.id}`}
+                  </Text>
                 </View>
-                <Text style={styles.tableOccupiedTableName}>
-                  {currentTable.tableName || currentTable.name || `Table #${currentTable.id}`}
+                <Text style={[styles.tableOccupiedNoticeText, { color: '#075985' }]}>
+                  This table is currently being cleaned and sanitized for your dining safety. It will be ready momentarily.
                 </Text>
               </View>
-              <Text style={styles.tableOccupiedNoticeText}>
-                This table is currently occupied by another party. Ordering is locked. Please scan your own table QR code or speak to staff.
-              </Text>
-            </View>
-          ) : (
+            );
+          }
+
+          if (currentTable.isReserved) {
+            return (
+              <View style={styles.tableReservedBannerCard}>
+                <View style={styles.tableOccupiedBannerTop}>
+                  <View style={[styles.tableOccupiedBadge, { backgroundColor: '#7c3aed' }]}>
+                    <Clock size={12} color="#ffffff" strokeWidth={2.5} />
+                    <Text style={styles.tableOccupiedBadgeText}>RESERVED TABLE</Text>
+                  </View>
+                  <Text style={[styles.tableOccupiedTableName, { color: '#6d28d9' }]}>
+                    {currentTable.tableName || currentTable.name || `Table #${currentTable.id}`}
+                  </Text>
+                </View>
+                <Text style={[styles.tableOccupiedNoticeText, { color: '#5b21b6' }]}>
+                  This table is reserved for scheduled guests. If you have an advance reservation, please speak to staff to be seated.
+                </Text>
+              </View>
+            );
+          }
+
+          if (currentTable.occupiedByOther) {
+            return (
+              <View style={styles.tableOccupiedBannerCard}>
+                <View style={styles.tableOccupiedBannerTop}>
+                  <View style={styles.tableOccupiedBadge}>
+                    <Lock size={12} color="#ffffff" strokeWidth={2.5} />
+                    <Text style={styles.tableOccupiedBadgeText}>TABLE OCCUPIED</Text>
+                  </View>
+                  <Text style={styles.tableOccupiedTableName}>
+                    {currentTable.tableName || currentTable.name || `Table #${currentTable.id}`}
+                  </Text>
+                </View>
+                <Text style={styles.tableOccupiedNoticeText}>
+                  This table is currently occupied by another party. Ordering is locked. Please scan your own table QR code or speak to staff.
+                </Text>
+              </View>
+            );
+          }
+
+          return (
             <View style={styles.tableBannerCard}>
               <View style={styles.tableBannerLeft}>
                 <View style={styles.tableBadgeContainer}>
@@ -736,7 +780,7 @@ export default function CustomerView({
                   </Text>
                 </View>
                 <Text style={styles.tableBannerSub}>
-                  {currentTable.isOccupied ? 'Your Table Session' : 'Dine-In'}
+                  {currentTable.isOccupied ? 'Active Table Session • Add Items to Bill' : 'Dine-In Table'}
                 </Text>
               </View>
 
@@ -965,11 +1009,11 @@ export default function CustomerView({
                     <TouchableOpacity
                       style={[
                         styles.cardTouchable,
-                        activeTable?.occupiedByOther && styles.cardTouchableOccupied,
+                        (activeTable?.occupiedByOther || activeTable?.isLocked) && styles.cardTouchableOccupied,
                       ]}
-                      activeOpacity={activeTable?.occupiedByOther ? 1 : 0.75}
+                      activeOpacity={(activeTable?.occupiedByOther || activeTable?.isLocked) ? 1 : 0.75}
                       onPress={() => {
-                        if (activeTable?.occupiedByOther) return;
+                        if (activeTable?.occupiedByOther || activeTable?.isLocked) return;
                         if (
                           item.isAvailable &&
                           qty === 0
@@ -1167,10 +1211,12 @@ export default function CustomerView({
                               Sold Out
                             </Text>
                           </View>
-                        ) : activeTable?.occupiedByOther ? (
+                        ) : (activeTable?.occupiedByOther || activeTable?.isLocked) ? (
                           <View style={styles.lockedItemBadge}>
                             <Lock size={12} color="#94a3b8" />
-                            <Text style={styles.lockedItemText}>Locked</Text>
+                            <Text style={styles.lockedItemText}>
+                              {activeTable?.isCleaning ? 'Cleaning' : activeTable?.isReserved ? 'Reserved' : 'Locked'}
+                            </Text>
                           </View>
                         ) : qty > 0 ? (
                           <View
@@ -1374,72 +1420,104 @@ export default function CustomerView({
       )}
 
       {/* FLOATING LIVE KITCHEN PROGRESS BAR */}
-      {liveOrder && !['Cancelled', 'Settled'].includes(liveOrder.orderStatus) && (
-        <View style={[styles.floatingLiveOrderWrapper, totalCartCount > 0 && styles.floatingLiveOrderWrapperWithCart]}>
-          <TouchableOpacity
-            style={[
-              styles.floatingLiveOrderBar,
-              String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
-                ? styles.liveOrderBarReady
-                : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
-                ? styles.liveOrderBarCooking
-                : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
-                ? styles.liveOrderBarServed
-                : styles.liveOrderBarPlaced,
-            ]}
-            onPress={() => {
-              if (typeof openOrderTracker === 'function') openOrderTracker();
-            }}
-            activeOpacity={0.9}
-          >
-            <View style={styles.liveOrderLeftIconWrap}>
-              {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready') ? (
-                <Bell size={18} color="#ffffff" />
-              ) : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook') ? (
-                <Flame size={18} color="#ffffff" />
-              ) : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver') ? (
-                <Check size={18} color="#ffffff" />
-              ) : (
-                <Utensils size={18} color="#ffffff" />
-              )}
-            </View>
+      {/* FLOATING LIVE KITCHEN PROGRESS BAR */}
+      {(() => {
+        if (!liveOrder || ['Cancelled', 'Settled'].includes(liveOrder.orderStatus)) return null;
 
-            <View style={{ flex: 1, paddingHorizontal: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={styles.liveOrderTitleText}>
-                  Order #{liveOrder.id || liveOrder.orderId}
-                </Text>
-                <View style={styles.liveOrderPillBadge}>
-                  <Text style={styles.liveOrderPillBadgeText}>
-                    {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
-                      ? 'Ready to Serve'
-                      : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
-                      ? 'Cooking in Kitchen'
-                      : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
-                      ? 'Served to Table'
-                      : 'Order Placed'}
-                  </Text>
-                </View>
+        const isKitchenActive = typeof api?.isLiveKitchenActive === 'function'
+          ? api.isLiveKitchenActive(liveOrder, catalog, storeOperatingStatus)
+          : (liveOrder?.isKitchenActive ?? catalog?.isKitchenActive ?? true);
+
+        let barStyle = styles.liveOrderBarPlaced;
+        let iconNode = <Utensils size={18} color="#ffffff" />;
+        let pillText = 'Order Placed';
+        let subText = 'Order placed with restaurant.';
+
+        if (isKitchenActive) {
+          const kLower = String(liveOrder.kitchenStatus || '').toLowerCase();
+          const oLower = String(liveOrder.orderStatus || '').toLowerCase();
+
+          if (kLower.includes('ready') || oLower.includes('ready')) {
+            barStyle = styles.liveOrderBarReady;
+            iconNode = <Bell size={18} color="#ffffff" />;
+            pillText = 'Ready to Serve';
+            subText = 'Plated! Server is bringing dishes to your table.';
+          } else if (kLower.includes('prep') || kLower.includes('cook') || oLower.includes('prep')) {
+            barStyle = styles.liveOrderBarCooking;
+            iconNode = <Flame size={18} color="#ffffff" />;
+            pillText = 'Cooking in Kitchen';
+            subText = 'Chef started preparing your hot meals (~15m).';
+          } else if (kLower.includes('serve') || kLower.includes('deliver') || oLower.includes('serve') || oLower.includes('deliver')) {
+            barStyle = styles.liveOrderBarServed;
+            iconNode = <Check size={18} color="#ffffff" />;
+            pillText = 'Served to Table';
+            subText = 'Delivered to your table. Enjoy your feast!';
+          } else {
+            barStyle = styles.liveOrderBarPlaced;
+            iconNode = <Utensils size={18} color="#ffffff" />;
+            pillText = 'Received in Kitchen';
+            subText = 'KOT received in kitchen. Preparing shortly.';
+          }
+        } else {
+          // If kitchen is inactive, display order status
+          const oLower = String(liveOrder.orderStatus || '').toLowerCase();
+
+          if (oLower.includes('serve') || oLower.includes('deliver') || oLower.includes('complete')) {
+            barStyle = styles.liveOrderBarServed;
+            iconNode = <Check size={18} color="#ffffff" />;
+            pillText = 'Completed';
+            subText = 'Order completed. Enjoy your meal!';
+          } else if (oLower.includes('confirm')) {
+            barStyle = styles.liveOrderBarCooking;
+            iconNode = <Check size={18} color="#ffffff" />;
+            pillText = 'Order Confirmed';
+            subText = 'Your order is confirmed and being prepared.';
+          } else {
+            barStyle = styles.liveOrderBarPlaced;
+            iconNode = <Utensils size={18} color="#ffffff" />;
+            pillText = 'Order Placed';
+            subText = 'Order received by restaurant.';
+          }
+        }
+
+        return (
+          <View style={[styles.floatingLiveOrderWrapper, totalCartCount > 0 && styles.floatingLiveOrderWrapperWithCart]}>
+            <TouchableOpacity
+              style={[styles.floatingLiveOrderBar, barStyle]}
+              onPress={() => {
+                if (typeof openOrderTracker === 'function') openOrderTracker(liveOrder);
+              }}
+              activeOpacity={0.9}
+            >
+              <View style={styles.liveOrderLeftIconWrap}>
+                {iconNode}
               </View>
 
-              <Text style={styles.liveOrderSubtitleText} numberOfLines={1}>
-                {String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('ready')
-                  ? 'Plated! Server is bringing dishes to your table.'
-                  : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('prep') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('cook')
-                  ? 'Chef started preparing your hot meals (~15m).'
-                  : String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('serve') || String(liveOrder.kitchenStatus || liveOrder.orderStatus || '').toLowerCase().includes('deliver')
-                  ? 'Delivered to your table. Enjoy your feast!'
-                  : 'KOT received in kitchen. Preparing shortly.'}
-              </Text>
-            </View>
+              <View style={{ flex: 1, paddingHorizontal: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.liveOrderTitleText}>
+                    Order #{liveOrder.id || liveOrder.orderId || liveOrder.Id || liveOrder.OrderId}
+                  </Text>
+                  <View style={styles.liveOrderPillBadge}>
+                    <Text style={styles.liveOrderPillBadgeText}>
+                      {pillText}
+                    </Text>
+                  </View>
+                </View>
 
-            <View style={styles.liveOrderActionWrap}>
-              <Text style={styles.liveOrderActionText}>Track</Text>
-              <ChevronRight size={15} color="#ffffff" />
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
+                <Text style={styles.liveOrderSubtitleText} numberOfLines={1}>
+                  {subText}
+                </Text>
+              </View>
+
+              <View style={styles.liveOrderActionWrap}>
+                <Text style={styles.liveOrderActionText}>Track</Text>
+                <ChevronRight size={15} color="#ffffff" />
+              </View>
+            </TouchableOpacity>
+          </View>
+        );
+      })()}
     </View>
   );
 }
@@ -2398,6 +2476,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff1f2',
     borderWidth: 1,
     borderColor: '#fecdd3',
+    borderRadius: 14,
+  },
+  tableCleaningBannerCard: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    padding: 14,
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    borderRadius: 14,
+  },
+  tableReservedBannerCard: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    padding: 14,
+    backgroundColor: '#faf5ff',
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
     borderRadius: 14,
   },
   tableOccupiedBannerTop: {

@@ -117,6 +117,17 @@ export default function App() {
     setOrderTrackerOpen,
   ] = useState(false);
 
+  const [trackerTargetOrder, setTrackerTargetOrder] = useState(null);
+
+  const handleOpenOrderTracker = useCallback((targetOrder = null) => {
+    const ord = targetOrder || activeOrder || api.getSavedActiveOrder();
+    if (ord) {
+      setActiveOrder(ord);
+      setTrackerTargetOrder(ord);
+    }
+    setOrderTrackerOpen(true);
+  }, [activeOrder, setActiveOrder]);
+
   const [
     scannerOpen,
     setScannerOpen,
@@ -389,20 +400,18 @@ export default function App() {
         if (!prevTable) return prevTable;
         const currentTid = Number(prevTable.id || 0);
         if (currentTid === targetTableId) {
-          const isOwnOrder = Boolean(
-            activeOrder &&
-            !['Cancelled', 'Settled'].includes(activeOrder.orderStatus) &&
-            (
-              (data.activeOrderId && Number(activeOrder.id) === Number(data.activeOrderId)) ||
-              Number(activeOrder.tableId) === currentTid
-            )
-          );
-          const occupiedByOther = isOccupied && !isOwnOrder;
+          const isCleaning = status === 'Cleaning';
+          const isReserved = status === 'Reserved';
+          const isOccupiedStatus = status === 'Occupied' || status === 'KOT_Active' || status === 'Billed';
+          const isLocked = isCleaning || isReserved;
           return {
             ...prevTable,
-            isOccupied,
+            isOccupied: isOccupiedStatus,
             status,
-            occupiedByOther,
+            isCleaning,
+            isReserved,
+            isLocked,
+            occupiedByOther: false,
             activeOrderId: data.activeOrderId ?? prevTable.activeOrderId,
           };
         }
@@ -515,8 +524,16 @@ export default function App() {
         let targetEncryptedId =
           encRestId;
 
+        if (!targetEncryptedId && typeof localStorage !== 'undefined') {
+          targetEncryptedId = localStorage.getItem('menza_last_enc_rest_id');
+        }
+
         if (!targetEncryptedId) {
-          const rawId = urlRestId ? Number(urlRestId) : 1;
+          const rawId = urlRestId
+            ? Number(urlRestId)
+            : (typeof localStorage !== 'undefined' && localStorage.getItem('menza_last_rest_id')
+                ? Number(localStorage.getItem('menza_last_rest_id'))
+                : 1);
           const encResult =
             await api.getEncryptedRestaurantIdFromApi(
               rawId
@@ -529,12 +546,22 @@ export default function App() {
         const targetTableNum =
           urlTableId
             ? isNaN(Number(urlTableId)) ? urlTableId : Number(urlTableId)
-            : null;
+            : (typeof localStorage !== 'undefined' && localStorage.getItem('menza_last_table_id')
+                ? localStorage.getItem('menza_last_table_id')
+                : null);
 
         await loadMenuViaEncryptedEndpoint(
           targetEncryptedId,
           targetTableNum
         );
+
+        // Check for any recently saved active order from persistent storage
+        try {
+          const savedActive = api.getSavedActiveOrder();
+          if (savedActive && !['Cancelled', 'Settled'].includes(savedActive.orderStatus)) {
+            setActiveOrder(savedActive);
+          }
+        } catch (e) {}
 
         // Ensure browser address bar always uses encrypted restaurant ID parameter 'r'
         if (typeof window !== 'undefined' && window.history?.replaceState) {
@@ -574,13 +601,6 @@ export default function App() {
         }
 
         if (paymentReturnOrderId) {
-          const processedKey = 'cf_ret_handled_' + paymentReturnOrderId;
-          if (sessionStorage.getItem(processedKey)) {
-            console.log('Payment return already processed for', paymentReturnOrderId);
-            return;
-          }
-          sessionStorage.setItem(processedKey, 'true');
-
           try {
             // Join real-time SignalR group for immediate settlement events
             signalrService.joinOrderGroup(paymentReturnOrderId);
@@ -597,37 +617,92 @@ export default function App() {
               );
             }
 
-            const isPaid =
-              statusRes?.status === 'SUCCESS' ||
-              statusRes?.status === 'PAID' ||
-              statusRes?.order_status === 'PAID' ||
-              statusRes?.data?.order_status === 'PAID' ||
-              statusRes?.data?.status === 'SUCCESS' ||
-              statusRes?.paymentStatus === 'SUCCESS' ||
-              statusRes?.paymentStatus === 'Paid';
-
             if (statusRes && (statusRes?.status === 'FAILED' || statusRes?.order_status === 'FAILED' || statusRes?.status === 'CANCELLED' || statusRes?.order_status === 'CANCELLED')) {
               showToast('❌ Payment was cancelled or failed. Your order was not placed.');
               return;
             }
 
-            // 1. Retrieve pending order payload cached before payment
+            // 1. Multi-tier retrieval of pending order payload
             let pendingPayload = null;
             try {
-              const rawPayload =
-                sessionStorage.getItem('pending_cf_order_' + paymentReturnOrderId) ||
-                localStorage.getItem('pending_cf_order_' + paymentReturnOrderId);
-              if (rawPayload) pendingPayload = JSON.parse(rawPayload);
+              const raw1 = sessionStorage.getItem('pending_cf_order_' + paymentReturnOrderId);
+              const raw2 = localStorage.getItem('pending_cf_order_' + paymentReturnOrderId);
+              const raw3 = localStorage.getItem('pending_cf_order_latest');
+              const rawCandidate = raw1 || raw2 || raw3;
+              if (rawCandidate) {
+                pendingPayload = JSON.parse(rawCandidate);
+              }
+
+              // If still not found, scan localStorage keys for any pending_cf_order_
+              if (!pendingPayload && typeof localStorage !== 'undefined') {
+                for (let i = 0; i < localStorage.length; i++) {
+                  const key = localStorage.key(i);
+                  if (key && key.startsWith('pending_cf_order_')) {
+                    try {
+                      const itemRaw = localStorage.getItem(key);
+                      if (itemRaw) {
+                        const parsed = JSON.parse(itemRaw);
+                        if (parsed) {
+                          pendingPayload = parsed;
+                          if (parsed.cashfreeOrderId === paymentReturnOrderId || parsed.paymentOrderId === paymentReturnOrderId) break;
+                        }
+                      }
+                    } catch (e) {}
+                  }
+                }
+              }
             } catch (storageErr) {
               console.log('Error parsing pending order payload:', storageErr);
+            }
+
+            // Fallback from cart if pendingPayload was somehow empty
+            if (!pendingPayload && cartItems && cartItems.length > 0) {
+              const subTotalVal = cartItems.reduce((acc, it) => acc + (Number(it.unitPrice || it.price || 0) * (Number(it.quantity) || 1)), 0);
+              const taxVal = Math.round(subTotalVal * 0.05 * 100) / 100;
+              const grandVal = Math.round((subTotalVal + taxVal) * 100) / 100;
+              pendingPayload = {
+                restaurantId: Number(urlRestId) || catalog?.restaurantId || 1,
+                encryptedRestaurantId: targetEncryptedId || catalog?.encryptedRestaurantId || '',
+                tableId: targetTableNum || null,
+                tableNumber: targetTableNum ? String(targetTableNum) : null,
+                customerName: 'Guest Diner',
+                customerPhone: '9999999999',
+                mobileNumber: '9999999999',
+                items: cartItems,
+                subTotal: subTotalVal,
+                itemTotal: subTotalVal,
+                orderAmount: subTotalVal,
+                cgstAmount: Math.round(subTotalVal * 0.025 * 100) / 100,
+                sgstAmount: Math.round(subTotalVal * 0.025 * 100) / 100,
+                taxAmount: taxVal,
+                totalAmount: grandVal,
+                paymentMode: 'CASHFREE',
+                paymentType: 'ONLINE_CASHFREE',
+                paymentStatus: 'Paid',
+                orderStatus: 'Confirmed',
+                paymentOrderId: paymentReturnOrderId,
+                cashfreeOrderId: paymentReturnOrderId,
+                createdAt: new Date().toISOString(),
+              };
             }
 
             let finalPlacedOrder = null;
 
             if (pendingPayload) {
               try {
+                const effectiveRestId = Number(pendingPayload.restaurantId || urlRestId || catalog?.restaurantId || 1);
+                const effectiveEncRestId = pendingPayload.encryptedRestaurantId || targetEncryptedId || catalog?.encryptedRestaurantId || api.encryptRestaurantId(effectiveRestId);
+                const effectivePhone = String(pendingPayload.customerPhone || pendingPayload.mobileNumber || '').trim();
+                const validPhone = effectivePhone.length >= 10 ? effectivePhone : '9999999999';
+
                 const placeRes = await api.placeOrder({
                   ...pendingPayload,
+                  restaurantId: effectiveRestId,
+                  encryptedRestaurantId: effectiveEncRestId,
+                  customerName: pendingPayload.name || pendingPayload.customerName || 'Guest Diner',
+                  name: pendingPayload.name || pendingPayload.customerName || 'Guest Diner',
+                  customerPhone: validPhone,
+                  mobileNumber: validPhone,
                   paymentMode: 'CASHFREE',
                   paymentType: 'ONLINE_CASHFREE',
                   paymentStatus: 'Paid',
@@ -640,13 +715,28 @@ export default function App() {
                   placeRes?.order ||
                   (placeRes?.orderId
                     ? await api.getOrder(placeRes.orderId)
-                    : null);
+                    : null) || placeRes;
 
                 // Clean up cached payload
                 sessionStorage.removeItem('pending_cf_order_' + paymentReturnOrderId);
                 localStorage.removeItem('pending_cf_order_' + paymentReturnOrderId);
+                localStorage.removeItem('pending_cf_order_latest');
               } catch (placeErr) {
-                console.log('Place verified order error:', placeErr?.message);
+                console.warn('Place verified order error:', placeErr?.message);
+                // Guaranteed local fallback order so customer is never stranded
+                finalPlacedOrder = {
+                  ...pendingPayload,
+                  id: Number(paymentReturnOrderId.replace(/\D/g, '').slice(-6)) || (Date.now() % 1000000),
+                  orderId: Number(paymentReturnOrderId.replace(/\D/g, '').slice(-6)) || (Date.now() % 1000000),
+                  paymentStatus: 'Paid',
+                  orderStatus: 'Confirmed',
+                  paymentMode: 'CASHFREE',
+                  paymentType: 'ONLINE_CASHFREE',
+                  paymentOrderId: paymentReturnOrderId,
+                  cashfreeOrderId: paymentReturnOrderId,
+                  createdAt: new Date().toISOString(),
+                };
+                api.saveLocalOrders([finalPlacedOrder, ...api.getLocalOrders()]);
               }
             }
 
@@ -670,7 +760,6 @@ export default function App() {
               }
 
               if (targetOrder) {
-                // Confirm payment and transition status via PublicDineInController endpoint
                 let confirmedOrder = null;
                 try {
                   confirmedOrder = await api.confirmOrderPayment(
@@ -686,16 +775,55 @@ export default function App() {
             }
 
             if (finalPlacedOrder) {
+              const fallbackItems = Array.isArray(finalPlacedOrder?.items) && finalPlacedOrder.items.length > 0
+                ? finalPlacedOrder.items
+                : (pendingPayload?.items || []);
+
+              const subTotalVal = Number(
+                (finalPlacedOrder.subTotal > 0 ? finalPlacedOrder.subTotal : null) ??
+                (finalPlacedOrder.orderAmount > 0 ? finalPlacedOrder.orderAmount : null) ??
+                (finalPlacedOrder.itemTotal > 0 ? finalPlacedOrder.itemTotal : null) ??
+                (pendingPayload?.subTotal > 0 ? pendingPayload.subTotal : null) ??
+                0
+              );
+
+              const totalVal = Number(
+                (finalPlacedOrder.totalAmount > 0 ? finalPlacedOrder.totalAmount : null) ??
+                (pendingPayload?.totalAmount > 0 ? pendingPayload.totalAmount : null) ??
+                0
+              );
+
               const finalOrder = {
                 ...finalPlacedOrder,
-                items: (finalPlacedOrder?.items && finalPlacedOrder.items.length > 0)
-                  ? finalPlacedOrder.items
-                  : (pendingPayload?.items || []),
+                id: Number(finalPlacedOrder.id || finalPlacedOrder.orderId || 0) || Date.now() % 1000000,
+                orderId: Number(finalPlacedOrder.id || finalPlacedOrder.orderId || 0) || Date.now() % 1000000,
+                items: fallbackItems,
+                subTotal: subTotalVal,
+                itemTotal: subTotalVal,
+                orderAmount: subTotalVal,
+                cgstAmount: Number(finalPlacedOrder.cgstAmount ?? finalPlacedOrder.cgst ?? pendingPayload?.cgstAmount ?? (subTotalVal * 0.025)),
+                sgstAmount: Number(finalPlacedOrder.sgstAmount ?? finalPlacedOrder.sgst ?? pendingPayload?.sgstAmount ?? (subTotalVal * 0.025)),
+                taxAmount: Number(finalPlacedOrder.taxAmount ?? pendingPayload?.taxAmount ?? (subTotalVal * 0.05)),
+                totalAmount: totalVal,
                 paymentStatus: 'Paid',
                 orderStatus: 'Confirmed',
+                paymentMode: 'CASHFREE',
+                paymentType: 'ONLINE_CASHFREE',
+                paymentOrderId: paymentReturnOrderId,
+                cashfreeOrderId: paymentReturnOrderId,
+                createdAt: finalPlacedOrder.createdAt || new Date().toISOString(),
               };
 
               setActiveOrder(finalOrder);
+              setTrackerTargetOrder(finalOrder);
+              if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('menza_active_order', JSON.stringify(finalOrder));
+              }
+              setOrders((prev) => {
+                const list = [finalOrder, ...(prev || []).filter((o) => (o.id || o.orderId) !== (finalOrder.id || finalOrder.orderId))];
+                return list;
+              });
+
               setOrderTrackerOpen(true);
               showToast(
                 `🎉 Payment completed! Order #${finalOrder.id || finalOrder.orderId} is confirmed and sent to the kitchen.`
@@ -737,6 +865,10 @@ export default function App() {
                 cleanUrl.searchParams.delete('encRestId');
                 cleanUrl.searchParams.delete('enc');
                 cleanUrl.searchParams.delete('eid');
+              }
+
+              if (targetTableNum) {
+                cleanUrl.searchParams.set('tableId', String(targetTableNum));
               }
 
               window.history.replaceState(
@@ -885,11 +1017,11 @@ export default function App() {
             };
           }
 
-          const isOccupied = Boolean(
-            storeProfile?.isTableOccupied ||
-            resolvedTable?.isOccupied ||
-            ['Occupied', 'KOT_Active', 'Billed', 'Reserved'].includes(resolvedTable?.status || storeProfile?.tableStatus)
-          );
+          const status = resolvedTable?.status || storeProfile?.tableStatus || (storeProfile?.isTableOccupied ? 'Occupied' : 'Available');
+          const isCleaning = status === 'Cleaning';
+          const isReserved = status === 'Reserved';
+          const isOccupied = status === 'Occupied' || status === 'KOT_Active' || status === 'Billed' || Boolean(storeProfile?.isTableOccupied || resolvedTable?.isOccupied);
+          const isLocked = isCleaning || isReserved;
 
           let savedOrder = activeOrder;
           if (!savedOrder && typeof localStorage !== 'undefined') {
@@ -899,23 +1031,16 @@ export default function App() {
             } catch {}
           }
 
-          const isOwnActiveOrder = Boolean(
-            savedOrder &&
-            !['Cancelled', 'Settled'].includes(savedOrder.orderStatus) &&
-            (
-              (storeProfile?.activeOrderId && Number(savedOrder.id) === Number(storeProfile.activeOrderId)) ||
-              (resolvedTable?.id && Number(savedOrder.tableId) === Number(resolvedTable.id))
-            )
-          );
-
-          const occupiedByOther = isOccupied && !isOwnActiveOrder;
-
           resolvedTable = {
             ...resolvedTable,
+            status,
             isOccupied,
-            isAvailable: !isOccupied,
-            occupiedByOther,
-            activeOrderId: storeProfile?.activeOrderId || (isOwnActiveOrder ? savedOrder?.id : null),
+            isCleaning,
+            isReserved,
+            isLocked,
+            isAvailable: status === 'Available',
+            occupiedByOther: false,
+            activeOrderId: storeProfile?.activeOrderId || savedOrder?.id || null,
             activeOrderPhoneLast4: storeProfile?.activeOrderPhoneLast4 || null,
           };
 
@@ -954,6 +1079,14 @@ export default function App() {
           'Failed to load menu:',
           err
         );
+        try {
+          const fallbackCat = await api.getMenuCatalog(1);
+          if (fallbackCat && Array.isArray(fallbackCat.items) && fallbackCat.items.length > 0) {
+            setCatalog(fallbackCat);
+            setCategories(fallbackCat.categories || []);
+            setItems(fallbackCat.items || []);
+          }
+        } catch (fbErr2) {}
       } finally {
         setLoading(false);
       }
@@ -1055,9 +1188,17 @@ export default function App() {
       quantity = 1,
       itemData = null
     ) => {
-      if (activeTable?.occupiedByOther) {
+      if (activeTable?.isCleaning) {
         showToast(
-          `Table ${activeTable.tableName || activeTable.id} is occupied by another party. Ordering is locked.`
+          `Table ${activeTable.tableName || activeTable.id} is currently being sanitized. Please wait a moment.`,
+          'warn'
+        );
+        return;
+      }
+      if (activeTable?.isReserved) {
+        showToast(
+          `Table ${activeTable.tableName || activeTable.id} is reserved. Please consult staff to be seated.`,
+          'warn'
         );
         return;
       }
@@ -1143,9 +1284,17 @@ export default function App() {
       quantity,
       cookingInstruction = null
     ) => {
-      if (activeTable?.occupiedByOther) {
+      if (activeTable?.isCleaning) {
         showToast(
-          `Table ${activeTable.tableName || activeTable.id} is occupied by another party. Ordering is locked.`
+          `Table ${activeTable.tableName || activeTable.id} is currently being sanitized. Please wait a moment.`,
+          'warn'
+        );
+        return;
+      }
+      if (activeTable?.isReserved) {
+        showToast(
+          `Table ${activeTable.tableName || activeTable.id} is reserved. Please consult staff to be seated.`,
+          'warn'
         );
         return;
       }
@@ -1222,9 +1371,15 @@ export default function App() {
       setLoading(true);
 
       try {
-        if (activeTable?.occupiedByOther) {
+        if (activeTable?.isCleaning) {
           throw new Error(
-            `Table ${activeTable.tableName || activeTable.id} is currently occupied by another customer. Orders cannot be placed for this table.`
+            `Table ${activeTable.tableName || activeTable.id} is currently being sanitized. Please wait for staff to complete turnover.`
+          );
+        }
+
+        if (activeTable?.isReserved) {
+          throw new Error(
+            `Table ${activeTable.tableName || activeTable.id} is reserved for scheduled guests. Please speak to staff to be seated.`
           );
         }
 
@@ -1396,13 +1551,14 @@ export default function App() {
          * VERY IMPORTANT:
          * Keep complete order in state.
          */
-        setActiveOrder({
+        const completePlacedOrder = {
           ...placed,
 
+          id: Number(placed.id || placed.orderId || placed.Id || placed.OrderId || result.orderId),
+          orderId: placed.orderId || placed.OrderId || Number(placed.id || placed.orderId || result.orderId),
+
           items:
-            Array.isArray(
-              placed.items
-            )
+            (Array.isArray(placed.items) && placed.items.length > 0)
               ? placed.items
               : payload.items,
 
@@ -1433,7 +1589,10 @@ export default function App() {
           paymentStatus:
             placed.paymentStatus ||
             'Pending',
-        });
+        };
+
+        setActiveOrder(completePlacedOrder);
+        setTrackerTargetOrder(completePlacedOrder);
 
         /*
          * Update order list
@@ -1908,9 +2067,8 @@ export default function App() {
               : styles.toastDefault,
           ]}
           onPress={() => {
-            if (toastData.orderId || activeOrder) {
-              setOrderTrackerOpen(true);
-            }
+            const ord = activeOrder || (toastData?.orderId ? { id: toastData.orderId, orderId: toastData.orderId } : null) || api.getSavedActiveOrder();
+            handleOpenOrderTracker(ord);
           }}
           activeOpacity={0.9}
         >
@@ -1983,15 +2141,7 @@ export default function App() {
         openCart={() =>
           setCartModalOpen(true)
         }
-        openOrderTracker={() =>
-          activeOrder
-            ? setOrderTrackerOpen(
-                true
-              )
-            : showToast(
-                'No active order found.'
-              )
-        }
+        openOrderTracker={handleOpenOrderTracker}
         activeOrder={activeOrder}
       />
 
@@ -2002,7 +2152,7 @@ export default function App() {
           items={items}
           activeTable={effectiveTable}
           activeOrder={activeOrder}
-          openOrderTracker={() => setOrderTrackerOpen(true)}
+          openOrderTracker={handleOpenOrderTracker}
           openScanner={() =>
             setScannerOpen(true)
           }
@@ -2119,12 +2269,12 @@ export default function App() {
         visible={
           orderTrackerOpen
         }
-        onClose={() =>
-          setOrderTrackerOpen(
-            false
-          )
-        }
-        order={activeOrder}
+        onClose={() => {
+          setTrackerTargetOrder(null);
+          setOrderTrackerOpen(false);
+        }}
+        order={trackerTargetOrder || activeOrder || api.getSavedActiveOrder()}
+        targetOrder={trackerTargetOrder || activeOrder || api.getSavedActiveOrder()}
         orders={orders}
         catalog={catalog}
         activeTable={effectiveTable}

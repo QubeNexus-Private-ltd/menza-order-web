@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -46,10 +46,338 @@ const STATUSES = [
   'Served',
 ];
 
+
+const STATUS_RANKS = {
+  pending: 0,
+  placed: 0,
+  new: 0,
+  created: 0,
+  confirmed: 1,
+  accepted: 1,
+  preparing: 2,
+  cooking: 2,
+  in_kitchen: 2,
+  kitchen: 2,
+  ready: 3,
+  prepared: 3,
+  delivered: 4,
+  served: 4,
+  completed: 4,
+  settled: 4,
+};
+
+const PAYMENT_MODE_ONLINE = ['ONLINE', 'CASHFREE', 'UPI'];
+const PAYMENT_METHOD_ONLINE = ['CASHFREE', 'CASHFREE_SPLIT', 'ONLINE', 'UPI'];
+const PAYMENT_STATES_PAID = ['PAID', 'SUCCESS', 'COMPLETED', 'CAPTURED'];
+const TERMINAL_STATUSES = ['Served', 'Delivered', 'Cancelled'];
+
+const STATUS_ALIASES = {
+  Pending: ['pending', 'placed', 'created', 'new', 'received'],
+  Confirmed: ['confirmed', 'accepted', 'approved', 'order confirmed'],
+  Preparing: ['preparing', 'prepare', 'in preparation', 'processing', 'cooking', 'in kitchen', 'kitchen'],
+  Ready: ['ready', 'prepared', 'ready to serve', 'ready for pickup'],
+  Served: ['served', 'delivered', 'completed', 'settled', 'picked up', 'pickedup', 'closed'],
+  Cancelled: ['cancelled', 'rejected', 'canceled', 'declined'],
+};
+
+const maskPhoneLast4 = (phone) => {
+  if (!phone) return '';
+  const str = String(phone).trim();
+  if (str.includes('*')) return str;
+  const digits = str.replace(/\D/g, '');
+  if (digits.length <= 4) return digits;
+  return '******' + digits.slice(-4);
+};
+
+const normalizeStatus = (value) => {
+  const valueLower = String(value ?? '').trim().toLowerCase();
+
+  for (const [status, aliases] of Object.entries(STATUS_ALIASES)) {
+    if (aliases.includes(valueLower)) return status;
+  }
+
+  return 'Pending';
+};
+
+const resolveIsKitchenActive = (ord, isKitchenActiveOverride = null, catalog = null, storeOperatingStatus = null) => {
+  if (typeof isKitchenActiveOverride === 'boolean') return isKitchenActiveOverride;
+  if (typeof api?.isLiveKitchenActive === 'function') {
+    return api.isLiveKitchenActive(ord, catalog, storeOperatingStatus);
+  }
+  return Boolean(ord?.isKitchenActive ?? catalog?.isKitchenActive ?? storeOperatingStatus?.isKitchenActive ?? true);
+};
+
+const getOrderStatusInfo = (ord, isKitchenActiveOverride = null, catalog = null, storeOperatingStatus = null) => {
+  const isKitchenActive = resolveIsKitchenActive(ord, isKitchenActiveOverride, catalog, storeOperatingStatus);
+
+  const paymentMode = String(ord?.paymentMode ?? '').trim().toUpperCase();
+  const paymentMethod = String(ord?.paymentMethod ?? '').trim().toUpperCase();
+  const paymentState = String(ord?.paymentStatus ?? '').trim().toUpperCase();
+
+  const isOnline =
+    PAYMENT_MODE_ONLINE.includes(paymentMode) ||
+    PAYMENT_METHOD_ONLINE.includes(paymentMethod) ||
+    ord?.isOnline === true;
+
+  const isPaid = PAYMENT_STATES_PAID.includes(paymentState) || Boolean(ord?.settledDateUtc) || ord?.isSettled === true || isOnline;
+  const isAwaitingPayment = isOnline && !isPaid;
+
+  let rawStatus = 'Pending';
+  let badge = null;
+
+  if (isKitchenActive) {
+    // If restaurant has IsKitchenActive === true, resolve and display KITCHEN status
+    const kitchenStatusCandidates = [
+      ord?.kitchenStatus,
+      ord?.KitchenStatus,
+      ord?.kitchenOrderStatus,
+      ord?.KitchenOrderStatus,
+    ]
+      .filter((value) => value !== null && value !== undefined && value !== '')
+      .map(normalizeStatus);
+
+    rawStatus =
+      kitchenStatusCandidates.length > 0
+        ? kitchenStatusCandidates[0]
+        : normalizeStatus(ord?.orderStatus || 'Pending');
+
+    const orderStLower = String(ord?.orderStatus || '').toLowerCase();
+    if (orderStLower.includes('serve') || orderStLower.includes('deliver') || orderStLower.includes('complete') || orderStLower.includes('settled')) {
+      rawStatus = 'Served';
+    } else if (orderStLower.includes('cancel')) {
+      rawStatus = 'Cancelled';
+    }
+
+    // Business Rule: For Cash QR orders, status will only be Confirmed AFTER Payment to cashier settlement.
+    if (!isOnline && !isPaid) {
+      if (rawStatus === 'Confirmed' || rawStatus === 'Preparing') {
+        rawStatus = 'Pending';
+      }
+    }
+
+    const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
+
+    const kitchenBadgeByStatus = {
+      Confirmed: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
+      Preparing: { badgeColor: '#ea580c', badgeBg: '#ffedd5', label: 'In Kitchen' },
+      Ready: { badgeColor: '#7c3aed', badgeBg: '#ede9fe', label: 'Ready to Serve' },
+      Served: {
+        badgeColor: '#15803d',
+        badgeBg: '#dcfce7',
+        label: isDineInOrder(ord) ? 'Served to Table' : 'Picked Up',
+      },
+      Cancelled: { badgeColor: '#dc2626', badgeBg: '#fee2e2', label: 'Cancelled' },
+    };
+
+    badge = kitchenBadgeByStatus[normalizedStatus] || {
+      badgeColor: '#0284c7',
+      badgeBg: '#e0f2fe',
+      label: 'Received',
+    };
+
+    return {
+      rawStatus,
+      normalizedStatus,
+      isKitchenActive: true,
+      isOnline,
+      isPaid,
+      isAwaitingPayment,
+      ...badge,
+    };
+  } else {
+    // If restaurant has IsKitchenActive === false, resolve and display ORDER status
+    const orderStatusCandidates = [
+      ord?.orderStatus,
+      ord?.orderStatusName,
+      ord?.status,
+      ord?.statusName,
+      ord?.orderState,
+    ]
+      .filter((value) => value !== null && value !== undefined && value !== '')
+      .map(normalizeStatus);
+
+    rawStatus =
+      orderStatusCandidates.length > 0
+        ? orderStatusCandidates[0]
+        : 'Pending';
+
+    // Business Rule: For Cash QR orders, status will only be Confirmed AFTER Payment to cashier settlement.
+    if (!isOnline && !isPaid) {
+      if (rawStatus === 'Confirmed') {
+        rawStatus = 'Pending';
+      }
+    }
+
+    const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
+
+    const orderBadgeByStatus = {
+      Confirmed: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
+      Preparing: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
+      Ready: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
+      Served: {
+        badgeColor: '#15803d',
+        badgeBg: '#dcfce7',
+        label: isDineInOrder(ord) ? 'Completed' : 'Picked Up',
+      },
+      Delivered: {
+        badgeColor: '#15803d',
+        badgeBg: '#dcfce7',
+        label: 'Completed',
+      },
+      Cancelled: { badgeColor: '#dc2626', badgeBg: '#fee2e2', label: 'Cancelled' },
+    };
+
+    badge = orderBadgeByStatus[normalizedStatus] || {
+      badgeColor: '#0284c7',
+      badgeBg: '#e0f2fe',
+      label: 'Placed',
+    };
+
+    return {
+      rawStatus,
+      normalizedStatus,
+      isKitchenActive: false,
+      isOnline,
+      isPaid,
+      isAwaitingPayment,
+      ...badge,
+    };
+  }
+};
+
+const getOrderItems = (orderItem) => {
+  if (!orderItem) return [];
+  if (Array.isArray(orderItem.items) && orderItem.items.length > 0) return orderItem.items;
+  if (Array.isArray(orderItem.orderItems) && orderItem.orderItems.length > 0) return orderItem.orderItems;
+  if (Array.isArray(orderItem.OrderItems) && orderItem.OrderItems.length > 0) return orderItem.OrderItems;
+  if (Array.isArray(orderItem.Items) && orderItem.Items.length > 0) return orderItem.Items;
+  if (Array.isArray(orderItem.orderDetails) && orderItem.orderDetails.length > 0) return orderItem.orderDetails;
+  if (Array.isArray(orderItem.OrderDetails) && orderItem.OrderDetails.length > 0) return orderItem.OrderDetails;
+  return Array.isArray(orderItem.items) ? orderItem.items : [];
+};
+
+const getOrderTokenNumber = (ord) => {
+  if (!ord) return 'TK-001';
+  if (ord.pickupToken) return ord.pickupToken;
+  if (ord.tokenNumber) return `TK-${String(ord.tokenNumber).padStart(3, '0')}`;
+  if (ord.TokenNumber) return `TK-${String(ord.TokenNumber).padStart(3, '0')}`;
+  const idVal = ord.id ?? ord.orderId ?? ord.Id ?? ord.OrderId;
+  return idVal ? `TK-${String(idVal).padStart(3, '0')}` : 'TK-001';
+};
+
+const formatOrderDate = (ord, fallback = 'Just now') => {
+  const value = ord?.createdDateUtc || ord?.createdAt || ord?.CreatedDateUtc || ord?.CreatedAt;
+  return value
+    ? new Date(value).toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      })
+    : fallback;
+};
+
+const normalizeDeliveryType = (value) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
+    .replace(/-+/g, '-');
+
+const isDineInOrder = (ord) =>
+  ['dine-in', 'dine-in-order', 'dinein'].includes(
+    normalizeDeliveryType(ord?.deliveryType || ord?.DeliveryType)
+  );
+
+const hasOrderTableId = (ord) => {
+  if (!ord) return false;
+  const tid = ord.tableId ?? ord.TableId ?? ord.tableNumber ?? ord.TableNumber;
+  if (tid === null || tid === undefined || tid === '' || tid === false) return false;
+  const num = Number(tid);
+  if (!isNaN(num)) {
+    return num > 0;
+  }
+  return String(tid).trim().length > 0;
+};
+
+const getOrderDiningType = (ord) =>
+  isDineInOrder(ord) ? 'Dine-In' : 'Self Pickup';
+
+const getOrderChannelText = (ord) =>
+  isDineInOrder(ord)
+    ? ord?.tableName
+      ? `Dine-In • ${ord.tableName}`
+      : hasOrderTableId(ord)
+      ? `Dine-In • Table #${ord.tableId}`
+      : 'Dine-In'
+    : 'Self Pickup';
+
+const getItemUnitName = (item) =>
+  item?.unitName ||
+  item?.unitDescription ||
+  (item?.unit ? `Unit #${item.unit}` : '') ||
+  'Plate';
+
+
+const isCompletedOrderStatus = (status) => TERMINAL_STATUSES.includes(status);
+
+const filterOrders = (ordersList, activeTab, searchQuery) => {
+  const list = Array.isArray(ordersList) ? ordersList : [];
+  const query = (searchQuery || '').trim().toLowerCase();
+
+  return list.filter((ord) => {
+    const { normalizedStatus } = getOrderStatusInfo(ord);
+
+    if (activeTab === 'active' && isCompletedOrderStatus(normalizedStatus)) {
+      return false;
+    }
+
+    if (activeTab === 'completed' && !isCompletedOrderStatus(normalizedStatus)) {
+      return false;
+    }
+
+    if (!query) return true;
+
+    const idStr = String(ord?.id || ord?.orderId || '');
+    const tokenStr = String(ord?.pickupToken || ord?.tokenNumber || '').toLowerCase();
+    const dinerName = String(ord?.customerName || ord?.name || '').toLowerCase();
+    const tableStr = String(ord?.tableName || ord?.tableNumber || '').toLowerCase();
+    const itemsMatch = getOrderItems(ord).some((item) =>
+      String(item?.itemName || item?.name || '')
+        .toLowerCase()
+        .includes(query)
+    );
+
+    return (
+      idStr.includes(query) ||
+      tokenStr.includes(query) ||
+      dinerName.includes(query) ||
+      tableStr.includes(query) ||
+      itemsMatch
+    );
+  });
+};
+
+const getOrderTabCounts = (ordersList) => {
+  const list = Array.isArray(ordersList) ? ordersList : [];
+  let activeCount = 0;
+  let completedCount = 0;
+
+  for (const order of list) {
+    const { normalizedStatus } = getOrderStatusInfo(order);
+    if (['Delivered', 'Cancelled'].includes(normalizedStatus)) {
+      completedCount += 1;
+    } else {
+      activeCount += 1;
+    }
+  }
+
+  return { activeCount, completedCount };
+};
+
 export default function OrderTrackerModal({
   visible,
   onClose,
   order,
+  targetOrder,
   orders = [],
   catalog,
   activeTable,
@@ -59,8 +387,11 @@ export default function OrderTrackerModal({
   onCallWaiter,
   onRequestBill,
 }) {
-  const [selectedOrder, setSelectedOrder] = useState(order || null);
-  const [viewMode, setViewMode] = useState(order ? 'detail' : 'list');
+  const [selectedOrder, setSelectedOrder] = useState(() => {
+    const init = targetOrder || order || api.getSavedActiveOrder() || null;
+    return init && api.normalizeOrder ? api.normalizeOrder(init) : init;
+  });
+  const [viewMode, setViewMode] = useState(() => (targetOrder || order || api.getSavedActiveOrder() ? 'detail' : 'list'));
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [allOrdersList, setAllOrdersList] = useState([]);
@@ -76,12 +407,37 @@ export default function OrderTrackerModal({
     return () => clearInterval(timer);
   }, [visible]);
 
+  // Synchronize on order prop change or whenever tracker modal becomes visible
   useEffect(() => {
-    if (order) {
-      setSelectedOrder(order);
-      setViewMode('detail');
+    if (!visible) return;
+
+    let target = targetOrder || order || selectedOrder || api.getSavedActiveOrder();
+    if (!target && typeof localStorage !== 'undefined') {
+      try {
+        const localOrds = api.getLocalOrders ? api.getLocalOrders() : [];
+        if (localOrds && localOrds.length > 0) {
+          target = localOrds[0];
+        } else {
+          const rawPending = localStorage.getItem('pending_cf_order_latest');
+          if (rawPending) {
+            target = JSON.parse(rawPending);
+          }
+        }
+      } catch (e) {}
     }
-  }, [order]);
+
+    const tid = Number(target?.id || target?.orderId || target?.Id || target?.OrderId);
+    if (tid) {
+      const normalized = api.normalizeOrder ? api.normalizeOrder(target) : target;
+      setSelectedOrder(normalized);
+      setViewMode('detail');
+    } else if (allOrdersList.length > 0) {
+      setSelectedOrder(allOrdersList[0]);
+      setViewMode('detail');
+    } else {
+      setViewMode('list');
+    }
+  }, [visible, order, targetOrder]);
 
   useEffect(() => {
     if (!visible) return;
@@ -98,15 +454,35 @@ export default function OrderTrackerModal({
 
       const ords = await api.getRestaurantOrders(restId, phone);
 
-      const combined = [...(ords || []), ...(orders || [])];
+      const savedActive = api.getSavedActiveOrder();
+      const localOrders = api.getLocalOrders ? api.getLocalOrders() : [];
+      let pendingLatest = null;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const rawP = localStorage.getItem('pending_cf_order_latest');
+          if (rawP) pendingLatest = JSON.parse(rawP);
+        }
+      } catch (e) {}
+
+      const combined = [
+        ...(targetOrder ? [targetOrder] : []),
+        ...(order ? [order] : []),
+        ...(selectedOrder ? [selectedOrder] : []),
+        ...(savedActive ? [savedActive] : []),
+        ...(localOrders || []),
+        ...(pendingLatest ? [pendingLatest] : []),
+        ...(ords || []),
+        ...(orders || []),
+      ];
       const uniqueMap = new Map();
 
       for (const o of combined) {
-        const id = Number(o?.orderId || o?.id);
+        const id = Number(o?.id || o?.orderId || o?.Id || o?.OrderId);
 
         if (id && !uniqueMap.has(id)) {
           const norm = api.normalizeOrder ? api.normalizeOrder(o) : o;
-          if (selectedOrder && Number(selectedOrder.id) === id) {
+          const curSelectedId = Number(selectedOrder?.id || selectedOrder?.orderId || selectedOrder?.Id || selectedOrder?.OrderId);
+          if (curSelectedId && curSelectedId === id) {
             uniqueMap.set(id, {
               ...norm,
               kitchenStatus: selectedOrder.kitchenStatus || norm.kitchenStatus,
@@ -120,19 +496,18 @@ export default function OrderTrackerModal({
 
       const list = Array.from(uniqueMap.values()).sort(
         (a, b) =>
-          new Date(b?.createdAt || b?.createdDateUtc || 0) -
-          new Date(a?.createdAt || a?.createdDateUtc || 0)
+          new Date(b?.createdAt || b?.createdDateUtc || b?.CreatedAt || b?.CreatedDateUtc || 0) -
+          new Date(a?.createdAt || a?.createdDateUtc || a?.CreatedAt || a?.CreatedDateUtc || 0)
       );
 
       setAllOrdersList(list);
 
-      if (
-        !order &&
-        (!selectedOrder ||
-          !list.some((o) => Number(o.id) === Number(selectedOrder.id)))
-      ) {
-        if (list.length === 1) {
+      // If selectedOrder is null or not in list, auto-select latest order so user never sees empty screen
+      if (list.length > 0) {
+        const curId = Number(selectedOrder?.id || selectedOrder?.orderId || selectedOrder?.Id || selectedOrder?.OrderId);
+        if (!curId || !list.some((o) => Number(o?.id || o?.orderId || o?.Id || o?.OrderId) === curId)) {
           setSelectedOrder(list[0]);
+          setViewMode('detail');
         }
       }
     } catch (err) {
@@ -143,7 +518,8 @@ export default function OrderTrackerModal({
   };
 
   useEffect(() => {
-    if (!visible || viewMode !== 'detail' || !selectedOrder?.id) {
+    const activeOrderId = Number(selectedOrder?.id || selectedOrder?.orderId || selectedOrder?.Id || selectedOrder?.OrderId);
+    if (!visible || viewMode !== 'detail' || !activeOrderId) {
       return undefined;
     }
 
@@ -151,7 +527,7 @@ export default function OrderTrackerModal({
     let lastRefreshTime = 0;
 
     // Join SignalR order group for instant push updates
-    signalrService.joinOrderGroup(selectedOrder.id);
+    signalrService.joinOrderGroup(activeOrderId);
 
     const refresh = async (force = false) => {
       const now = Date.now();
@@ -164,33 +540,14 @@ export default function OrderTrackerModal({
         let latest = null;
 
         if (typeof onRefreshOrder === 'function') {
-          latest = await onRefreshOrder(selectedOrder.id);
+          latest = await onRefreshOrder(activeOrderId);
         } else {
-          latest = await api.getOrder(selectedOrder.id);
+          latest = await api.getOrder(activeOrderId);
         }
 
         if (!cancelled && latest) {
           setSelectedOrder((prev) => {
             if (!prev) return latest;
-
-            const STATUS_RANKS = {
-              pending: 0,
-              placed: 0,
-              new: 0,
-              created: 0,
-              confirmed: 1,
-              accepted: 1,
-              preparing: 2,
-              cooking: 2,
-              in_kitchen: 2,
-              kitchen: 2,
-              ready: 3,
-              prepared: 3,
-              delivered: 4,
-              served: 4,
-              completed: 4,
-              settled: 4,
-            };
 
             const prevOrderRank = STATUS_RANKS[String(prev.orderStatus || '').trim().toLowerCase()] ?? 0;
             const latestOrderRank = STATUS_RANKS[String(latest.orderStatus || '').trim().toLowerCase()] ?? 0;
@@ -233,7 +590,7 @@ export default function OrderTrackerModal({
     // Real-Time SignalR Listener: Direct in-memory state update without HTTP request
     const unsubscribeSignalR = signalrService.onOrderStatusChanged((data) => {
       const changedOrderId = Number(data?.orderId || data?.OrderId || data?.id || data?.Id || 0);
-      if (changedOrderId === Number(selectedOrder.id) || !changedOrderId) {
+      if (changedOrderId === activeOrderId || !changedOrderId) {
         console.log('⚡ [SignalR] Real-time order update received in-memory:', data);
 
         const newOrderStatus = data?.orderStatus || data?.OrderStatus || data?.status || data?.Status;
@@ -293,379 +650,162 @@ export default function OrderTrackerModal({
       cancelled = true;
       if (interval) clearInterval(interval);
       unsubscribeSignalR();
-      if (selectedOrder?.id) {
-        signalrService.leaveOrderGroup(selectedOrder.id);
+      if (activeOrderId) {
+        signalrService.leaveOrderGroup(activeOrderId);
       }
     };
   }, [
     visible,
     viewMode,
     selectedOrder?.id,
+    selectedOrder?.orderId,
+    selectedOrder?.Id,
+    selectedOrder?.OrderId,
     onRefreshOrder,
   ]);
 
-  if (!visible) return null;
-
-  const maskPhoneLast4 = (phone) => {
-    if (!phone) return '';
-    const str = String(phone).trim();
-    if (str.includes('*')) return str;
-    const digits = str.replace(/\D/g, '');
-    if (digits.length <= 4) return digits;
-    return '******' + digits.slice(-4);
-  };
-
-  const normalizeStatus = (value) => {
-    const valueLower = String(value ?? '')
-      .trim()
-      .toLowerCase();
-
-    if (
-      [
-        'pending',
-        'placed',
-        'created',
-        'new',
-        'received',
-      ].includes(valueLower)
-    ) {
-      return 'Pending';
-    }
-
-    if (
-      [
-        'confirmed',
-        'accepted',
-        'approved',
-        'order confirmed',
-      ].includes(valueLower)
-    ) {
-      return 'Confirmed';
-    }
-
-    if (
-      [
-        'preparing',
-        'prepare',
-        'in preparation',
-        'processing',
-        'cooking',
-        'in kitchen',
-        'kitchen',
-      ].includes(valueLower)
-    ) {
-      return 'Preparing';
-    }
-
-    if (
-      [
-        'ready',
-        'prepared',
-        'ready to serve',
-        'ready for pickup',
-      ].includes(valueLower)
-    ) {
-      return 'Ready';
-    }
-
-    if (
-      [
-        'served',
-        'delivered',
-        'completed',
-        'settled',
-        'picked up',
-        'pickedup',
-        'closed',
-      ].includes(valueLower)
-    ) {
-      return 'Served';
-    }
-
-    if (
-      [
-        'cancelled',
-        'rejected',
-        'canceled',
-        'declined',
-      ].includes(valueLower)
-    ) {
-      return 'Cancelled';
-    }
-
-    return 'Pending';
-  };
-
-  const getOrderStatusInfo = (ord) => {
-    const statusCandidates = [
-      ord?.kitchenStatus,
-      ord?.kitchenOrderStatus,
-      ord?.orderStatus,
-      ord?.orderStatusName,
-      ord?.status,
-      ord?.statusName,
-      ord?.orderState,
-    ]
-      .filter(
-        (v) =>
-          v !== null &&
-          v !== undefined &&
-          v !== ''
-      )
-      .map(normalizeStatus);
-
-    const rawStatus =
-      statusCandidates.length > 0
-        ? statusCandidates.reduce((best, value) =>
-            STATUSES.indexOf(value) >
-            STATUSES.indexOf(best)
-              ? value
-              : best
-          )
-        : 'Pending';
-
-    const paymentMode = String(
-      ord?.paymentMode ?? ''
-    )
-      .trim()
-      .toUpperCase();
-
-    const paymentMethod = String(
-      ord?.paymentMethod ?? ''
-    )
-      .trim()
-      .toUpperCase();
-
-    const paymentState = String(
-      ord?.paymentStatus ?? ''
-    )
-      .trim()
-      .toUpperCase();
-
-    const isOnline =
-      ['ONLINE', 'CASHFREE', 'UPI'].includes(
-        paymentMode
-      ) ||
-      [
-        'CASHFREE',
-        'CASHFREE_SPLIT',
-        'ONLINE',
-        'UPI',
-      ].includes(paymentMethod) ||
-      ord?.isOnline === true;
-
-    const isPaid = [
-      'PAID',
-      'SUCCESS',
-      'COMPLETED',
-      'CAPTURED',
-    ].includes(paymentState) || isOnline;
-
-    const isAwaitingPayment =
-      isOnline && !isPaid;
-
-    const normalizedStatus = isAwaitingPayment
-      ? 'Pending'
-      : rawStatus;
-
-    let badgeColor = '#0284c7';
-    let badgeBg = '#e0f2fe';
-    let label = 'Placed';
-
-    if (normalizedStatus === 'Confirmed') {
-      badgeColor = '#0d9488';
-      badgeBg = '#ccfbf1';
-      label = 'Confirmed';
-    } else if (
-      normalizedStatus === 'Preparing'
-    ) {
-      badgeColor = '#ea580c';
-      badgeBg = '#ffedd5';
-      label = 'In Kitchen';
-    } else if (normalizedStatus === 'Ready') {
-      badgeColor = '#7c3aed';
-      badgeBg = '#ede9fe';
-      label = 'Ready to Serve';
-    } else if (
-      normalizedStatus === 'Served' ||
-      normalizedStatus === 'Delivered'
-    ) {
-      badgeColor = '#15803d';
-      badgeBg = '#dcfce7';
-      label = 'Served to Table';
-    } else if (
-      normalizedStatus === 'Cancelled'
-    ) {
-      badgeColor = '#dc2626';
-      badgeBg = '#fee2e2';
-      label = 'Cancelled';
-    }
-
-    return {
-      rawStatus,
-      normalizedStatus,
-      isOnline,
-      isPaid,
-      isAwaitingPayment,
-      badgeColor,
-      badgeBg,
-      label,
-    };
-  };
-
-  const filteredOrders = allOrdersList.filter(
-    (ord) => {
-      const { normalizedStatus } =
-        getOrderStatusInfo(ord);
-
-      if (activeTab === 'active') {
-        if (
-          ['Served', 'Delivered', 'Cancelled'].includes(
-            normalizedStatus
-          )
-        ) {
-          return false;
-        }
-      } else if (activeTab === 'completed') {
-        if (
-          !['Served', 'Delivered', 'Cancelled'].includes(
-            normalizedStatus
-          )
-        ) {
-          return false;
-        }
-      }
-
-      if (searchQuery.trim()) {
-        const q =
-          searchQuery.toLowerCase();
-
-        const idStr = String(
-          ord.id || ord.orderId || ''
-        );
-
-        const tokenStr = String(
-          ord.pickupToken ||
-            ord.tokenNumber ||
-            ''
-        ).toLowerCase();
-
-        const dinerName = String(
-          ord.customerName ||
-            ord.name ||
-            ''
-        ).toLowerCase();
-
-        const tableStr = String(
-          ord.tableName ||
-            ord.tableNumber ||
-            ''
-        ).toLowerCase();
-
-        const itemsMatch =
-          Array.isArray(ord.items) &&
-          ord.items.some((i) =>
-            String(
-              i.itemName ||
-                i.name ||
-                ''
-            )
-              .toLowerCase()
-              .includes(q)
-          );
-
-        return (
-          idStr.includes(q) ||
-          tokenStr.includes(q) ||
-          dinerName.includes(q) ||
-          tableStr.includes(q) ||
-          itemsMatch
-        );
-      }
-
-      return true;
-    }
+  const filteredOrders = useMemo(
+    () => filterOrders(allOrdersList, activeTab, searchQuery),
+    [allOrdersList, activeTab, searchQuery]
   );
 
-  const activeCount =
-    allOrdersList.filter((o) => {
-      const { normalizedStatus } =
-        getOrderStatusInfo(o);
+  const { activeCount, completedCount } = useMemo(
+    () => getOrderTabCounts(allOrdersList),
+    [allOrdersList]
+  );
 
-      return ![
-        'Delivered',
-        'Cancelled',
-      ].includes(normalizedStatus);
-    }).length;
+  if (!visible) return null;
 
-  const completedCount =
-    allOrdersList.filter((o) => {
-      const { normalizedStatus } =
-        getOrderStatusInfo(o);
+  const handleWaiterAction = (action) => {
+    if (!hasOrderTableId(selectedOrder)) {
+      return;
+    }
 
-      return [
-        'Delivered',
-        'Cancelled',
-      ].includes(normalizedStatus);
-    }).length;
+    if (typeof openCallWaiter === 'function') {
+      openCallWaiter(action);
+      return;
+    }
+
+    if (action === 'REQUEST_BILL' && typeof onRequestBill === 'function') {
+      onRequestBill();
+      return;
+    }
+
+    if (typeof onCallWaiter === 'function') {
+      onCallWaiter(action);
+    }
+  };
+
+  const handleSelectOrder = (ord) => {
+    setSelectedOrder(ord);
+    setViewMode('detail');
+  };
 
   /* =========================================================
      RENDER: ORDER DETAIL & RECEIPT VIEW
   ========================================================= */
   const renderDetailView = () => {
-    if (!selectedOrder) {
-      return (
-        <View style={styles.emptyContainer}>
-          <UtensilsCrossed
-            size={36}
-            color="#cbd5e1"
-          />
+    try {
+      let activeOrd =
+        selectedOrder ||
+        targetOrder ||
+        order ||
+        api.getSavedActiveOrder() ||
+        (allOrdersList.length > 0 ? allOrdersList[0] : null);
 
-          <Text style={styles.emptyTitle}>
-            No Order Selected
-          </Text>
+      if (!activeOrd) {
+        try {
+          const localOrds = api.getLocalOrders ? api.getLocalOrders() : [];
+          if (localOrds && localOrds.length > 0) {
+            activeOrd = localOrds[0];
+          } else if (typeof localStorage !== 'undefined') {
+            const rawP = localStorage.getItem('pending_cf_order_latest');
+            if (rawP) activeOrd = JSON.parse(rawP);
+          }
+        } catch (e) {}
+      }
 
-          <TouchableOpacity
-            style={styles.backToListBtn}
-            onPress={() =>
-              setViewMode('list')
-            }
-          >
-            <Text
-              style={
-                styles.backToListBtnText
-              }
-            >
-              View All Orders
+      if (!activeOrd) {
+        if (allOrdersList.length > 0) {
+          return renderListView();
+        }
+        return (
+          <View style={styles.emptyContainer}>
+            <UtensilsCrossed
+              size={38}
+              color="#EA580C"
+            />
+
+            <Text style={styles.emptyTitle}>
+              No Active Orders
             </Text>
-          </TouchableOpacity>
-        </View>
+
+            <Text style={styles.emptySubtitle}>
+              Browse our menu and place your order. You can track real-time kitchen preparation status right here!
+            </Text>
+
+            <TouchableOpacity
+              style={styles.backToListBtn}
+              onPress={onClose}
+            >
+              <Text
+                style={
+                  styles.backToListBtnText
+                }
+              >
+                Browse Menu Catalog
+              </Text>
+            </TouchableOpacity>
+          </View>
+        );
+      }
+
+      const normalizedOrd = api.normalizeOrder ? api.normalizeOrder(activeOrd) : activeOrd;
+      const selectedOrder = normalizedOrd || activeOrd;
+
+      const isKitchenActive = resolveIsKitchenActive(selectedOrder, null, catalog, storeOperatingStatus);
+      const isKitchenDisabled = !isKitchenActive;
+
+      const {
+        normalizedStatus,
+        isOnline,
+        isPaid,
+        isAwaitingPayment,
+        badgeColor,
+        badgeBg,
+        label,
+      } = getOrderStatusInfo(
+        selectedOrder,
+        isKitchenActive,
+        catalog,
+        storeOperatingStatus
       );
-    }
 
-    const {
-      normalizedStatus,
-      isOnline,
-      isPaid,
-      isAwaitingPayment,
-      badgeColor,
-      badgeBg,
-      label,
-    } = getOrderStatusInfo(
-      selectedOrder
-    );
-
-    const prepCountdown = api.getDecreasingPreparationCountdown(
-      selectedOrder,
-      catalog,
-      storeOperatingStatus
-    );
-
-    const isKitchenActive = api.isLiveKitchenActive
-      ? api.isLiveKitchenActive(selectedOrder, catalog, storeOperatingStatus)
-      : (selectedOrder?.isKitchenActive ?? catalog?.isKitchenActive ?? storeOperatingStatus?.isKitchenActive ?? true);
-
-    const isKitchenDisabled = !isKitchenActive;
+      let prepCountdown = {
+        formatted: 'Order confirmed',
+        shortFormatted: 'Confirmed',
+        diffSec: 0,
+        minutes: 0,
+        seconds: 0,
+        isFinished: false,
+        isOverdue: false,
+        isAwaitingConfirmation: false,
+        isTakeaway: false,
+        isKitchenStatusDisabled: isKitchenDisabled,
+        statusMessage: 'Order confirmed and received by restaurant.',
+      };
+      try {
+        if (typeof api?.getDecreasingPreparationCountdown === 'function') {
+          const res = api.getDecreasingPreparationCountdown(
+            selectedOrder,
+            catalog,
+            storeOperatingStatus
+          );
+          if (res) prepCountdown = { ...prepCountdown, ...res };
+        }
+      } catch (e) {
+        console.warn('prepCountdown calculation error:', e);
+      }
 
     const currentIdx =
       STATUSES.indexOf(normalizedStatus) >= 0
@@ -674,104 +814,62 @@ export default function OrderTrackerModal({
         ? STATUSES.indexOf('Served')
         : 0;
 
-    const items = Array.isArray(
-      selectedOrder.items
-    )
-      ? selectedOrder.items
-      : [];
+    const items = getOrderItems(selectedOrder);
+
+    const itemsSum = items.reduce(
+      (sum, item) => {
+        const q = Number(item.quantity || 1);
+        const p = Number(item.unitPrice ?? item.price ?? item.amount ?? (item.totalAmount > 0 ? item.totalAmount / q : 0));
+        const t = Number(item.totalAmount ?? (p * q));
+        return sum + t;
+      },
+      0
+    );
 
     const subtotal =
       Number(
-        selectedOrder.subTotal ??
-          selectedOrder.itemTotal ??
-          items.reduce(
-            (sum, item) =>
-              sum +
-              Number(
-                item.amount ??
-                  item.unitPrice ??
-                  item.price ??
-                  0
-              ) *
-                Number(
-                  item.quantity || 1
-                ),
-            0
-          )
+        (selectedOrder.subTotal > 0 ? selectedOrder.subTotal : null) ??
+          (selectedOrder.orderAmount > 0 ? selectedOrder.orderAmount : null) ??
+          (selectedOrder.itemTotal > 0 ? selectedOrder.itemTotal : null) ??
+          (itemsSum > 0 ? itemsSum : 0)
       ) || 0;
 
     const cgst =
       Number(
-        selectedOrder.cgstAmount ?? 0
-      ) ||
-      Math.round(
-        subtotal * 0.025 * 100
-      ) / 100;
+        (selectedOrder.cgstAmount > 0 ? selectedOrder.cgstAmount : null) ??
+          (selectedOrder.cgst > 0 ? selectedOrder.cgst : null) ??
+          Math.round(
+            subtotal * 0.025 * 100
+          ) / 100
+      ) || 0;
 
     const sgst =
       Number(
-        selectedOrder.sgstAmount ?? 0
-      ) ||
-      Math.round(
-        subtotal * 0.025 * 100
-      ) / 100;
+        (selectedOrder.sgstAmount > 0 ? selectedOrder.sgstAmount : null) ??
+          (selectedOrder.sgst > 0 ? selectedOrder.sgst : null) ??
+          Math.round(
+            subtotal * 0.025 * 100
+          ) / 100
+      ) || 0;
 
     const grandTotal =
       Number(
-        selectedOrder.totalAmount ??
-          subtotal + cgst + sgst
+        (selectedOrder.totalAmount > 0 ? selectedOrder.totalAmount : null) ??
+          (subtotal + cgst + sgst)
       ) || 0;
 
-    const tokenNumber =
-      selectedOrder.pickupToken ||
-      (selectedOrder.tokenNumber
-        ? `TK-${String(
-            selectedOrder.tokenNumber
-          ).padStart(3, '0')}`
-        : `TK-${String(
-            selectedOrder.id
-          ).padStart(3, '0')}`);
+    const tokenNumber = getOrderTokenNumber(selectedOrder);
 
-    const formattedDate =
-      selectedOrder.createdDateUtc ||
-      selectedOrder.createdAt
-        ? new Date(
-            selectedOrder.createdDateUtc ||
-              selectedOrder.createdAt
-          ).toLocaleString(
-            'en-IN',
-            {
-              dateStyle: 'medium',
-              timeStyle: 'short',
-            }
-          )
-        : new Date().toLocaleString(
-            'en-IN',
-            {
-              dateStyle: 'medium',
-              timeStyle: 'short',
-            }
-          );
+    const formattedDate = formatOrderDate(selectedOrder);
 
-    const channelText =
-      selectedOrder.tableName
-        ? `Dine-In • ${selectedOrder.tableName}`
-        : selectedOrder.tableId
-        ? `Dine-In • Table #${selectedOrder.tableId}`
-        : 'Quick Order (Counter / Takeaway)';
-
-    const isTableOrder = Boolean(
-      selectedOrder.tableName ||
-      selectedOrder.tableId ||
-      activeTable?.tableName ||
-      activeTable?.id
-    );
+    const hasTable = hasOrderTableId(selectedOrder);
+    const isTableOrder = isDineInOrder(selectedOrder) && hasTable;
+    const channelText = getOrderChannelText(selectedOrder);
+    const diningType = getOrderDiningType(selectedOrder);
 
     const displayTableName =
       selectedOrder.tableName ||
-      activeTable?.tableName ||
-      activeTable?.name ||
-      (selectedOrder.tableId ? `Table #${selectedOrder.tableId}` : activeTable?.id ? `Table #${activeTable.id}` : 'Table');
+      (hasTable ? `Table #${selectedOrder.tableId}` : 'Table');
 
     return (
       <ScrollView
@@ -893,7 +991,7 @@ export default function OrderTrackerModal({
                   {tokenNumber}
                 </Text>
               </View>
-              <Text style={styles.orderIdHeroText}>Order #{selectedOrder.id}</Text>
+              <Text style={styles.orderIdHeroText}>Order #{selectedOrder.id || selectedOrder.orderId || selectedOrder.Id || selectedOrder.OrderId}</Text>
             </View>
 
             <View
@@ -959,7 +1057,7 @@ export default function OrderTrackerModal({
             <View style={styles.waiterActionsGrid}>
               <TouchableOpacity
                 style={[styles.waiterActionBtn, styles.waiterActionBtnPrimary]}
-                onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('CALL_WAITER') : typeof onCallWaiter === 'function' ? onCallWaiter('CALL_WAITER') : null)}
+                onPress={() => handleWaiterAction('CALL_WAITER')}
                 activeOpacity={0.75}
                 accessibilityRole="button"
                 accessibilityLabel="Call Waiter"
@@ -973,7 +1071,7 @@ export default function OrderTrackerModal({
 
               <TouchableOpacity
                 style={[styles.waiterActionBtn, styles.waiterActionBtnWater]}
-                onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('REQUEST_WATER') : typeof onCallWaiter === 'function' ? onCallWaiter('REQUEST_WATER') : null)}
+                onPress={() => handleWaiterAction('REQUEST_WATER')}
                 activeOpacity={0.75}
                 accessibilityRole="button"
                 accessibilityLabel="Request Drinking Water"
@@ -987,7 +1085,7 @@ export default function OrderTrackerModal({
 
               <TouchableOpacity
                 style={[styles.waiterActionBtn, styles.waiterActionBtnBill]}
-                onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('REQUEST_BILL') : typeof onRequestBill === 'function' ? onRequestBill() : typeof onCallWaiter === 'function' ? onCallWaiter('REQUEST_BILL') : null)}
+                onPress={() => handleWaiterAction('REQUEST_BILL')}
                 activeOpacity={0.75}
                 accessibilityRole="button"
                 accessibilityLabel="Request Bill"
@@ -1001,7 +1099,7 @@ export default function OrderTrackerModal({
 
               <TouchableOpacity
                 style={[styles.waiterActionBtn, styles.waiterActionBtnClean]}
-                onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('CLEAN_TABLE') : typeof onCallWaiter === 'function' ? onCallWaiter('CLEAN_TABLE') : null)}
+                onPress={() => handleWaiterAction('CLEAN_TABLE')}
                 activeOpacity={0.75}
                 accessibilityRole="button"
                 accessibilityLabel="Clean Table"
@@ -1094,7 +1192,11 @@ export default function OrderTrackerModal({
                     : 'Order confirmed and received by restaurant.'}
                 </Text>
                 <Text style={styles.statusMessageSub}>
-                  {prepCountdown.statusMessage}
+                  {normalizedStatus === 'Served' || normalizedStatus === 'Delivered'
+                    ? (prepCountdown.isTakeaway ? 'Thank you for ordering with us!' : 'Order served to your table. Enjoy your meal!')
+                    : prepCountdown.isAwaitingConfirmation
+                    ? 'Awaiting cashier confirmation before kitchen preparation begins.'
+                    : 'Your order has been received and is being processed.'}
                 </Text>
               </View>
             </View>
@@ -1162,7 +1264,7 @@ export default function OrderTrackerModal({
                       ]}
                       numberOfLines={1}
                     >
-                      {step === 'Delivered' ? 'Served' : step}
+                      {step === 'Delivered' ? 'Served' : (step === 'Pending' ? 'Placed' : step)}
                     </Text>
 
                     {idx < STATUSES.length - 1 && (
@@ -1195,7 +1297,17 @@ export default function OrderTrackerModal({
                     : 'Order queued in kitchen.'}
                 </Text>
                 <Text style={styles.statusMessageSub}>
-                  {prepCountdown.statusMessage}
+                  {normalizedStatus === 'Preparing'
+                    ? 'Dishes are being freshly prepared in the kitchen.'
+                    : normalizedStatus === 'Ready'
+                    ? (prepCountdown.isTakeaway ? 'Please collect your order at the pickup counter.' : 'Server is bringing dishes to your table.')
+                    : normalizedStatus === 'Delivered' || normalizedStatus === 'Served'
+                    ? (prepCountdown.isTakeaway ? 'Thank you for ordering with us!' : 'Order served to your table. Enjoy your feast!')
+                    : prepCountdown.isAwaitingConfirmation
+                    ? 'Awaiting cashier confirmation before kitchen preparation begins.'
+                    : isAwaitingPayment
+                    ? 'Please complete payment to send your order to the kitchen.'
+                    : 'Order confirmed and queued for preparation.'}
                 </Text>
               </View>
             </View>
@@ -1271,7 +1383,7 @@ export default function OrderTrackerModal({
             <View style={styles.infoTableRow}>
               <Text style={styles.infoTableLabel}>Delivery / Dining Type:</Text>
               <Text style={styles.infoTableValue}>
-                {selectedOrder.deliveryType || (selectedOrder.tableId ? 'Dine-In' : 'Takeaway / Counter')}
+                {diningType}
               </Text>
             </View>
 
@@ -1436,9 +1548,9 @@ export default function OrderTrackerModal({
                 const unitPrice =
                   Number(
                     item.unitPrice ??
-                      item.amount ??
                       item.price ??
-                      0
+                      item.amount ??
+                      (item.totalAmount > 0 && qty > 0 ? item.totalAmount / qty : 0)
                   );
 
                 const lineTotal =
@@ -1481,21 +1593,7 @@ export default function OrderTrackerModal({
                           'Menu Dish'}
                       </Text>
 
-                      {(() => {
-                        if (isKitchenDisabled) return null;
-                        const itemPrep =
-                          item.preparationTimeMinutes ||
-                          item.PreparationTimeMinutes ||
-                          catalog?.items?.find((ci) => Number(ci.itemId || ci.id) === Number(item.itemId || item.id))?.preparationTimeMinutes;
-                        if (itemPrep && Number(itemPrep) > 0) {
-                          return (
-                            <Text style={styles.receiptItemPrepText}>
-                              ⏱ ~{itemPrep}m prep
-                            </Text>
-                          );
-                        }
-                        return null;
-                      })()}
+
 
                       {item.cookingInstruction ? (
                         <Text
@@ -1717,7 +1815,7 @@ export default function OrderTrackerModal({
               >
                 {isOnline
                   ? 'Online Payment (Direct / Cashfree)'
-                  : 'Cash Payment (At Counter / Table)'}
+                  : 'Cash Payment (At Counter / Self Pickup)'}
               </Text>
 
               <View
@@ -1748,7 +1846,7 @@ export default function OrderTrackerModal({
                 styles.paymentCardSubText
               }
             >
-              Delivery Type: {selectedOrder.deliveryType || (selectedOrder.tableId ? 'Dine-In' : 'Takeaway / Counter')} • Mode: {selectedOrder.paymentMode || (isOnline ? 'ONLINE' : 'CASH')}
+              Delivery Type: {diningType} • Mode: {selectedOrder.paymentMode || (isOnline ? 'ONLINE' : 'CASH')}
             </Text>
 
             <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: (isPaid || isOnline) ? '#f0fdf4' : '#fffbeb' }}>
@@ -1775,7 +1873,27 @@ export default function OrderTrackerModal({
         </View>
       </ScrollView>
     );
-  };
+  } catch (err) {
+    console.error('renderDetailView error:', err);
+    return (
+      <View style={[styles.emptyContainer, { padding: 24 }]}>
+        <UtensilsCrossed size={36} color="#EA580C" />
+        <Text style={styles.emptyTitle}>Order Tracking</Text>
+        <Text style={styles.emptySubtitle}>
+          {err?.message || 'Unable to display order details. Please refresh or view all orders.'}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+          <TouchableOpacity style={styles.backToListBtn} onPress={loadOrders}>
+            <Text style={styles.backToListBtnText}>Refresh Order</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.backToListBtn, { backgroundColor: '#F1F5F9' }]} onPress={() => setViewMode('list')}>
+            <Text style={[styles.backToListBtnText, { color: '#1B1C1C' }]}>View All Orders</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+};
 
   /* =========================================================
      RENDER: ALL ORDERS LIST VIEW
@@ -1966,10 +2084,21 @@ export default function OrderTrackerModal({
                   ? 'There are no active kitchen orders right now.'
                   : 'Place your order from the menu catalog to track it here.'}
               </Text>
+
+              <TouchableOpacity
+                style={[styles.backToListBtn, { marginTop: 14 }]}
+                onPress={onClose}
+              >
+                <Text style={styles.backToListBtnText}>
+                  Browse Menu & Order
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : (
             filteredOrders.map(
               (ord) => {
+                const isKitchenActive = resolveIsKitchenActive(ord, null, catalog, storeOperatingStatus);
+
                 const {
                   badgeColor,
                   badgeBg,
@@ -1978,81 +2107,68 @@ export default function OrderTrackerModal({
                   isPaid,
                 } =
                   getOrderStatusInfo(
-                    ord
+                    ord,
+                    isKitchenActive,
+                    catalog,
+                    storeOperatingStatus
                   );
 
-                const items =
-                  Array.isArray(
-                    ord.items
-                  )
-                    ? ord.items
-                    : [];
+                const items = getOrderItems(ord);
 
-                const tokenNumber =
-                  ord.pickupToken ||
-                  (ord.tokenNumber
-                    ? `TK-${String(
-                        ord.tokenNumber
-                      ).padStart(
-                        3,
-                        '0'
-                      )}`
-                    : `TK-${String(
-                        ord.id
-                      ).padStart(
-                        3,
-                        '0'
-                      )}`);
+                const tokenNumber = getOrderTokenNumber(ord);
 
-                const formattedDate =
-                  ord.createdDateUtc ||
-                  ord.createdAt
-                    ? new Date(
-                        ord.createdDateUtc ||
-                          ord.createdAt
-                      ).toLocaleString(
-                        'en-IN',
-                        {
-                          dateStyle:
-                            'medium',
-                          timeStyle:
-                            'short',
-                        }
-                      )
-                    : 'Just now';
+                const formattedDate = formatOrderDate(ord);
 
-                const channelText =
-                  ord.tableName
-                    ? `Table ${ord.tableName}`
-                    : ord.tableId
-                    ? `Table #${ord.tableId}`
-                    : 'Counter / Takeaway';
+                const channelText = getOrderChannelText(ord);
+
+                const itemsSum = items.reduce((sum, item) => {
+                  const q = Number(item.quantity || 1);
+                  const p = Number(item.unitPrice ?? item.price ?? item.amount ?? (item.totalAmount > 0 ? item.totalAmount / q : 0));
+                  const t = Number(item.totalAmount ?? (p * q));
+                  return sum + t;
+                }, 0);
 
                 const totalAmount =
                   Number(
-                    ord.totalAmount ||
-                      0
+                    (ord.totalAmount > 0 ? ord.totalAmount : null) ??
+                    (ord.subTotal > 0 ? ord.subTotal : null) ??
+                    (ord.orderAmount > 0 ? ord.orderAmount : null) ??
+                    (itemsSum > 0 ? itemsSum * 1.05 : 0)
                   );
 
-                const ordCountdown = api.getDecreasingPreparationCountdown(ord, catalog, storeOperatingStatus);
+                let ordCountdown = {
+                  formatted: 'Order confirmed',
+                  shortFormatted: 'Confirmed',
+                  diffSec: 0,
+                  minutes: 0,
+                  seconds: 0,
+                  isFinished: false,
+                  isOverdue: false,
+                  isAwaitingConfirmation: false,
+                  isTakeaway: false,
+                  isKitchenStatusDisabled: true,
+                  statusMessage: 'Order confirmed',
+                };
+                try {
+                  if (typeof api?.getDecreasingPreparationCountdown === 'function') {
+                    const res = api.getDecreasingPreparationCountdown(ord, catalog, storeOperatingStatus);
+                    if (res) ordCountdown = { ...ordCountdown, ...res };
+                  }
+                } catch (e) {}
 
                 return (
                   <TouchableOpacity
                     key={
                       ord.id ||
-                      ord.orderId
+                      ord.orderId ||
+                      ord.Id ||
+                      ord.OrderId ||
+                      Math.random()
                     }
                     style={
                       styles.orderCard
                     }
-                    onPress={() => {
-                      setSelectedOrder(
-                        ord
-                      );
-                      setViewMode(
-                        'detail'
-                      );
-                    }}
+                    onPress={() => handleSelectOrder(ord)}
                     activeOpacity={0.85}
                   >
                     <View
@@ -2083,7 +2199,7 @@ export default function OrderTrackerModal({
                             {tokenNumber}
                           </Text>
                         </View>
-                        <Text style={styles.orderCardId}>Order #{ord.id}</Text>
+                        <Text style={styles.orderCardId}>Order #{ord.id || ord.orderId || ord.Id || ord.OrderId}</Text>
                       </View>
 
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -2201,13 +2317,7 @@ export default function OrderTrackerModal({
                                   1
                               );
 
-                            const unitName =
-                              item.unitName ||
-                              item.unitDescription ||
-                              (item.unit
-                                ? `Unit #${item.unit}`
-                                : '') ||
-                              'Plate';
+                            const unitName = getItemUnitName(item);
 
                             return (
                               <View
@@ -2331,12 +2441,8 @@ export default function OrderTrackerModal({
     );
   };
 
-  const isTableOrderForSelected = Boolean(
-    selectedOrder?.tableName ||
-    selectedOrder?.tableId ||
-    activeTable?.tableName ||
-    activeTable?.id
-  );
+  const curForWaiter = selectedOrder || order || api.getSavedActiveOrder();
+  const isTableOrderForSelected = isDineInOrder(curForWaiter) && hasOrderTableId(curForWaiter);
 
   return (
     <Modal
@@ -2345,11 +2451,12 @@ export default function OrderTrackerModal({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
+      <View style={styles.overlay} className="responsive-modal-overlay">
         <View
           style={
             styles.sheetContainer
           }
+          className="responsive-modal-sheet"
         >
           <View
             style={styles.modalHeader}
@@ -2364,6 +2471,7 @@ export default function OrderTrackerModal({
                   styles.headerIconWrap
                 }
               >
+                <ChefHat size={18} color="#D33401" />
               </View>
 
               <View>
@@ -2442,7 +2550,7 @@ export default function OrderTrackerModal({
                 {isTableOrderForSelected && (
                   <TouchableOpacity
                     style={styles.waiterFooterBtn}
-                    onPress={() => (typeof openCallWaiter === 'function' ? openCallWaiter('CALL_WAITER') : typeof onCallWaiter === 'function' ? onCallWaiter('CALL_WAITER') : null)}
+                    onPress={() => handleWaiterAction('CALL_WAITER')}
                     activeOpacity={0.75}
                     accessibilityRole="button"
                     accessibilityLabel="Call Waiter"
@@ -2493,17 +2601,22 @@ export default function OrderTrackerModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor:
-      'rgba(15, 23, 42, 0.75)',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 12,
+    width: '100%',
+    height: '100%',
+    minHeight: '100vh',
   },
 
   sheetContainer: {
     width: '100%',
     maxWidth: 620,
-    maxHeight: '92%',
+    alignSelf: 'center',
+    height: '90vh',
+    maxHeight: '92vh',
+    minHeight: '60vh',
     backgroundColor: '#FAF8F5',
     borderRadius: 24,
     overflow: 'hidden',
@@ -2515,6 +2628,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 10,
+    display: 'flex',
     flexDirection: 'column',
   },
 

@@ -600,7 +600,7 @@ export const getItemImageUrl = (imageUrl, isVeg = true) => {
 ========================================================= */
 
 export const getUnitDescription = (item) => {
-  if (!item) return 'Piece';
+  if (!item) return 'no.';
 
   // 1. Direct text fields from API
   const direct =
@@ -635,7 +635,7 @@ export const getUnitDescription = (item) => {
   if (!isNaN(numId) && numId > 0) {
     switch (numId) {
       case 1:
-        return 'Piece';
+        return 'no.';
       case 2:
         return 'Plate';
       case 3:
@@ -653,11 +653,11 @@ export const getUnitDescription = (item) => {
       case 9:
         return 'Bottle';
       default:
-        return 'Piece';
+        return 'no.';
     }
   }
 
-  return 'Piece';
+  return 'no.';
 };
 
 /* =========================================================
@@ -935,6 +935,34 @@ export const getMenuCatalogByEncryptedId =
       }
     }
 
+    if (!catalogData || !Array.isArray(catalogData.items) || catalogData.items.length === 0) {
+      try {
+        const rawRestId = decryptedRestId || decryptRestaurantId(cleanEncId) || 1;
+        const fallbackCatalog = await getMenuCatalog(rawRestId);
+        if (fallbackCatalog && Array.isArray(fallbackCatalog.items) && fallbackCatalog.items.length > 0) {
+          catalogData = fallbackCatalog;
+          decryptedRestId = fallbackCatalog.restaurantId || rawRestId;
+        }
+      } catch (e) {
+        console.log('Direct getMenuCatalog fallback failed:', e?.message);
+      }
+    }
+
+    if (!catalogData || !Array.isArray(catalogData.items) || catalogData.items.length === 0) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const cachedRaw = localStorage.getItem('menza_cached_catalog');
+          if (cachedRaw) {
+            const parsed = JSON.parse(cachedRaw);
+            if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+              catalogData = parsed;
+              decryptedRestId = parsed.restaurantId || decryptedRestId;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
     const normalized = normalizeCatalogData(
       catalogData || {},
       decryptedRestId,
@@ -1029,6 +1057,12 @@ export const getMenuCatalogByEncryptedId =
       console.warn('Profile augmentation error:', profileErr?.message);
     }
 
+    if (typeof localStorage !== 'undefined' && normalized && Array.isArray(normalized.items) && normalized.items.length > 0) {
+      try {
+        localStorage.setItem('menza_cached_catalog', JSON.stringify(normalized));
+      } catch (e) {}
+    }
+
     return normalized;
   };
 
@@ -1118,6 +1152,8 @@ export const getMenuCatalogTree =
       result.encryptedRestaurantId
     );
   };
+
+export const getMenuCatalog = getMenuCatalogTree;
 
 export const getCategories =
   async (restaurantId = 1) => {
@@ -1872,50 +1908,116 @@ export const clearCart =
    LOCAL ORDERS
 ========================================================= */
 
-let inMemoryOrders = null;
+export const getSavedActiveOrder = () => {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('menza_active_order');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && (parsed.id || parsed.orderId || parsed.Id || parsed.OrderId)) {
+          return parsed;
+        }
+      }
+    } catch (e) {}
 
-const getLocalOrders = () => {
-  if (inMemoryOrders) {
-    return inMemoryOrders;
+    try {
+      const rawPending = localStorage.getItem('pending_cf_order_latest');
+      if (rawPending) {
+        const parsed = JSON.parse(rawPending);
+        if (parsed && (parsed.id || parsed.orderId || parsed.Id || parsed.OrderId)) {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const saved = localStorage.getItem('menza_local_orders');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const nonTerminal = parsed.find(
+            (o) => o && !['Cancelled', 'Settled'].includes(o.orderStatus || o.status)
+          );
+          if (nonTerminal && (nonTerminal.id || nonTerminal.orderId || nonTerminal.Id || nonTerminal.OrderId)) {
+            return nonTerminal;
+          }
+          if (parsed[0] && (parsed[0].id || parsed[0].orderId || parsed[0].Id || parsed[0].OrderId)) {
+            return parsed[0];
+          }
+        }
+      }
+    } catch (e) {}
   }
-
-  if (
-    typeof localStorage !==
-    'undefined'
-  ) {
-    const saved =
-      localStorage.getItem(
-        'menza_local_orders'
-      );
-
-    if (saved) {
-      try {
-        inMemoryOrders =
-          JSON.parse(saved);
-
-        return inMemoryOrders;
-      } catch (error) {}
-    }
-  }
-
-  inMemoryOrders = [];
-
-  return inMemoryOrders;
+  return null;
 };
 
-const saveLocalOrders = (
-  orders
-) => {
-  inMemoryOrders = orders;
+export const getLocalOrders = () => {
+  let list = [];
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('menza_local_orders');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) list = parsed;
+      }
+    } catch (error) {}
 
-  if (
-    typeof localStorage !==
-    'undefined'
-  ) {
+    try {
+      const activeSaved = localStorage.getItem('menza_active_order');
+      if (activeSaved) {
+        const activeOrd = JSON.parse(activeSaved);
+        const activeId = Number(activeOrd?.id || activeOrd?.orderId || activeOrd?.Id || activeOrd?.OrderId);
+        if (activeId) {
+          const exists = list.some(
+            (o) => Number(o?.id || o?.orderId || o?.Id || o?.OrderId) === activeId
+          );
+          if (!exists) {
+            list.unshift(activeOrd);
+          }
+        }
+      }
+    } catch (error) {}
+
+    try {
+      const pendingRaw = localStorage.getItem('pending_cf_order_latest');
+      if (pendingRaw) {
+        const pendingOrd = JSON.parse(pendingRaw);
+        const pendingId = Number(pendingOrd?.id || pendingOrd?.orderId || pendingOrd?.Id || pendingOrd?.OrderId);
+        if (pendingId) {
+          const exists = list.some(
+            (o) => Number(o?.id || o?.orderId || o?.Id || o?.OrderId) === pendingId
+          );
+          if (!exists) {
+            list.unshift(pendingOrd);
+          }
+        }
+      }
+    } catch (error) {}
+  }
+
+  return list;
+};
+
+export const saveLocalOrders = (orders) => {
+  if (typeof localStorage !== 'undefined') {
     localStorage.setItem(
       'menza_local_orders',
       JSON.stringify(orders)
     );
+
+    try {
+      const activeSaved = localStorage.getItem('menza_active_order');
+      if (activeSaved) {
+        const activeOrd = JSON.parse(activeSaved);
+        const activeId = Number(activeOrd?.id || activeOrd?.orderId || activeOrd?.Id || activeOrd?.OrderId);
+        const match = orders.find(
+          (o) => Number(o?.id || o?.orderId || o?.Id || o?.OrderId) === activeId
+        );
+        if (match) {
+          localStorage.setItem('menza_active_order', JSON.stringify({ ...activeOrd, ...match }));
+        }
+      }
+    } catch (e) {}
   }
 };
 
@@ -1959,7 +2061,19 @@ export const normalizeOrder = (
   }
 
   const rawItems =
-    Array.isArray(order.items)
+    (Array.isArray(order.items) && order.items.length > 0)
+      ? order.items
+      : (Array.isArray(order.orderItems) && order.orderItems.length > 0)
+      ? order.orderItems
+      : (Array.isArray(order.OrderItems) && order.OrderItems.length > 0)
+      ? order.OrderItems
+      : (Array.isArray(order.Items) && order.Items.length > 0)
+      ? order.Items
+      : (Array.isArray(order.orderDetails) && order.orderDetails.length > 0)
+      ? order.orderDetails
+      : (Array.isArray(order.OrderDetails) && order.OrderDetails.length > 0)
+      ? order.OrderDetails
+      : Array.isArray(order.items)
       ? order.items
       : [];
 
@@ -2025,32 +2139,50 @@ export const normalizeOrder = (
     normalizedItems.reduce(
       (sum, item) =>
         sum +
-        item.amount *
-          item.quantity,
+        (item.totalAmount > 0 ? item.totalAmount : item.amount * item.quantity),
       0
     );
 
+  const effectiveSubtotal =
+    Number(
+      (order.subTotal > 0 ? order.subTotal : null) ??
+      (order.orderAmount > 0 ? order.orderAmount : null) ??
+      (order.itemTotal > 0 ? order.itemTotal : null) ??
+      calculatedSubtotal
+    ) || 0;
+
   const cgst =
-    Math.round(
-      calculatedSubtotal *
-        0.025 *
-        100
-    ) / 100;
+    Number(
+      order.cgstAmount ??
+      order.cgst ??
+      Math.round(
+        effectiveSubtotal *
+          0.025 *
+          100
+      ) / 100
+    );
 
   const sgst =
-    Math.round(
-      calculatedSubtotal *
-        0.025 *
-        100
-    ) / 100;
+    Number(
+      order.sgstAmount ??
+      order.sgst ??
+      Math.round(
+        effectiveSubtotal *
+          0.025 *
+          100
+      ) / 100
+    );
 
   const calculatedTotal =
-    Math.round(
-      (calculatedSubtotal +
-        cgst +
-        sgst) *
-        100
-    ) / 100;
+    Number(
+      (order.totalAmount > 0 ? order.totalAmount : null) ??
+      Math.round(
+        (effectiveSubtotal +
+          cgst +
+          sgst) *
+          100
+      ) / 100
+    );
 
   const rawPaymentMode = (order.paymentMode || order.paymentMethod || 'CASH').toString().toUpperCase();
   const isOnline = rawPaymentMode.includes('ONLINE') || rawPaymentMode.includes('CASHFREE') || rawPaymentMode.includes('UPI') || order.isOnline === true;
@@ -2058,22 +2190,34 @@ export const normalizeOrder = (
   const isSettled = isOnline || String(paymentStatus).toLowerCase() === 'paid' || order.isSettled === true || Boolean(order.settledDateUtc);
   const paymentType = order.paymentType || (isOnline ? 'Cashfree Online' : 'Counter Cash');
   const deliveryType = order.deliveryType || (order.tableId ? 'Dine-In' : 'Takeaway / Counter');
-  const orderStatus = order.orderStatus || order.status || (isOnline ? 'Confirmed' : 'Placed');
+  let orderStatus = order.orderStatus || order.status || (isOnline ? 'Confirmed' : 'Placed');
+
+  // Business Rule: For Cash QR orders, order status will only be Confirmed AFTER Payment to cashier settlement.
+  if (!isOnline && !isSettled && (orderStatus === 'Confirmed' || !orderStatus)) {
+    orderStatus = 'Placed';
+  }
+
   const requiresCashierConfirmation = !isOnline && !isSettled && (orderStatus === 'Placed' || orderStatus === 'Pending');
 
   return {
     ...order,
 
     id:
-      Number(order.id),
+      Number(order.id || order.orderId || order.Id || order.OrderId),
 
     orderId:
       order.orderId ||
-      Number(order.id),
+      order.OrderId ||
+      Number(order.id || order.orderId || order.Id || order.OrderId),
 
     orderStatus,
 
     kitchenStatus: (() => {
+      // For unsettled/unpaid cash orders, kitchen cannot be Confirmed before cashier settlement
+      if (!isOnline && !isSettled) {
+        return 'Pending';
+      }
+
       const rawKitchen =
         order.kitchenStatus ||
         order.KitchenStatus ||
@@ -2153,40 +2297,28 @@ export const normalizeOrder = (
       normalizedItems,
 
     itemTotal:
-      Number(
-        order.itemTotal ??
-          calculatedSubtotal
-      ),
+      effectiveSubtotal,
 
     subTotal:
-      Number(
-        order.subTotal ??
-          calculatedSubtotal
-      ),
+      effectiveSubtotal,
+
+    orderAmount:
+      effectiveSubtotal,
 
     cgstAmount:
-      Number(
-        order.cgstAmount ??
-          cgst
-      ),
+      cgst,
 
     sgstAmount:
-      Number(
-        order.sgstAmount ??
-          sgst
-      ),
+      sgst,
 
     taxAmount:
       Number(
         order.taxAmount ??
-          cgst + sgst
+          (cgst + sgst)
       ),
 
     totalAmount:
-      Number(
-        order.totalAmount ??
-          calculatedTotal
-      ),
+      calculatedTotal,
 
     gstNumber:
       order.gstNumber ||
@@ -2367,12 +2499,23 @@ export const placeOrder =
           100
       ) / 100;
 
-    const backendItems = normalizedItems.map((item) => ({
-      itemId: Number(item.itemId),
-      quantity: Number(item.quantity || 1),
-      unitId: Number(item.unit || item.unitId || 1),
-      cookingInstruction: item.cookingInstruction || null,
-    }));
+    const backendItems = normalizedItems.map((item) => {
+      const price = Number(item.price ?? item.unitPrice ?? item.amount ?? 0);
+      const quantity = Number(item.quantity || 1);
+      const totalAmount = Number(item.totalAmount ?? (price * quantity));
+
+      return {
+        itemId: Number(item.itemId),
+        itemName: item.itemName || item.name || '',
+        quantity,
+        unitId: Number(item.unit || item.unitId || 1),
+        price,
+        unitPrice: price,
+        amount: price,
+        totalAmount,
+        cookingInstruction: item.cookingInstruction || null,
+      };
+    });
 
     const returnUrl =
       orderPayload.returnUrl ||
@@ -2386,9 +2529,23 @@ export const placeOrder =
     const rawTableIdStr = orderPayload.tableId ? String(orderPayload.tableId) : null;
     const effectiveEncTable = !isNumericTable && rawTableIdStr ? rawTableIdStr : (orderPayload.encryptedTableId || null);
 
+    const resolvedRestId = Number(orderPayload.restaurantId) || 1;
+    const resolvedEncRestId =
+      orderPayload.encryptedRestaurantId ||
+      encryptRestaurantId(resolvedRestId);
+
+    const rawPhone = String(orderPayload.customerPhone || orderPayload.mobileNumber || '').trim();
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    const validPhone = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : '9999999999';
+
+    const customerName =
+      orderPayload.customerName ||
+      orderPayload.name ||
+      `Guest ${validPhone.slice(-4)}`;
+
     const publicPlaceOrderPayload = {
-      restaurantId: Number(orderPayload.restaurantId) || 1,
-      encryptedRestaurantId: orderPayload.encryptedRestaurantId || '',
+      restaurantId: resolvedRestId,
+      encryptedRestaurantId: resolvedEncRestId,
       tableId: isNumericTable ? Number(orderPayload.tableId) : null,
       encryptedTableId: effectiveEncTable,
       tableToken: effectiveEncTable,
@@ -2397,8 +2554,8 @@ export const placeOrder =
         : isNumericTable
         ? String(orderPayload.tableId)
         : null,
-      customerName: orderPayload.name || 'Guest Diner',
-      customerPhone: orderPayload.mobileNumber || '',
+      customerName,
+      customerPhone: validPhone,
       otpCode: orderPayload.otpCode || null,
       customerUserId: orderPayload.customerUserId || null,
       orderTypeId: Number(orderPayload.orderTypeId || 1),
@@ -2433,6 +2590,9 @@ export const placeOrder =
       gstNumber: orderPayload.gstNumber || null,
       cgstPercentage: orderPayload.cgstPercentage !== undefined ? Number(orderPayload.cgstPercentage) : 2.5,
       sgstPercentage: orderPayload.sgstPercentage !== undefined ? Number(orderPayload.sgstPercentage) : 2.5,
+      orderAmount: orderPayload.orderAmount !== undefined ? Number(orderPayload.orderAmount) : itemsTotal,
+      subTotal: orderPayload.subTotal !== undefined ? Number(orderPayload.subTotal) : itemsTotal,
+      itemTotal: orderPayload.itemTotal !== undefined ? Number(orderPayload.itemTotal) : itemsTotal,
       cgstAmount: orderPayload.cgstAmount !== undefined ? Number(orderPayload.cgstAmount) : cgst,
       sgstAmount: orderPayload.sgstAmount !== undefined ? Number(orderPayload.sgstAmount) : sgst,
       taxAmount: orderPayload.taxAmount !== undefined ? Number(orderPayload.taxAmount) : (cgst + sgst),
@@ -2713,17 +2873,22 @@ export const getOrder = async (orderId, phone = '') => {
       const res = await api.get(
         `/api/public/store/order/track/${orderId}${phone ? `?phone=${encodeURIComponent(phone)}` : ''}`
       );
-      if (res?.data && (res.data.orderId || res.data.id)) {
+      const data = res?.data?.data || res?.data;
+      if (data && (data.orderId || data.id || data.OrderId || data.Id)) {
         return normalizeOrder({
-          ...res.data,
-          id: res.data.orderId || res.data.id,
+          ...data,
+          id: data.orderId || data.id || data.OrderId || data.Id,
         });
       }
     } catch (e) {
       try {
         const orderRes = await api.get(`/api/Order/${orderId}`);
-        if (orderRes?.data && orderRes.data.id) {
-          return normalizeOrder(orderRes.data);
+        const data = orderRes?.data?.data || orderRes?.data;
+        if (data && (data.id || data.orderId || data.Id || data.OrderId)) {
+          return normalizeOrder({
+            ...data,
+            id: data.id || data.orderId || data.Id || data.OrderId,
+          });
         }
       } catch (orderErr) {
         // Fallback to local
@@ -2732,7 +2897,7 @@ export const getOrder = async (orderId, phone = '') => {
 
     const orders = getLocalOrders();
     const found = orders.find(
-      (order) => Number(order.id) === Number(orderId)
+      (order) => Number(order?.id || order?.orderId || order?.Id || order?.OrderId) === Number(orderId)
     );
 
     return found ? normalizeOrder(found) : null;
@@ -3211,7 +3376,7 @@ export const updateOrderStatus =
     const updated =
       orders.map(
         (order) =>
-          Number(order.id) ===
+          Number(order.id || order.orderId) ===
           Number(orderId)
             ? {
                 ...order,
@@ -3261,7 +3426,7 @@ export const addItemToOrder =
     const index =
       orders.findIndex(
         (order) =>
-          Number(order.id) ===
+          Number(order.id || order.orderId) ===
           Number(orderId)
       );
 
@@ -4096,7 +4261,7 @@ export const getDecreasingPreparationCountdown = (order, catalog = null, storeOp
       isAwaitingConfirmation: false,
       isTakeaway: false,
       isKitchenStatusDisabled: isKitchenDisabled,
-      statusMessage: isKitchenDisabled ? 'Order received by restaurant.' : 'Estimated preparation: ~15 mins',
+      statusMessage: isKitchenDisabled ? 'Order received by restaurant.' : 'Order confirmed and queued for preparation.',
     };
   }
 
@@ -4115,10 +4280,15 @@ export const getDecreasingPreparationCountdown = (order, catalog = null, storeOp
   const orderStatus = String(order.orderStatus || order.status || '').toLowerCase();
   const kitchenStatus = String(order.kitchenStatus || '').toLowerCase();
 
+  const isDineIn = String(order.deliveryType || '').toLowerCase().includes('dine');
   const isTakeaway =
-    String(order.deliveryType || '').toLowerCase().includes('takeaway') ||
-    String(order.deliveryType || '').toLowerCase().includes('counter') ||
-    !order.tableId;
+    !isDineIn && (
+      String(order.deliveryType || '').toLowerCase().includes('takeaway') ||
+      String(order.deliveryType || '').toLowerCase().includes('counter') ||
+      String(order.deliveryType || '').toLowerCase().includes('self') ||
+      String(order.deliveryType || '').toLowerCase().includes('pickup') ||
+      (!order.tableId && !isDineIn)
+    );
 
   const tokenStr =
     order.pickupToken ||
@@ -4266,7 +4436,7 @@ export const getDecreasingPreparationCountdown = (order, catalog = null, storeOp
       isOverdue: false,
       isAwaitingConfirmation: true,
       isTakeaway,
-      statusMessage: `Awaiting cashier confirmation (~${prepMinutes}m prep once accepted)`,
+      statusMessage: 'Awaiting cashier confirmation before kitchen preparation begins.',
     };
   }
 
@@ -4284,7 +4454,7 @@ export const getDecreasingPreparationCountdown = (order, catalog = null, storeOp
       isOverdue: false,
       isAwaitingConfirmation: false,
       isTakeaway,
-      statusMessage: `Chef is cooking your dishes • ~${prepMinutes}m remaining`,
+      statusMessage: 'Dishes are being freshly prepared in the kitchen.',
     };
   }
 
@@ -4324,7 +4494,7 @@ export const getDecreasingPreparationCountdown = (order, catalog = null, storeOp
     isOverdue: false,
     isAwaitingConfirmation: false,
     isTakeaway,
-    statusMessage: `Chef is cooking your dishes • ${timerText} remaining`,
+    statusMessage: 'Dishes are being freshly prepared in the kitchen.',
   };
 };
 

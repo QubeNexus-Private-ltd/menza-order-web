@@ -169,6 +169,15 @@ export default function Header({
     }
   }, [openQrModal]);
 
+  const hasTable = React.useMemo(() => {
+    if (!activeTable) return false;
+    const tid = activeTable.id ?? activeTable.tableId;
+    if (tid === null || tid === undefined || tid === '' || tid === false) return false;
+    const num = Number(tid);
+    if (!isNaN(num)) return num > 0;
+    return String(tid).trim().length > 0;
+  }, [activeTable]);
+
   const handleCallWaiterPress = React.useCallback(() => {
     if (typeof openCallWaiter === 'function') {
       openCallWaiter();
@@ -177,9 +186,9 @@ export default function Header({
 
   const handleOrderPress = React.useCallback(() => {
     if (typeof openOrderTracker === 'function') {
-      openOrderTracker();
+      openOrderTracker(activeOrder);
     }
-  }, [openOrderTracker]);
+  }, [openOrderTracker, activeOrder]);
 
   const handleCartPress = React.useCallback(() => {
     if (typeof openCart === 'function') {
@@ -269,14 +278,25 @@ export default function Header({
                 ) : null}
 
                 {activeTable?.tableName ? (
-                  <View style={[styles.headerTableBadge, activeTable?.occupiedByOther && styles.headerTableBadgeOccupied]}>
-                    {activeTable?.occupiedByOther ? (
+                  <View style={[
+                    styles.headerTableBadge,
+                    (activeTable?.isLocked || activeTable?.occupiedByOther) && styles.headerTableBadgeOccupied,
+                  ]}>
+                    {(activeTable?.isLocked || activeTable?.occupiedByOther) ? (
                       <Lock size={10} color="#e11d48" />
                     ) : (
                       <Utensils size={10} color="#D33401" />
                     )}
-                    <Text style={[styles.headerTableText, activeTable?.occupiedByOther && styles.headerTableTextOccupied]} numberOfLines={1}>
-                      {activeTable.tableName} {activeTable?.occupiedByOther ? '(Occupied)' : ''}
+                    <Text style={[
+                      styles.headerTableText,
+                      (activeTable?.isLocked || activeTable?.occupiedByOther) && styles.headerTableTextOccupied,
+                    ]} numberOfLines={1}>
+                      {activeTable.tableName} {
+                        activeTable?.isCleaning ? '(Cleaning)' :
+                        activeTable?.isReserved ? '(Reserved)' :
+                        activeTable?.occupiedByOther ? '(Occupied)' :
+                        activeTable?.isOccupied ? '(Active Tab)' : ''
+                      }
                     </Text>
                   </View>
                 ) : null}
@@ -315,7 +335,7 @@ export default function Header({
               </Pressable>
             )}
 
-            {typeof openCallWaiter === 'function' && (
+            {hasTable && typeof openCallWaiter === 'function' && (
               <Pressable
                 style={({ pressed }) => [
                   styles.bellButton,
