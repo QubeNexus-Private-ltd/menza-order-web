@@ -230,26 +230,49 @@ export default function Header({
     }
   }, [openCart]);
 
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const handleResize = (e: MediaQueryListEvent | MediaQueryList) => {
+      setIsMobile(e.matches);
+    };
+    setIsMobile(mediaQuery.matches);
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleResize);
+      return () => mediaQuery.removeEventListener('change', handleResize);
+    } else {
+      mediaQuery.addListener(handleResize);
+      return () => mediaQuery.removeListener(handleResize);
+    }
+  }, []);
+
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
         {/* Restaurant Identity: Logo, Name, Address & Live Status */}
         {loading ? (
           <View style={styles.brandContainer}>
-            <SkeletonBox width={38} height={38} borderRadius={10} />
+            <SkeletonBox width={isMobile ? 34 : 38} height={isMobile ? 34 : 38} borderRadius={10} />
             <View style={[styles.brandTextContainer, { gap: 6 }]}>
-              <SkeletonBox width={120} height={14} borderRadius={4} />
-              <SkeletonBox width={160} height={10} borderRadius={3} />
+              <SkeletonBox width={isMobile ? 100 : 120} height={14} borderRadius={4} />
+              <SkeletonBox width={isMobile ? 120 : 160} height={10} borderRadius={3} className="header-desktop-only" />
             </View>
           </View>
         ) : (
           <View style={styles.brandContainer}>
-            <View style={styles.logoBadge}>
+            <View style={[styles.logoBadge, isMobile && styles.logoBadgeMobile]}>
               <StoreLogoImage
                 uri={primaryImage}
                 sources={candidateImages}
-                size={38}
-                style={styles.logoImage}
+                size={isMobile ? 34 : 38}
+                style={isMobile ? styles.logoImageMobile : styles.logoImage}
               />
             </View>
 
@@ -300,8 +323,8 @@ export default function Header({
                 )}
               </View>
 
-              {/* Address & Table Seating Row (No dummy fallbacks) */}
-              <View style={styles.subInfoRow}>
+              {/* Address & Table Seating Row (Desktop only - on mobile it moves cleanly below to mobileSubBar) */}
+              <View style={styles.subInfoRow} className="header-desktop-only">
                 {(restaurantAddress || storeOperatingStatus?.restaurantAddress || storeOperatingStatus?.address) ? (
                   <View style={styles.headerAddressRow}>
                     <MapPin size={11} color="#EA580C" style={{ flexShrink: 0 }} />
@@ -339,14 +362,14 @@ export default function Header({
           </View>
         )}
 
-        {/* Action Controls: QR, Orders, Cart */}
+        {/* Action Controls: QR, Bell, Orders, Cart */}
         {loading ? (
           <View style={styles.actionsRow}>
             {/* QR Button Skeleton */}
-            <SkeletonBox width={48} height={34} borderRadius={17} />
+            <SkeletonBox width={isMobile ? 36 : 48} height={34} borderRadius={17} />
 
             {/* Orders Button Skeleton */}
-            <SkeletonBox width={72} height={34} borderRadius={17} />
+            <SkeletonBox width={isMobile ? 36 : 72} height={34} borderRadius={17} />
 
             {/* Cart Button Skeleton */}
             <SkeletonBox width={36} height={36} borderRadius={18} />
@@ -355,6 +378,7 @@ export default function Header({
           <View style={styles.actionsRow}>
             {typeof openQrModal === 'function' && (
               <Pressable
+                className="header-action-btn header-action-btn-compact"
                 style={({ pressed }) => [
                   styles.qrButton,
                   pressed && styles.qrButtonPressed,
@@ -365,12 +389,13 @@ export default function Header({
                 accessibilityLabel="View QR Code"
               >
                 <QrCode size={15} color="#0F172A" strokeWidth={2.2} />
-                <Text style={styles.qrButtonText}>QR</Text>
+                <Text style={styles.qrButtonText} className="header-btn-label">QR</Text>
               </Pressable>
             )}
 
             {hasTable && typeof openCallWaiter === 'function' && (
               <Pressable
+                className="header-action-btn header-action-btn-compact"
                 style={({ pressed }) => [
                   styles.bellButton,
                   pressed && styles.bellButtonPressed,
@@ -381,12 +406,13 @@ export default function Header({
                 accessibilityLabel="Call Waiter"
               >
                 <Bell size={15} color="#EA580C" strokeWidth={2.2} />
-                <Text style={styles.bellButtonText}>Bell</Text>
+                <Text style={styles.bellButtonText} className="header-btn-label">Call Waiter</Text>
               </Pressable>
             )}
 
             {typeof openOrderTracker === 'function' && (
               <Pressable
+                className="header-action-btn header-action-btn-compact"
                 style={({ pressed }) => [
                   styles.orderButton,
                   pressed && styles.orderButtonPressed,
@@ -397,12 +423,18 @@ export default function Header({
                 accessibilityLabel="View Orders"
               >
                 <OrderIcon size={16} color="#D33401" strokeWidth={2.2} />
-                <Text style={styles.orderButtonText}>Orders</Text>
-                {activeOrder && <View style={styles.orderDot} />}
+                <Text style={styles.orderButtonText} className="header-btn-label">Orders</Text>
+                {activeOrder && (
+                  <>
+                    <View style={styles.orderDot} className="header-desktop-only" />
+                    <View style={styles.orderDotMobile} className="header-mobile-only pulse-order-dot" />
+                  </>
+                )}
               </Pressable>
             )}
 
             <Pressable
+              className="header-action-btn"
               style={({ pressed }) => [
                 styles.cartButton,
                 pressed && styles.cartButtonPressed,
@@ -425,6 +457,49 @@ export default function Header({
           </View>
         )}
       </View>
+
+      {/* Mobile Sub-Bar: Clean, dedicated row for Table & Address without crowding */}
+      {!loading && (activeTable?.tableName || restaurantAddress || storeOperatingStatus?.restaurantAddress || storeOperatingStatus?.address) ? (
+        <View style={styles.mobileSubBar} className="header-mobile-only">
+          {activeTable?.tableName ? (
+            <View
+              style={[
+                styles.mobileTableBadge,
+                (activeTable?.isLocked || activeTable?.occupiedByOther) && styles.mobileTableBadgeOccupied,
+              ]}
+            >
+              {(activeTable?.isLocked || activeTable?.occupiedByOther) ? (
+                <Lock size={10.5} color="#e11d48" />
+              ) : (
+                <Utensils size={10.5} color="#D33401" />
+              )}
+              <Text
+                style={[
+                  styles.mobileTableText,
+                  (activeTable?.isLocked || activeTable?.occupiedByOther) && styles.mobileTableTextOccupied,
+                ]}
+                numberOfLines={1}
+              >
+                Table {activeTable.tableName} {
+                  activeTable?.isCleaning ? '(Cleaning)' :
+                  activeTable?.isReserved ? '(Reserved)' :
+                  activeTable?.occupiedByOther ? '(Occupied)' :
+                  activeTable?.isOccupied ? '(Active Tab)' : ''
+                }
+              </Text>
+            </View>
+          ) : null}
+
+          {(restaurantAddress || storeOperatingStatus?.restaurantAddress || storeOperatingStatus?.address) ? (
+            <View style={styles.mobileAddressPill}>
+              <MapPin size={10.5} color="#EA580C" style={{ flexShrink: 0 }} />
+              <Text style={styles.mobileAddressText} numberOfLines={1}>
+                {restaurantAddress || storeOperatingStatus?.restaurantAddress || storeOperatingStatus?.address}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -705,5 +780,77 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 8.5,
     fontWeight: '900',
+  },
+  logoBadgeMobile: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+  },
+  logoImageMobile: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+  },
+  orderDotMobile: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#D33401',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  mobileSubBar: {
+    width: '100%',
+    maxWidth: 1200,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 5,
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 8,
+  },
+  mobileTableBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3.5,
+    backgroundColor: '#FFF1EC',
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#F3C8BA',
+    flexShrink: 0,
+  },
+  mobileTableBadgeOccupied: {
+    backgroundColor: '#FFF1F2',
+    borderColor: '#FECDD3',
+  },
+  mobileTableText: {
+    color: '#D33401',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  mobileTableTextOccupied: {
+    color: '#E11D48',
+  },
+  mobileAddressPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    flexShrink: 1,
+    minWidth: 0,
+    marginLeft: 'auto',
+  },
+  mobileAddressText: {
+    color: '#64748B',
+    fontSize: 10,
+    fontWeight: '500',
+    flexShrink: 1,
   },
 });

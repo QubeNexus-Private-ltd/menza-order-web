@@ -138,3 +138,93 @@ input[type="search"]:focus {
   animation: skeletonPulse 1.3s ease-in-out infinite !important;
 }
 
+/* =========================================================
+   RESPONSIVE HEADER ENHANCEMENTS
+   ========================================================= */
+
+/* Button hover & active feedback */
+.header-action-btn {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.15s ease !important;
+}
+
+.header-action-btn:hover {
+  transform: translateY(-1px);
+}
+
+.header-action-btn:active {
+  transform: scale(0.95);
+}
+
+/* Pulsing dot for active orders */
+@keyframes pulseDot {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(211, 52, 1, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 5px rgba(211, 52, 1, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(211, 52, 1, 0);
+  }
+}
+
+.pulse-order-dot {
+  animation: pulseDot 2s infinite ease-in-out !important;
+}
+
+/* Responsive visibility rules */
+.header-desktop-only {
+  display: flex !important;
+}
+
+.header-mobile-only {
+  display: none !important;
+}
+
+.header-btn-label {
+  display: inline-block !important;
+}
+
+@media (max-width: 767px) {
+  .header-desktop-only {
+    display: none !important;
+  }
+
+  .header-mobile-only {
+    display: flex !important;
+  }
+
+  .header-btn-label {
+    display: none !important;
+  }
+
+  /* Compact touch buttons on mobile */
+  .header-action-btn-compact {
+    min-width: 36px !important;
+    width: 36px !important;
+    height: 36px !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    border-radius: 18px !important;
+    justify-content: center !important;
+    align-items: center !important;
+  }
+}
+
+@media (min-width: 768px) {
+  .header-desktop-only {
+    display: flex !important;
+  }
+
+  .header-mobile-only {
+    display: none !important;
+  }
+
+  .header-btn-label {
+    display: inline-block !important;
+  }
+}
+
