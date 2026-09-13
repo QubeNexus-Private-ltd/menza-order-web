@@ -543,12 +543,17 @@ export default function App() {
             encResult?.encryptedRestaurantId || api.encryptRestaurantId(rawId);
         }
 
-        const targetTableNum =
-          urlTableId
-            ? isNaN(Number(urlTableId)) ? urlTableId : Number(urlTableId)
-            : (typeof localStorage !== 'undefined' && localStorage.getItem('menza_last_table_id')
-                ? localStorage.getItem('menza_last_table_id')
-                : null);
+        // If table ID is not in URL, do NOT resurrect old table from localStorage.
+        // URLs with only encRestId/r are store-level menus (Takeaway / Counter / General browsing).
+        const targetTableNum = urlTableId
+          ? (isNaN(Number(urlTableId)) ? urlTableId : Number(urlTableId))
+          : null;
+
+        if (urlTableId && typeof localStorage !== 'undefined') {
+          localStorage.setItem('menza_last_table_id', String(urlTableId));
+        } else if (!urlTableId && typeof localStorage !== 'undefined') {
+          localStorage.removeItem('menza_last_table_id');
+        }
 
         await loadMenuViaEncryptedEndpoint(
           targetEncryptedId,
@@ -570,16 +575,19 @@ export default function App() {
             if (
               currentUrl.searchParams.has('restaurantId') ||
               currentUrl.searchParams.has('restId') ||
-              currentUrl.searchParams.has('id')
+              currentUrl.searchParams.has('id') ||
+              currentUrl.searchParams.has('encRestId') ||
+              currentUrl.searchParams.has('enc') ||
+              currentUrl.searchParams.has('eid')
             ) {
               currentUrl.searchParams.delete('restaurantId');
               currentUrl.searchParams.delete('restId');
               currentUrl.searchParams.delete('id');
+              currentUrl.searchParams.delete('encRestId');
+              currentUrl.searchParams.delete('enc');
+              currentUrl.searchParams.delete('eid');
               if (targetEncryptedId) {
                 currentUrl.searchParams.set('r', targetEncryptedId);
-                currentUrl.searchParams.delete('encRestId');
-                currentUrl.searchParams.delete('enc');
-                currentUrl.searchParams.delete('eid');
               }
               window.history.replaceState({}, document.title, currentUrl.toString());
             }
@@ -589,8 +597,8 @@ export default function App() {
         // If dining at a table, automatically detect and sync any active running kitchen order
         if (targetTableNum) {
           try {
-            const rawId = urlRestId ? Number(urlRestId) : 1;
-            const runningOrder = await api.getActiveOrderByTable(targetTableNum, rawId);
+            const effectiveRestId = Number(urlRestId) || (targetEncryptedId ? api.decryptRestaurantId(targetEncryptedId) : 1);
+            const runningOrder = await api.getActiveOrderByTable(targetTableNum, effectiveRestId);
             if (runningOrder && !['Cancelled', 'Settled'].includes(runningOrder.orderStatus)) {
               setActiveOrder(runningOrder);
               signalrService.joinOrderGroup(runningOrder.id);
@@ -1134,8 +1142,16 @@ export default function App() {
         if (tableId) {
           url.searchParams.set(
             'tableId',
-            tableId
+            String(tableId)
           );
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('menza_last_table_id', String(tableId));
+          }
+        } else {
+          url.searchParams.delete('tableId');
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem('menza_last_table_id');
+          }
         }
 
         url.searchParams.delete(
@@ -1151,7 +1167,7 @@ export default function App() {
 
       await loadMenuViaEncryptedEndpoint(
         encId,
-        tableId
+        tableId || null
       );
     };
 
@@ -1872,15 +1888,16 @@ export default function App() {
       tableId,
       status
     ) => {
-      await api.updateTableStatus(
-        tableId,
-        status
-      );
-
       const restId =
         selectedRestaurant
           ? selectedRestaurant.id
-          : 1;
+          : (catalog?.restaurantId || 1);
+
+      await api.updateTableStatus(
+        tableId,
+        status,
+        restId
+      );
 
       const tList =
         await api.getTables(
@@ -1896,14 +1913,15 @@ export default function App() {
 
   const handleSettleTable =
     async (tableId) => {
-      await api.settleTable(
-        tableId
-      );
-
       const restId =
         selectedRestaurant
           ? selectedRestaurant.id
-          : 1;
+          : (catalog?.restaurantId || 1);
+
+      await api.settleTable(
+        tableId,
+        restId
+      );
 
       const tList =
         await api.getTables(

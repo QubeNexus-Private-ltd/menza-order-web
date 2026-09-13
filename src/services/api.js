@@ -3876,10 +3876,12 @@ export const getTables =
 export const updateTableStatus =
   async (
     tableId,
-    status
+    status,
+    restaurantId = 1
   ) => {
+    const rId = Number(restaurantId) || 1;
     const tables =
-      getLocalTables(1);
+      getLocalTables(rId);
 
     const updated =
       tables.map(
@@ -3894,7 +3896,7 @@ export const updateTableStatus =
       );
 
     saveLocalTables(
-      1,
+      rId,
       updated
     );
 
@@ -4021,12 +4023,14 @@ export const requestBill =
   };
 
 export const settleTable =
-  async (tableId) => {
+  async (tableId, restaurantId = 1) => {
+    const rId =
+      Number(restaurantId) || 1;
     const tId =
       Number(tableId);
 
     const tables =
-      getLocalTables(1);
+      getLocalTables(rId);
 
     const updatedTables =
       tables.map(
@@ -4042,7 +4046,7 @@ export const settleTable =
       );
 
     saveLocalTables(
-      1,
+      rId,
       updatedTables
     );
 

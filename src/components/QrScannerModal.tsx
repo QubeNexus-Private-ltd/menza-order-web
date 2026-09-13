@@ -7,7 +7,7 @@ import { encryptRestaurantId, KNOWN_ENCRYPTED_IDS } from '../services/api';
 export interface QrScannerModalProps {
   visible: boolean;
   onClose: () => void;
-  onSelectScanResult: (encId: string, tableId: number) => void;
+  onSelectScanResult: (encId: string, tableId: number | null) => void;
   activeEncryptedId?: string;
   activeRestaurantId?: number | string;
 }
@@ -21,9 +21,9 @@ export default function QrScannerModal({
 }: QrScannerModalProps) {
   const [manualText, setManualText] = useState<string>('');
 
-  const parseQrText = (decodedText: string): { encId: string; tableId: number } => {
+  const parseQrText = (decodedText: string): { encId: string; tableId: number | null } => {
     let encId = activeEncryptedId || 'uqQTzsGyDJy4_TBVeYXCfg';
-    let tableId = 1;
+    let tableId: number | null = null;
 
     try {
       if (decodedText.startsWith('{')) {
@@ -46,13 +46,13 @@ export default function QrScannerModal({
       encId = decodeURIComponent(encMatch[1]);
     } else if (restMatch) {
       encId = encryptRestaurantId(Number(restMatch[1]));
-    } else if (decodedText.startsWith('uqQT') || decodedText.startsWith('NQZ2') || decodedText.startsWith('23wy') || decodedText.startsWith('enc_')) {
+    } else if (decodedText.startsWith('uqQT') || decodedText.startsWith('NQZ2') || decodedText.startsWith('23wy') || decodedText.startsWith('enc_') || decodedText.startsWith('fPo9')) {
       encId = decodedText.trim();
     }
 
     if (tableMatch) tableId = Number(tableMatch[1]);
 
-    if (!tableMatch && !isNaN(Number(decodedText))) {
+    if (!tableMatch && !isNaN(Number(decodedText)) && decodedText.trim().length <= 4) {
       tableId = Number(decodedText);
     }
 
