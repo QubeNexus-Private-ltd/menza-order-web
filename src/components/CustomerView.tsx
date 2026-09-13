@@ -703,23 +703,7 @@ export default function CustomerView({
 
         {/* Dine-In Table Seating & Waiter Request Bar / Occupied Notice */}
         {(() => {
-          const isMatchingActiveOrder =
-            activeOrder &&
-            (activeOrder.tableId || activeOrder.tableName) &&
-            (!catalog?.restaurantId || Number(activeOrder.restaurantId) === Number(catalog.restaurantId)) &&
-            !['Cancelled', 'Settled'].includes(activeOrder.orderStatus);
-
-          const currentTable: any = activeTable || (
-            isMatchingActiveOrder
-              ? {
-                  id: activeOrder.tableId,
-                  tableName: activeOrder.tableName || `Table #${activeOrder.tableId}`,
-                  restaurantId: activeOrder.restaurantId || catalog?.restaurantId,
-                  isOccupied: true,
-                }
-              : null
-          );
-
+          const currentTable: any = activeTable || null;
           if (!currentTable) return null;
 
           if (currentTable.isCleaning) {

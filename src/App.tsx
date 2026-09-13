@@ -77,7 +77,13 @@ export default function App() {
     if (typeof localStorage !== 'undefined') {
       try {
         const saved = localStorage.getItem('menza_active_order');
-        return saved ? JSON.parse(saved) : null;
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && !['Cancelled', 'Settled', 'Completed'].includes(parsed.orderStatus || parsed.status)) {
+            return parsed;
+          }
+        }
+        return null;
       } catch {
         return null;
       }
@@ -563,8 +569,15 @@ export default function App() {
         // Check for any recently saved active order from persistent storage
         try {
           const savedActive = api.getSavedActiveOrder();
-          if (savedActive && !['Cancelled', 'Settled'].includes(savedActive.orderStatus)) {
-            setActiveOrder(savedActive);
+          if (savedActive && !['Cancelled', 'Settled', 'Completed'].includes(savedActive.orderStatus || savedActive.status)) {
+            const currentNumericRestId = Number(urlRestId) || (targetEncryptedId ? api.decryptRestaurantId(targetEncryptedId) : 1);
+            if (!savedActive.restaurantId || Number(savedActive.restaurantId) === currentNumericRestId) {
+              setActiveOrder(savedActive);
+            } else {
+              setActiveOrder(null);
+            }
+          } else {
+            setActiveOrder(null);
           }
         } catch (e) {}
 
@@ -1668,18 +1681,10 @@ export default function App() {
   ========================= */
 
   const effectiveTable = React.useMemo(() => {
-    if (activeTable) return activeTable;
-    if (activeOrder?.tableId || activeOrder?.tableName) {
-      return {
-        id: activeOrder.tableId,
-        tableName: activeOrder.tableName || `Table #${activeOrder.tableId}`,
-        restaurantId: activeOrder.restaurantId || catalog?.restaurantId,
-        encryptedTableId: activeOrder.encryptedTableId,
-        isOccupied: true,
-      };
-    }
-    return null;
-  }, [activeTable, activeOrder?.tableId, activeOrder?.tableName, activeOrder?.restaurantId, activeOrder?.encryptedTableId, catalog?.restaurantId]);
+    // A table is strictly active ONLY when explicitly set (e.g. from Table QR code or selection).
+    // Storefront visits (?r=...) have activeTable = null and must remain in Takeaway/Counter mode without a table.
+    return activeTable || null;
+  }, [activeTable]);
 
   const handleCallWaiter =
     async (requestType = 'CALL_WAITER', message = '') => {

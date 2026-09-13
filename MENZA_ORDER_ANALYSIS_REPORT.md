@@ -2,102 +2,117 @@
 
 **Date**: September 14, 2026  
 **Application**: MenzaOrder (React Native Web / Vite / Azure SignalR / Cashfree POS)  
-**Target Investigation URL**: `https://lemon-mud-097d55a00.7.azurestaticapps.net/?encRestId=fPo9f2iv1IjJcp77OZWtgA`
+**Investigation Scope**: Verification & QR Routing Audit, General Storefront vs Dine-In Resolution
 
 ---
 
-## 1. The Incident: Why Did a Table ID Appear on the Website?
+## 1. Executive Summary: What Happened With the QR Links?
 
-### 1.1 The Reported Query
-> **Backend Developer Statement**:  
-> *"I only provided you `RestId` (`encRestId=fPo9f2iv1IjJcp77OZWtgA`). It doesn't have a `tableId` in the URL, but you can see a table ID displayed on the website. Why did that happen?"*
+### 1.1 The Reported Incident
+> **Developer Testing Scenario**:  
+> *"I am a developer testing the app regularly. I opened the app and registered / verified myself with OTP. I did NOT select any table, and I scanned the **General Storefront QR**. However, the website is showing me **Table 1** and displaying the **Call Waiter** button! Why is this happening? Check all the links and solve this error."*
 
 ---
 
-### 1.2 Live Backend API Audit
-To verify if the backend was secretly injecting a table ID, we queried the production Azure API endpoint directly:
+### 1.2 Analysis of the 4 Real WhatsApp Links Provided by Akshay
 
+| Link # | Link URL | Type | Intended Restaurant & Table | What Happened Before Fix | Correct Behavior (Now Fixed) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Link 1** | `https://lemon-mud-097d55a00.7.azurestaticapps.net/?r=bEfOdSjPPB6U8FPbxxQzTg` | **Storefront QR** | **Menza Veerji Cafe** (RestId 51)<br>*No Table (Takeaway / Counter)* | Resurrected Table 1 from old session + showed Call Waiter | **Clean Takeaway mode**, NO Table banner, Call Waiter button **HIDDEN** |
+| **Link 2** | `https://lemon-mud-097d55a00.7.azurestaticapps.net/dinein/bEfOdSjPPB6U8FPbxxQzTg/CDRJgfrhq_MBC2FUdl5kSQ` | **Table QR** | **Menza Veerji Cafe** (RestId 51)<br>**Table T1 (Main Hall)** | Correctly decoded `CDRJgfrhq_MBC2FUdl5kSQ` to Table 27 ("T1") | **Dine-In Table T1**, shows Call Waiter, orders attached to Table T1 |
+| **Link 3** | `https://lemon-mud-097d55a00.7.azurestaticapps.net/?r=fPo9f2iv1IjJcp77OZWtgA` | **Storefront QR** | **Menza kitchen** (RestId 52)<br>*No Table (Takeaway / Counter)* | Resurrected Table 1 (which doesn't exist in Rest 52!) | **Clean Takeaway mode**, NO Table banner, Call Waiter button **HIDDEN** |
+| **Link 4** | `https://lemon-mud-097d55a00.7.azurestaticapps.net/dinein/fPo9f2iv1IjJcp77OZWtgA/FhRodSl1o-j1bBJ92fd2ag` | **Table QR** | **Menza kitchen** (RestId 52)<br>**Table TE2 (Terrace)** | Correctly decoded `FhRodSl1o-j1bBJ92fd2ag` to Table 34 ("TE2") | **Dine-In Table TE2**, shows sanitization/table status and Call Waiter |
+
+---
+
+## 2. Why Did "Table 1" and "Call Waiter" Appear on General Storefront Links?
+
+When querying the live Azure backend API directly for Link 1 and Link 3:
 ```bash
-GET /api/public/store/profile?r=fPo9f2iv1IjJcp77OZWtgA&restaurantId=52
+GET /api/public/store/profile?r=bEfOdSjPPB6U8FPbxxQzTg
+GET /api/public/store/profile?r=fPo9f2iv1IjJcp77OZWtgA
 ```
+Both endpoints returned `"tableId": null` and `"tableName": null`. **The backend did not send any table.**
 
-**Backend Response Payload**:
-```json
-{
-  "restaurantId": 52,
-  "encryptedRestaurantId": "fPo9f2iv1IjJcp77OZWtgA",
-  "restaurantName": "Menza kitchen",
-  "address": "Katara hills",
-  "city": "Bhopal",
-  "state": "MP",
-  "isOpen": true,
-  "isAcceptingOrders": true,
-  "isTableOrderingEnabled": true,
-  "tableId": null,
-  "tableName": null,
-  "tableStatus": "Available",
-  "isTableOccupied": false,
-  "activeOrderId": null
-}
-```
-
-**Finding**: The backend API was **100% correct**. It returned `"tableId": null` and `"tableName": null`. The table ID was being injected and displayed entirely on the **frontend client**.
-
----
-
-### 1.3 Root Cause Analysis (Client-Side Trace)
+The appearance of **Table 1** and the **Call Waiter** button was triggered by a chain of 4 frontend client behaviors:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│ 1. User/Tester visits:                                                          │
-│    https://lemon-mud-097d55a00.7.azurestaticapps.net/?encRestId=fPo9f2iv1IjJcp...  │
-│    (No table parameter in query string -> urlTableId is null)                   │
+│ 1. Developer opens Storefront QR: /?r=bEfOdSjPPB6U8FPbxxQzTg                    │
+│    (No table parameter in URL -> urlTableId is null, activeTable is null)       │
 └────────────────────────────────────────┬────────────────────────────────────────┘
                                          │
                                          ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│ 2. App.tsx (Line 546-551):                                                      │
-│    targetTableNum = urlTableId ||                                               │
-│                     localStorage.getItem('menza_last_table_id')  <── RESURRECTED│
+│ 2. Developer registers / verifies mobile OTP:                                   │
+│    api.getSavedActiveOrder() scans localStorage:                                │
+│    - menza_active_order was empty / settled                                     │
+│    - BUT menza_local_orders contained [ { id: 101, tableId: 1, ... } ]          │
+│    - Line 1944: "if (parsed[0]) return parsed[0]" returned the old order!       │
+│    - App.tsx sets activeOrder = parsed[0] (which had tableId: 1)                │
 └────────────────────────────────────────┬────────────────────────────────────────┘
                                          │
                                          ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│ 3. loadMenuViaEncryptedEndpoint:                                                │
-│    Target Table is found or synthesized as a phantom "Table #X"                 │
-│    -> setActiveTable(resolvedTable)                                             │
+│ 3. App.tsx line 1670 (effectiveTable):                                          │
+│    effectiveTable = activeTable || activeOrder?.tableId                         │
+│    Since activeTable was null, effectiveTable took activeOrder.tableId (1)!     │
 └────────────────────────────────────────┬────────────────────────────────────────┘
                                          │
                                          ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│ 4. Header.tsx & CustomerView.tsx:                                               │
-│    - Renders "Table #..." Dine-In Banner at top of menu                         │
-│    - Renders "Call Waiter" button in navigation bar                             │
-│    - Converts order type from Takeaway to Dine-In                               │
+│ 4. Header, CustomerView, CartModal, CallWaiterModal:                            │
+│    - Header: receives activeTable = Table 1 -> hasTable is TRUE ->              │
+│              SHOWS "Call Waiter" BUTTON!                                        │
+│    - CustomerView: renders "Table #1 Dine-In Table" banner!                     │
+│    - CartModal: sets deliveryType = "Dine-In" for Table 1!                      │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Cause 1: Stale Session Fallback in `App.tsx`
-In `src/App.tsx` (Lines 546–551):
-```javascript
-// PREVIOUS CODE
-const targetTableNum =
-  urlTableId
-    ? isNaN(Number(urlTableId)) ? urlTableId : Number(urlTableId)
-    : (typeof localStorage !== 'undefined' && localStorage.getItem('menza_last_table_id')
-        ? localStorage.getItem('menza_last_table_id')
-        : null);
-```
-* If a developer or customer previously tested table ordering, scanned a table QR code, or created an order on that device, the browser stored `menza_last_table_id` in `localStorage`.
-* When opening the clean store-level URL (`?encRestId=...`), `urlTableId` evaluated to `null`.
-* Instead of staying in **Takeaway / General Store** mode, the frontend pulled the old table number out of `localStorage` and attached it to the session.
+### Detailed Breakdown of the Bugs
 
-#### Cause 2: Hardcoded `tableId = 1` Default in `QrScannerModal.tsx`
-In `src/components/QrScannerModal.tsx` (Lines 24–27):
+#### 1. `effectiveTable` Overriding Null Tables in `App.tsx`
+In `src/App.tsx`:
 ```javascript
-// PREVIOUS CODE
+// PREVIOUS BUGGY CODE:
+const effectiveTable = React.useMemo(() => {
+  if (activeTable) return activeTable;
+  if (activeOrder?.tableId || activeOrder?.tableName) {
+    return {
+      id: activeOrder.tableId,
+      tableName: activeOrder.tableName || `Table #${activeOrder.tableId}`,
+      ...
+    };
+  }
+  return null;
+}, [activeTable, activeOrder]);
+```
+* Even when `activeTable` was `null` (because the user opened a General Storefront QR), `effectiveTable` looked into `activeOrder?.tableId`.
+* If the user had tested placing an order previously on Table 1, `effectiveTable` returned Table 1.
+* Every component (`Header`, `CustomerView`, `CartModal`, `CallWaiterModal`) was passed `activeTable={effectiveTable}`, tricking the app into thinking the user was seated at Table 1!
+
+#### 2. `api.getSavedActiveOrder()` Resurrecting Old Orders from `menza_local_orders`
+In `src/services/api.js` (Lines 1934–1946):
+```javascript
+// PREVIOUS BUGGY CODE:
+const saved = localStorage.getItem('menza_local_orders');
+if (saved) {
+  const parsed = JSON.parse(saved);
+  if (Array.isArray(parsed) && parsed.length > 0) {
+    const nonTerminal = parsed.find(o => !['Cancelled', 'Settled'].includes(o.orderStatus));
+    if (nonTerminal) return nonTerminal;
+    if (parsed[0]) return parsed[0]; // <--- CRITICAL BUG!
+  }
+}
+```
+* `if (parsed[0]) return parsed[0];` unconditionally returned whatever order was at index 0 in the history, even if that order was settled, completed, or from weeks ago!
+* This caused `activeOrder` to be perpetually populated with an old test order on Table 1.
+
+#### 3. QR Scanner Hardcoded `tableId = 1` Fallback
+In `src/components/QrScannerModal.tsx` (Line 26):
+```javascript
+// PREVIOUS BUGGY CODE:
 const parseQrText = (decodedText) => {
-  let encId = activeEncryptedId || 'uqQTzsGyDJy4_TBVeYXCfg';
   let tableId = 1; // <--- HARDCODED DEFAULT
   ...
   const tableMatch = decodedText.match(/tableId=(\d+)/i);
@@ -105,119 +120,119 @@ const parseQrText = (decodedText) => {
   return { encId, tableId };
 };
 ```
-* If the backend URL was pasted or scanned through the in-app QR scanner modal, `tableMatch` failed (since no `tableId` existed in the URL).
-* The parser defaulted `tableId` to `1`, pushed `&tableId=1` to the URL, and permanently cached Table 1 in `localStorage`.
+* If someone scanned a General Storefront QR using the in-app camera scanner, the scanner found no `tableId` and defaulted `tableId` to `1`.
+* It then pushed `&tableId=1` to the URL and saved `menza_last_table_id = 1` in `localStorage`.
 
-#### Cause 3: Cross-Restaurant & Settled Order Table Bleed
-In `src/components/CustomerView.tsx` (Lines 706–715):
+#### 4. Header Rendering "Call Waiter" When `hasTable` is True
+In `src/components/Header.tsx` (Lines 210–217 & 438–458):
 ```javascript
-// PREVIOUS CODE
-const currentTable = activeTable || (
-  activeOrder?.tableId || activeOrder?.tableName
-    ? { id: activeOrder.tableId, tableName: activeOrder.tableName }
-    : null
-);
+const hasTable = React.useMemo(() => {
+  if (!activeTable) return false;
+  return Number(activeTable.id) > 0;
+}, [activeTable]);
 ```
-* If `activeOrder` was cached in storage from another restaurant or an earlier session, `CustomerView` displayed that order's table banner even when `activeTable` was null.
-
-#### Cause 4: Phantom Table Generation
-In `src/App.tsx` (Lines 1006–1018):
-* Restaurant 52 ("Menza kitchen") has 10 tables: **A1, A2, R1, R2, T1, T2, TE1, TE2, V1, V2**.
-* When the resurrected table ID (such as `1`) was not found among Restaurant 52's tables, the client synthesized a synthetic placeholder: `{ id: 1, tableName: "Table #1" }`, showing a non-existent table to the user.
+* When `effectiveTable` injected Table 1 into the `Header`, `hasTable` became `true`.
+* The header displayed the orange **Call Waiter** button and table badge.
+* On a Storefront QR, `activeTable` must be `null`, making `hasTable = false` and keeping the Call Waiter button hidden.
 
 ---
 
-### 1.4 How It Was Resolved
-1. **URL Priority & LocalStorage Cleanup**: In `src/App.tsx`, if the URL does not explicitly specify a table ID (`urlTableId === null`), `targetTableNum` is set to `null` and any lingering `menza_last_table_id` is purged from `localStorage`.
-2. **Nullable QR Scanner Resolution**: In `src/components/QrScannerModal.tsx`, `tableId` now defaults to `null`. If a store QR URL is scanned, it no longer appends a fake table ID.
-3. **Restaurant-Scoped Active Order Check**: In `src/components/CustomerView.tsx`, an active order only provides a table fallback if it belongs to the currently viewed restaurant and is not in `Cancelled` or `Settled` status.
+## 3. How It Was Fixed in the Codebase
+
+### Fix 1: Strict `effectiveTable` in `App.tsx`
+`effectiveTable` now strictly returns `activeTable || null`. It **never** pulls a table from old active orders:
+```typescript
+const effectiveTable = React.useMemo(() => {
+  // A table is strictly active ONLY when explicitly set (e.g. from Table QR code or selection).
+  // Storefront visits (?r=...) have activeTable = null and must remain in Takeaway/Counter mode without a table.
+  return activeTable || null;
+}, [activeTable]);
+```
+
+### Fix 2: Purged Zombie Fallback in `api.getSavedActiveOrder()`
+In `src/services/api.js`:
+Removed `if (parsed[0]) return parsed[0]`. Now only genuinely active orders (`!['Cancelled', 'Settled', 'Completed'].includes(o.orderStatus)`) are returned. If all past orders are settled, it cleanly returns `null`.
+
+### Fix 3: Restaurant-Scoped Active Order & State Initialization
+In `src/App.tsx`:
+* Initial state from `localStorage.getItem('menza_active_order')` checks for non-terminal status.
+* `initializeMenu` validates that `savedActive` belongs to the current restaurant (`savedActive.restaurantId === currentNumericRestId`). If not, it sets `activeOrder` to `null`.
+
+### Fix 4: Clean Takeaway View in `CustomerView.tsx`
+In `src/components/CustomerView.tsx`:
+```typescript
+const currentTable: any = activeTable || null;
+if (!currentTable) return null;
+```
+When visiting a General Storefront QR, `currentTable` is `null`, and no table banner is rendered.
+
+### Fix 5: Nullable Table Resolution in `QrScannerModal.tsx`
+In `src/components/QrScannerModal.tsx`:
+`tableId` now defaults to `null`. Scanning a General Storefront QR leaves `tableId: null`, stripping any `tableId` query parameters from the URL.
 
 ---
 
-## 2. Complete Application Functionality Map
+## 4. Complete Application Functionality Map
 
-`MenzaOrder` provides two synchronized operational views: the **Customer Ordering Portal** and the **Staff POS / Kitchen Display System (KDS)**.
+`MenzaOrder` provides two synchronized operational views:
 
-### 2.1 Customer Portal Features
+### 4.1 Customer Portal Features
 
 | Feature | Operational Scope |
 | :--- | :--- |
-| **Encrypted Routing Engine** | Resolves obfuscated restaurant tokens (`encRestId`, `r`, `eid`) and table IDs. Normalizes the address bar to clean encrypted parameters (`?r=...`). |
-| **Store vs Dine-In Dynamic Modes** | Automatically switches between **Takeaway / Counter Mode** (no table selected) and **Dine-In Mode** (table selected, waiter services enabled). |
-| **Real-Time Menu & Filter System** | Categorized menu layout, veg/non-veg dietary toggles, spicy badges, portion size indicators, preparation time metrics, and live instant search. |
-| **Operating Status & Auto-Lock** | Continuously evaluates store operating status (Open, Paused with countdown timer, Closed, Manual Mode). Disables ordering when the kitchen is closed or paused. |
-| **Table Sanitization Protection** | Detects if a table is marked `Cleaning`, `Reserved`, or `Occupied` by another party. Displays informative alert banners and locks checkout to prevent double-seating. |
-| **Cart & Multi-Tax Pricing** | In-memory and persisted cart management. Computes Item Total, CGST (2.5%), SGST (2.5%), discounts, platform fees, and packaging charges. |
-| **Customer OTP Authentication** | Phone number login with 6-digit SMS OTP verification and auth token persistence. |
-| **Cashfree Payment Gateway** | Native Cashfree SDK v3 integration. Creates payment orders, initiates seamless redirection, handles return URL callbacks, and performs server verification. |
-| **Real-Time Order Tracking** | Live order status progression: `Placed` → `Confirmed` → `In Kitchen / Preparing` → `Ready / Plated` → `Served to Table` → `Settled`. |
-| **Digital Waiter Call System** | Customers can send targeted table requests: **Call Waiter**, **Drinking Water**, **Request Bill**, or **Clean Table**. |
-| **Sliding-Window Rate Limiting** | Client-side rate limiting prevents spamming service requests (60-second cooldown for bill requests, 45 seconds for waiter calls). |
-| **In-App Camera QR Scanner** | HTML5 camera scanner that parses physical table QR stickers and switches dining context seamlessly. |
-| **Branded QR Generator** | Generates exportable, high-resolution SVG and printable PNG QR codes with restaurant branding and table numbers. |
+| **Dual Mode Operation** | **Takeaway / Counter Mode** (Storefront QRs) vs **Dine-In Mode** (Table QRs). |
+| **Encrypted Parameter Routing** | Resolves `?r=...`, `?encRestId=...`, `?tableId=...`, and path-based `/dinein/:encRestId/:encTableId`. |
+| **Digital Menu & Live Filters** | Category tabs, veg/non-veg toggles, spicy indicators, portion badges, preparation times, and instant search. |
+| **Operating Hours & Auto-Lock** | Checks store hours and kitchen status (Open, Paused with live countdown, Closed, Manual Mode). Automatically locks ordering when the kitchen is closed. |
+| **Table Sanitization Protection** | Detects if a table is marked `Cleaning`, `Reserved`, or `Occupied`. Displays alert banners and locks checkout to prevent seating conflicts. |
+| **Cart & Multi-Tax Pricing** | Computes Item Total, CGST (2.5%), SGST (2.5%), discounts, platform fees, and packaging charges. Persists cart across refreshes. |
+| **Customer SMS OTP Login** | Phone number entry with 6-digit SMS OTP verification and session token caching. |
+| **Cashfree Payment Gateway** | Cashfree SDK v3 integration with seamless online checkout, payment return verification, and rollback protection. |
+| **Live Order Tracking** | Real-time tracking: `Placed` → `Confirmed` → `In Kitchen / Preparing` → `Ready / Plated` → `Served to Table` → `Settled`. |
+| **Digital Waiter Call System** | Customers at tables can send service requests: **Call Waiter**, **Drinking Water**, **Request Bill**, or **Clean Table**. |
+| **Sliding-Window Rate Limiting** | Client-side rate limiting prevents request spam (60-second cooldown for bills, 45 seconds for waiter calls). |
+| **Camera QR Scanner & Generator** | HTML5 camera scanner for table stickers, plus exportable branded SVG/PNG QR code generator. |
 
 ---
 
-### 2.2 Staff POS & Kitchen Display (KDS) Features
+### 4.2 Staff POS & Kitchen Display System (KDS)
 
 | Feature | Operational Scope |
 | :--- | :--- |
 | **Staff Authentication** | PIN/OTP staff login with role-based access and multi-restaurant management. |
 | **Visual Table Floor Plan** | Color-coded live table grid displaying capacities, current states (`Available`, `Occupied`, `Cleaning`, `Reserved`, `KOT_Active`, `Billed`), and linked orders. |
-| **Kitchen Display System (KDS)** | Dedicated kitchen dashboard to transition tickets from `Pending` → `Confirmed` → `Preparing` → `Ready` → `Served`. |
+| **Kitchen Display System (KDS)** | Kitchen dashboard to transition tickets through preparation stages. |
 | **Table Billing & Settlement** | Allows staff to generate pre-bills, accept cash/card/UPI payments, settle table balances, and reset tables back to `Available`. |
-| **Direct Order Manipulation** | Staff can inject custom off-menu items or add extra dishes directly to an existing table ticket. |
-| **SignalR Real-Time WebSocket Hub** | Connects to `/hubs/order` for bi-directional live sync. Includes synthesized Web Audio bell chimes (587Hz → 880Hz) and native desktop push notifications. |
+| **SignalR Real-Time WebSocket Hub** | Connects to `/hubs/order` for bi-directional live sync. Includes synthesized Web Audio bell chimes and native push notifications. |
 
 ---
 
-## 3. Detailed Audit of Errors & Fixed Deficiencies
+## 5. Verification & Production Build Status
 
-During our codebase inspection, 5 key bugs were discovered and patched:
-
-### Defect 1: Stale Table Resurrection on Store URLs
-* **File**: `src/App.tsx` (Lines 546–555)
-* **Impact**: Scanning or clicking a general restaurant link caused previous table IDs to linger indefinitely.
-* **Resolution**: If `urlTableId` is not present in the URL query string, `targetTableNum` is explicitly assigned `null` and `menza_last_table_id` is removed from `localStorage`.
-
-### Defect 2: QR Scanner Modal Hardcoded Table ID 1
-* **File**: `src/components/QrScannerModal.tsx` (Lines 24–38)
-* **Impact**: Pasting or scanning any restaurant link without a table ID automatically converted the URL to Table 1.
-* **Resolution**: Initialized `tableId` as `number | null = null`. If no table parameter is detected, the scan result passes `tableId: null`, cleanly stripping `tableId` from the destination URL.
-
-### Defect 3: Cross-Restaurant Table Bleed from `activeOrder`
-* **File**: `src/components/CustomerView.tsx` (Lines 706–715)
-* **Impact**: If a user had an unsettled order from Restaurant A, opening Restaurant B showed Restaurant A's table banner.
-* **Resolution**: Added restaurant ID matching and verified the order status is not `Cancelled` or `Settled`.
-
-### Defect 4: Hardcoded `restaurantId = 1` in Table Status & Settlement API
-* **File**: `src/services/api.js` (Lines 3876–3906, 4023–4046), `src/App.tsx` (Lines 1886–1925)
-* **Impact**: Updating table status or settling a table from the staff dashboard always modified tables for Restaurant 1 instead of the staff's currently selected restaurant (e.g. Restaurant 52).
-* **Resolution**: Passed `restaurantId` through `updateTableStatus` and `settleTable` functions.
-
-### Defect 5: Backend Database Notice for Restaurant 52 ("Menza kitchen")
-* **Observation**: Direct query to `/api/public/store/menu?r=fPo9f2iv1IjJcp77OZWtgA` revealed that all 10 tables in Restaurant 52 are currently configured with non-available statuses:
-  * **Cleaning**: Tables 29 (T1), 30 (T2), 33 (TE1), 34 (TE2), 35 (R1), 37 (V1), 38 (V2)
-  * **Occupied**: Tables 31 (A1), 32 (A2), 36 (R2)
-* **Impact**: Whenever any table was previously assigned to Restaurant 52, the frontend locked ordering because every table was marked `Cleaning` or `Occupied`.
-* **Action Item for Backend / Admin**: Log in to the restaurant admin panel or database and update table statuses to `"Available"` when they are open for seating.
-
----
-
-## 4. Verification & Build Integrity
-
-* **Type & Syntax Check**: Verified using TypeScript compiler (`tsc --noEmit`). Zero type errors found.
-* **Production Build**: Verified using `vite build`:
+* **TypeScript Compilation**: `npx tsc --noEmit` — 0 errors.
+* **Vite Production Build**: `npm run build` — `1998 modules transformed`, built in 10.09s with **0 errors**:
   ```
-  vite v6.4.3 building for production...
-  ✓ 1998 modules transformed.
   dist/index.html                     1.82 kB │ gzip:   0.84 kB
   dist/assets/index-FGc1wPLm.css     12.67 kB │ gzip:   3.43 kB
-  dist/assets/index-BopYkNoQ.js   1,061.24 kB │ gzip: 310.22 kB
-  ✓ built in 9.60s (0 errors)
+  dist/assets/index-DAuoYLGF.js   1,060.76 kB │ gzip: 310.09 kB
+  ✓ built in 10.09s
   ```
-* **Git Commit Diff**:
-  * `src/App.tsx`: Resolved table resurrection, effective restaurant ID resolution, and staff table management.
-  * `src/components/CustomerView.tsx`: Restricted active order table fallbacks to current restaurant.
-  * `src/components/QrScannerModal.tsx`: Nullable table ID support on URL parsing.
-  * `src/services/api.js`: Multi-restaurant parameterization for table statuses and settlements.
+
+### What You Will See When Testing the 4 Links Now:
+1. **Link 1 (`/?r=bEfOdSjPPB6U8FPbxxQzTg`)**:
+   * Opens **Menza Veerji Cafe** in **Takeaway / Counter mode**.
+   * **No Table 1** banner.
+   * **Call Waiter button is hidden**.
+   * Cart checks out as Takeaway / Counter.
+2. **Link 2 (`/dinein/bEfOdSjPPB6U8FPbxxQzTg/CDRJgfrhq_MBC2FUdl5kSQ`)**:
+   * Opens **Menza Veerji Cafe** at **Table T1**.
+   * Shows Table T1 Dine-In banner.
+   * **Call Waiter button is active**.
+   * Cart checks out for Table T1.
+3. **Link 3 (`/?r=fPo9f2iv1IjJcp77OZWtgA`)**:
+   * Opens **Menza kitchen** in **Takeaway / Counter mode**.
+   * **No Table 1** banner.
+   * **Call Waiter button is hidden**.
+4. **Link 4 (`/dinein/fPo9f2iv1IjJcp77OZWtgA/FhRodSl1o-j1bBJ92fd2ag`)**:
+   * Opens **Menza kitchen** at **Table TE2**.
+   * Shows Table TE2 status and activates waiter features for Table TE2.

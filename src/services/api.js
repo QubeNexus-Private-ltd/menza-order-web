@@ -1936,13 +1936,10 @@ export const getSavedActiveOrder = () => {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const nonTerminal = parsed.find(
-            (o) => o && !['Cancelled', 'Settled'].includes(o.orderStatus || o.status)
+            (o) => o && !['Cancelled', 'Settled', 'Completed'].includes(o.orderStatus || o.status)
           );
           if (nonTerminal && (nonTerminal.id || nonTerminal.orderId || nonTerminal.Id || nonTerminal.OrderId)) {
             return nonTerminal;
-          }
-          if (parsed[0] && (parsed[0].id || parsed[0].orderId || parsed[0].Id || parsed[0].OrderId)) {
-            return parsed[0];
           }
         }
       }
