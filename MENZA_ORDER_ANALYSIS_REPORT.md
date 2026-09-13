@@ -236,3 +236,70 @@ In `src/components/QrScannerModal.tsx`:
 4. **Link 4 (`/dinein/fPo9f2iv1IjJcp77OZWtgA/FhRodSl1o-j1bBJ92fd2ag`)**:
    * Opens **Menza kitchen** at **Table TE2**.
    * Shows Table TE2 status and activates waiter features for Table TE2.
+
+---
+
+## 6. Menu Loading & Site Performance Incident (Diagnosis & Fix)
+
+### 6.1 Issue Reported
+> *"after you fixed the code site is not loading also it taking too much time to display menu"*
+
+### 6.2 Root Cause Analysis
+Two compounding factors caused this issue:
+
+1. **Azure Backend Crash (`HTTP Error 500.30 - ASP.NET Core app failed to start`)**:
+   * A live probe to the backend URL (`https://restadmin20260810182511-b7gaaqbfesdxa3cu.centralindia-01.azurewebsites.net/api/public/store/menu?r=bEfOdSjPPB6U8FPbxxQzTg`) returned:
+     ```html
+     HTTP/1.1 500 Internal Server Error
+     <h1> HTTP Error 500.30 - ASP.NET Core app failed to start </h1>
+     <h2> Common solutions to this issue: </h2>
+     <ul>
+       <li>The app failed to start</li>
+       <li>The app started but then stopped</li>
+       <li>The app started but threw an exception during startup</li>
+     </ul>
+     ```
+   * The Azure ASP.NET Core backend process crashed during startup (e.g. database connection string issue, missing environment variable, or unhandled exception in `Program.cs` / `ConfigureServices`). As a result, every single API endpoint returned HTTP 500 HTML error pages.
+
+2. **Mutual Recursion Loop in `api.js`**:
+   * In `src/services/api.js`, when `/api/public/store/menu` and `/api/MenuCatalog/encrypted/...` failed due to the 500 error, line 941 attempted a fallback:
+     ```javascript
+     const fallbackCatalog = await getMenuCatalog(rawRestId);
+     ```
+   * However, `getMenuCatalog` is an alias for `getMenuCatalogTree`, which internally calls `getMenuCatalogByEncryptedId`!
+   * This created an infinite mutual recursion loop (`getMenuCatalogByEncryptedId` → `getMenuCatalog` → `getMenuCatalogTree` → `getMenuCatalogByEncryptedId`). With multiple sequential network calls and timeouts, this completely choked the browser event loop and caused the page to hang indefinitely.
+
+3. **Sequential Loading Waterfall in `App.tsx`**:
+   * `loadMenuViaEncryptedEndpoint` previously awaited 6 API calls in strict sequence before hiding the loading spinner:
+     `catData` → `getStoreOperatingStatus` → `getStoreProfile` → `getTables` → `refreshCart` → `getAllOrders` → `setLoading(false)`.
+   * Under slow network conditions or backend failures, this multiplied the wait time by up to 6x.
+
+---
+
+### 6.3 Fixes Implemented
+
+1. **Eliminated Mutual Recursion (`api.js`)**:
+   * Removed the recursive `getMenuCatalog(rawRestId)` fallback from `getMenuCatalogByEncryptedId`.
+   * Added fast-fail guards in `getStoreProfile`: if the server responds with a 500 or times out, the client aborts immediately rather than attempting secondary routes against a crashed server.
+
+2. **Instant Cache Rendering (0ms First Paint)**:
+   * Exported `getCachedMenuCatalog(encryptedRestaurantId)` to immediately pull the cached menu catalog from `localStorage`.
+   * In `App.tsx`, if cached menu data exists, it renders **instantly (0ms)** and dismisses the loading spinner before network calls even initiate.
+   * Background revalidation fetches fresh data from the server and silently updates the UI when received.
+
+3. **Eliminated Loading Waterfall (Parallel Non-Blocking Metadata)**:
+   * As soon as the menu catalog is ready, `setLoading(false)` is invoked immediately.
+   * Secondary metadata (`getStoreOperatingStatus`, `getStoreProfile`, `getTables`, `refreshCart`, `getAllOrders`) now run in the background in parallel using `Promise.allSettled`.
+
+4. **Actionable Offline / Server Update Screen (`CustomerView.tsx`)**:
+   * If the server is offline or restarting and no items can be retrieved, the UI now displays a clean "Menu Currently Unavailable — Unable to load menu from server. The restaurant service may be restarting or updating." along with a **"Tap to Retry"** button.
+
+---
+
+### 6.4 Urgent Action Required for Backend Developer
+The frontend is now resilient, fast, and protected against crash loops. However, the backend developer must fix the ASP.NET Core process on Azure:
+1. Open the Azure Portal → Navigate to App Service **`restadmin20260810182511-b7gaaqbfesdxa3cu`**.
+2. Under **Monitoring**, check **Log Stream** or download the `stdout` logs from `D:\home\LogFiles\Application`.
+3. Verify database connectivity (connection string in `appsettings.json` or Azure App Settings) and inspect any exceptions thrown in `Program.cs`.
+4. Restart the App Service. Once the backend starts cleanly, the menu will immediately populate live data for all restaurants and tables.
+

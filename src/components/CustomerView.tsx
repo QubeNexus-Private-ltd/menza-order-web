@@ -931,6 +931,25 @@ export default function CustomerView({
             <ActivityIndicator size="large" color="#D33401" />
             <Text style={styles.loaderText}>Loading menu...</Text>
           </View>
+        ) : (items || []).length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Store size={38} color="#94A3B8" style={{ marginBottom: 12 }} />
+            <Text style={styles.emptyTitle}>Menu Currently Unavailable</Text>
+            <Text style={styles.emptySub}>
+              Unable to load menu from server. The restaurant service may be restarting or updating.
+            </Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => {
+                if (typeof window !== 'undefined') {
+                  window.location.reload();
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.retryButtonText}>Tap to Retry</Text>
+            </TouchableOpacity>
+          </View>
         ) : filteredItems.length === 0 ? (
           <View style={styles.emptyBox}>
             <Text style={styles.emptyTitle}>No Dishes Found</Text>
@@ -2081,6 +2100,23 @@ const styles = StyleSheet.create({
       COLORS.textSecondary,
     fontSize: 12,
     textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: COLORS.orange,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+    shadowColor: COLORS.orange,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  retryButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   restaurantHeroCard: {
     backgroundColor: COLORS.white,

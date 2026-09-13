@@ -38,7 +38,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 15000,
+  timeout: 7000,
 });
 
 /* =========================================================
@@ -884,6 +884,21 @@ const normalizeCatalogData = (
    MENU APIs
 ========================================================= */
 
+export const getCachedMenuCatalog = (encryptedRestaurantId) => {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const cleanEncId = (encryptedRestaurantId || '').trim();
+    const raw = (cleanEncId ? localStorage.getItem(`menza_cached_catalog_${cleanEncId}`) : null) ||
+                localStorage.getItem('menza_cached_catalog');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+};
+
 export const getMenuCatalogByEncryptedId =
   async (encryptedRestaurantId) => {
     const cleanEncId = (
@@ -936,31 +951,11 @@ export const getMenuCatalogByEncryptedId =
     }
 
     if (!catalogData || !Array.isArray(catalogData.items) || catalogData.items.length === 0) {
-      try {
-        const rawRestId = decryptedRestId || decryptRestaurantId(cleanEncId) || 1;
-        const fallbackCatalog = await getMenuCatalog(rawRestId);
-        if (fallbackCatalog && Array.isArray(fallbackCatalog.items) && fallbackCatalog.items.length > 0) {
-          catalogData = fallbackCatalog;
-          decryptedRestId = fallbackCatalog.restaurantId || rawRestId;
-        }
-      } catch (e) {
-        console.log('Direct getMenuCatalog fallback failed:', e?.message);
+      const cached = getCachedMenuCatalog(cleanEncId);
+      if (cached) {
+        catalogData = cached;
+        decryptedRestId = cached.restaurantId || decryptedRestId || decryptRestaurantId(cleanEncId) || 1;
       }
-    }
-
-    if (!catalogData || !Array.isArray(catalogData.items) || catalogData.items.length === 0) {
-      try {
-        if (typeof localStorage !== 'undefined') {
-          const cachedRaw = localStorage.getItem('menza_cached_catalog');
-          if (cachedRaw) {
-            const parsed = JSON.parse(cachedRaw);
-            if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
-              catalogData = parsed;
-              decryptedRestId = parsed.restaurantId || decryptedRestId;
-            }
-          }
-        }
-      } catch (e) {}
     }
 
     const normalized = normalizeCatalogData(
@@ -969,96 +964,9 @@ export const getMenuCatalogByEncryptedId =
       cleanEncId
     );
 
-    // Augment with public store profile or RestaurantConfig to ensure full SAS logo and address
-    try {
-      const profile = await getStoreProfile(cleanEncId, decryptedRestId);
-      if (profile) {
-        const pLogo =
-          profile.logoUrl ||
-          profile.LogoUrl ||
-          profile.storeImageUrl ||
-          profile.storeImage ||
-          profile.logo ||
-          profile.Logo ||
-          profile.restaurantLogo ||
-          profile.restaurantLogoUrl ||
-          profile.storeLogo;
-        if (pLogo) {
-          normalized.logoUrl = pLogo;
-        }
-
-        const pImg =
-          profile.imageUrl ||
-          profile.ImageUrl ||
-          profile.bannerImage ||
-          profile.bannerUrl ||
-          profile.image ||
-          profile.Image ||
-          profile.restaurantImage ||
-          profile.restaurantImageUrl ||
-          profile.storeImageUrl ||
-          profile.storeImage;
-        if (pImg) {
-          normalized.imageUrl = pImg;
-        }
-
-        if (profile.address || profile.Address) {
-          normalized.address = profile.address || profile.Address;
-        }
-        if (profile.city || profile.City) {
-          normalized.city = profile.city || profile.City;
-        }
-        if (profile.state || profile.State) {
-          normalized.state = profile.state || profile.State;
-        }
-
-        const pAddress =
-          profile.restaurantAddress ||
-          profile.RestaurantAddress ||
-          [
-            profile.address || profile.Address,
-            profile.city || profile.City,
-            profile.state || profile.State,
-          ]
-            .filter(Boolean)
-            .join(', ');
-        if (pAddress) {
-          normalized.restaurantAddress = pAddress;
-        }
-
-        const pName =
-          profile.restaurantName ||
-          profile.RestaurantName ||
-          profile.restName ||
-          profile.RestName;
-        if (
-          pName &&
-          (normalized.restaurantName.startsWith('Restaurant #') ||
-            !normalized.restaurantName)
-        ) {
-          normalized.restaurantName = pName;
-        }
-
-        if (profile.isKitchenActive !== undefined) {
-          normalized.isKitchenActive = Boolean(profile.isKitchenActive);
-        } else if (profile.IsKitchenActive !== undefined) {
-          normalized.isKitchenActive = Boolean(profile.IsKitchenActive);
-        }
-
-        if (profile.isLiveKitchenStatusEnabled !== undefined) {
-          normalized.isLiveKitchenStatusEnabled = Boolean(profile.isLiveKitchenStatusEnabled);
-        } else if (profile.IsLiveKitchenStatusEnabled !== undefined) {
-          normalized.isLiveKitchenStatusEnabled = Boolean(profile.IsLiveKitchenStatusEnabled);
-        } else if (normalized.isKitchenActive !== undefined) {
-          normalized.isLiveKitchenStatusEnabled = Boolean(normalized.isKitchenActive);
-        }
-      }
-    } catch (profileErr) {
-      console.warn('Profile augmentation error:', profileErr?.message);
-    }
-
     if (typeof localStorage !== 'undefined' && normalized && Array.isArray(normalized.items) && normalized.items.length > 0) {
       try {
+        localStorage.setItem(`menza_cached_catalog_${cleanEncId}`, JSON.stringify(normalized));
         localStorage.setItem('menza_cached_catalog', JSON.stringify(normalized));
       } catch (e) {}
     }
@@ -1088,6 +996,9 @@ export const getStoreProfile = async (
       return res.data;
     }
   } catch (e) {
+    if (e?.response?.status >= 500 || e?.code === 'ECONNABORTED') {
+      return null;
+    }
     try {
       const rId = Number(restaurantId) || 1;
       let res2 = null;

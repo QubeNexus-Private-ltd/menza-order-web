@@ -910,7 +910,16 @@ export default function App() {
       encryptedRestId,
       targetTableId = null
     ) => {
-      setLoading(true);
+      // 1. Instant cache retrieval for 0ms initial render
+      const cachedData = api.getCachedMenuCatalog(encryptedRestId);
+      if (cachedData && Array.isArray(cachedData.items) && cachedData.items.length > 0) {
+        setCatalog(cachedData);
+        setCategories(cachedData.categories || []);
+        setItems(cachedData.items || []);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
 
       try {
         const catData =
@@ -918,157 +927,21 @@ export default function App() {
             encryptedRestId
           );
 
-        setCatalog(catData);
-        setCategories(
-          catData.categories || []
-        );
-        setItems(
-          catData.items || []
-        );
+        if (catData && Array.isArray(catData.items) && catData.items.length > 0) {
+          setCatalog(catData);
+          setCategories(
+            catData.categories || []
+          );
+          setItems(
+            catData.items || []
+          );
+        }
 
         const numericRestId =
-          catData.restaurantId ||
+          catData?.restaurantId ||
           api.decryptRestaurantId(
             encryptedRestId
-          );
-
-        try {
-          const statusData = await api.getStoreOperatingStatus(numericRestId);
-          if (statusData) {
-            setStoreOperatingStatus(statusData);
-            setCatalog((prev) => {
-              if (!prev) return prev;
-              const realName =
-                prev.restaurantName && !prev.restaurantName.startsWith('Restaurant #')
-                  ? prev.restaurantName
-                  : statusData.restaurantName || prev.restaurantName;
-              const realLogo =
-                prev.logoUrl ||
-                statusData.storeImageUrl ||
-                statusData.storeImage ||
-                statusData.logoUrl ||
-                '';
-              const realImage =
-                prev.imageUrl ||
-                statusData.storeImageUrl ||
-                statusData.storeImage ||
-                statusData.bannerImage ||
-                statusData.bannerUrl ||
-                statusData.imageUrl ||
-                '';
-              return {
-                ...prev,
-                restaurantName: realName,
-                logoUrl: realLogo,
-                imageUrl: realImage,
-              };
-            });
-          }
-        } catch (statusErr) {
-          console.warn('Status fetch error:', statusErr);
-        }
-
-        let storeProfile = null;
-        try {
-          storeProfile = await api.getStoreProfile(
-            encryptedRestId,
-            numericRestId,
-            targetTableId
-          );
-        } catch (profileErr) {
-          console.warn('Store profile fetch error:', profileErr);
-        }
-
-        const localTables = await api.getTables(numericRestId);
-        const profileTables = Array.isArray(storeProfile?.availableTables) ? storeProfile.availableTables : [];
-        const tablesData = profileTables.length > 0 ? profileTables : (localTables || []);
-
-        setTables(tablesData);
-
-        if (targetTableId) {
-          const cleanTarget = String(targetTableId).trim();
-          let resolvedTable = null;
-
-          // 1. Check if backend decrypted the table in storeProfile
-          if (storeProfile?.tableId) {
-            resolvedTable = {
-              id: Number(storeProfile.tableId),
-              tableName: storeProfile.tableName || `Table ${storeProfile.tableId}`,
-              tableNumber: storeProfile.tableName || String(storeProfile.tableId),
-              restaurantId: numericRestId,
-              rId: numericRestId,
-              encryptedTableId: targetTableId,
-            };
-          }
-
-          // 2. Check if matching table in tablesData
-          if (!resolvedTable) {
-            const found = tablesData.find(
-              (t) =>
-                t.id === targetTableId ||
-                String(t.id) === cleanTarget ||
-                (t.tableName && String(t.tableName).toLowerCase() === cleanTarget.toLowerCase()) ||
-                (t.tableNumber && String(t.tableNumber).toLowerCase() === cleanTarget.toLowerCase())
-            );
-            if (found) {
-              resolvedTable = {
-                ...found,
-                id: Number(found.id),
-                tableName: found.tableName || `Table ${found.id}`,
-                tableNumber: found.tableNumber || found.tableName || String(found.id),
-                restaurantId: numericRestId,
-                rId: numericRestId,
-                encryptedTableId: targetTableId,
-              };
-            }
-          }
-
-          // 3. Fallback: numeric or unresolvable placeholder
-          if (!resolvedTable) {
-            const isNumeric = !isNaN(Number(targetTableId)) && Number(targetTableId) > 0;
-            resolvedTable = {
-              id: isNumeric ? Number(targetTableId) : targetTableId,
-              tableName: isNumeric
-                ? `Table #${cleanTarget}`
-                : 'Selected Table',
-              tableNumber: cleanTarget,
-              restaurantId: numericRestId,
-              rId: numericRestId,
-              encryptedTableId: targetTableId,
-            };
-          }
-
-          const status = resolvedTable?.status || storeProfile?.tableStatus || (storeProfile?.isTableOccupied ? 'Occupied' : 'Available');
-          const isCleaning = status === 'Cleaning';
-          const isReserved = status === 'Reserved';
-          const isOccupied = status === 'Occupied' || status === 'KOT_Active' || status === 'Billed' || Boolean(storeProfile?.isTableOccupied || resolvedTable?.isOccupied);
-          const isLocked = isCleaning || isReserved;
-
-          let savedOrder = activeOrder;
-          if (!savedOrder && typeof localStorage !== 'undefined') {
-            try {
-              const raw = localStorage.getItem('menza_active_order');
-              if (raw) savedOrder = JSON.parse(raw);
-            } catch {}
-          }
-
-          resolvedTable = {
-            ...resolvedTable,
-            status,
-            isOccupied,
-            isCleaning,
-            isReserved,
-            isLocked,
-            isAvailable: status === 'Available',
-            occupiedByOther: false,
-            activeOrderId: storeProfile?.activeOrderId || savedOrder?.id || null,
-            activeOrderPhoneLast4: storeProfile?.activeOrderPhoneLast4 || null,
-          };
-
-          setActiveTable(resolvedTable);
-        } else {
-          setActiveTable(null);
-        }
+          ) || 1;
 
         const rObj =
           (
@@ -1079,7 +952,7 @@ export default function App() {
           ) || {
             id: numericRestId,
             name:
-              catData.restaurantName ||
+              catData?.restaurantName ||
               `Restaurant #${numericRestId}`,
           };
 
@@ -1087,27 +960,145 @@ export default function App() {
           rObj
         );
 
-        await refreshCart();
+        // Immediate unblock for user: Stop loading spinner right now!
+        setLoading(false);
 
-        const allOrd =
-          await api.getAllOrders();
+        // 2. Secondary metadata in background (parallel, non-blocking)
+        Promise.allSettled([
+          api.getStoreOperatingStatus(numericRestId).then((statusData) => {
+            if (statusData) {
+              setStoreOperatingStatus(statusData);
+              setCatalog((prev) => {
+                if (!prev) return prev;
+                const realName =
+                  prev.restaurantName && !prev.restaurantName.startsWith('Restaurant #')
+                    ? prev.restaurantName
+                    : statusData.restaurantName || prev.restaurantName;
+                const realLogo =
+                  prev.logoUrl ||
+                  statusData.storeImageUrl ||
+                  statusData.storeImage ||
+                  statusData.logoUrl ||
+                  '';
+                const realImage =
+                  prev.imageUrl ||
+                  statusData.storeImageUrl ||
+                  statusData.storeImage ||
+                  statusData.bannerImage ||
+                  statusData.bannerUrl ||
+                  statusData.imageUrl ||
+                  '';
+                return {
+                  ...prev,
+                  restaurantName: realName,
+                  logoUrl: realLogo,
+                  imageUrl: realImage,
+                };
+              });
+            }
+          }),
+          api.getStoreProfile(encryptedRestId, numericRestId, targetTableId).then(async (storeProfile) => {
+            const localTables = await api.getTables(numericRestId).catch(() => []);
+            const profileTables = Array.isArray(storeProfile?.availableTables) ? storeProfile.availableTables : [];
+            const tablesData = profileTables.length > 0 ? profileTables : (localTables || []);
+            setTables(tablesData);
 
-        setOrders(
-          allOrd || []
-        );
+            if (targetTableId) {
+              const cleanTarget = String(targetTableId).trim();
+              let resolvedTable: any = null;
+
+              if (storeProfile?.tableId) {
+                resolvedTable = {
+                  id: Number(storeProfile.tableId),
+                  tableName: storeProfile.tableName || `Table ${storeProfile.tableId}`,
+                  tableNumber: storeProfile.tableName || String(storeProfile.tableId),
+                  restaurantId: numericRestId,
+                  rId: numericRestId,
+                  encryptedTableId: targetTableId,
+                };
+              }
+
+              if (!resolvedTable) {
+                const found = tablesData.find(
+                  (t: any) =>
+                    t.id === targetTableId ||
+                    String(t.id) === cleanTarget ||
+                    (t.tableName && String(t.tableName).toLowerCase() === cleanTarget.toLowerCase()) ||
+                    (t.tableNumber && String(t.tableNumber).toLowerCase() === cleanTarget.toLowerCase())
+                );
+                if (found) {
+                  resolvedTable = {
+                    ...found,
+                    id: Number(found.id),
+                    tableName: found.tableName || `Table ${found.id}`,
+                    tableNumber: found.tableNumber || found.tableName || String(found.id),
+                    restaurantId: numericRestId,
+                    rId: numericRestId,
+                    encryptedTableId: targetTableId,
+                  };
+                }
+              }
+
+              if (!resolvedTable) {
+                const isNumeric = !isNaN(Number(targetTableId)) && Number(targetTableId) > 0;
+                resolvedTable = {
+                  id: isNumeric ? Number(targetTableId) : targetTableId,
+                  tableName: isNumeric ? `Table #${cleanTarget}` : 'Selected Table',
+                  tableNumber: cleanTarget,
+                  restaurantId: numericRestId,
+                  rId: numericRestId,
+                  encryptedTableId: targetTableId,
+                };
+              }
+
+              const status = resolvedTable?.status || storeProfile?.tableStatus || (storeProfile?.isTableOccupied ? 'Occupied' : 'Available');
+              const isCleaning = status === 'Cleaning';
+              const isReserved = status === 'Reserved';
+              const isOccupied = status === 'Occupied' || status === 'KOT_Active' || status === 'Billed' || Boolean(storeProfile?.isTableOccupied || resolvedTable?.isOccupied);
+              const isLocked = isCleaning || isReserved;
+
+              let savedOrder = activeOrder;
+              if (!savedOrder && typeof localStorage !== 'undefined') {
+                try {
+                  const raw = localStorage.getItem('menza_active_order');
+                  if (raw) savedOrder = JSON.parse(raw);
+                } catch {}
+              }
+
+              resolvedTable = {
+                ...resolvedTable,
+                status,
+                isOccupied,
+                isCleaning,
+                isReserved,
+                isLocked,
+                isAvailable: status === 'Available',
+                occupiedByOther: false,
+                activeOrderId: storeProfile?.activeOrderId || savedOrder?.id || null,
+                activeOrderPhoneLast4: storeProfile?.activeOrderPhoneLast4 || null,
+              };
+
+              setActiveTable(resolvedTable);
+            } else {
+              setActiveTable(null);
+            }
+          }),
+          refreshCart(),
+          api.getAllOrders().then((allOrd) => {
+            if (Array.isArray(allOrd)) setOrders(allOrd);
+          }),
+        ]);
       } catch (err) {
         console.error(
           'Failed to load menu:',
           err
         );
-        try {
-          const fallbackCat = await api.getMenuCatalog(1);
-          if (fallbackCat && Array.isArray(fallbackCat.items) && fallbackCat.items.length > 0) {
-            setCatalog(fallbackCat);
-            setCategories(fallbackCat.categories || []);
-            setItems(fallbackCat.items || []);
-          }
-        } catch (fbErr2) {}
+        const fallbackCat = api.getCachedMenuCatalog(encryptedRestId);
+        if (fallbackCat && Array.isArray(fallbackCat.items) && fallbackCat.items.length > 0) {
+          setCatalog(fallbackCat);
+          setCategories(fallbackCat.categories || []);
+          setItems(fallbackCat.items || []);
+        }
       } finally {
         setLoading(false);
       }
