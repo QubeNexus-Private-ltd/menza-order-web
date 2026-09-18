@@ -25,13 +25,41 @@ import OrderTrackerModal from './components/OrderTrackerModal';
 import QrScannerModal from './components/QrScannerModal';
 import RestaurantQrModal from './components/RestaurantQrModal';
 import CallWaiterModal from './components/CallWaiterModal';
+import LandingPage from './components/LandingPage';
 
 import * as api from './services/api';
 import * as signalrService from './services/signalr';
 
 export default function App() {
-  const [mode, setMode] =
-    useState('customer');
+  const [mode, setMode] = useState<'customer' | 'staff' | 'landing'>(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const path = window.location.pathname.toLowerCase();
+
+      // Explicit landing or home route
+      if (path === '/landing' || searchParams.get('page') === 'landing' || searchParams.get('view') === 'landing') {
+        return 'landing';
+      }
+
+      // Explicit staff route
+      if (path === '/staff' || searchParams.get('staff') === 'true' || searchParams.get('view') === 'staff') {
+        return 'staff';
+      }
+
+      // Check if user came via a direct QR code link
+      const isDineInPath = path.includes('/dinein');
+      const hasQrRest = searchParams.has('r') || searchParams.has('encRestId') || searchParams.has('enc') || searchParams.has('eid') || searchParams.has('restId') || searchParams.has('restaurantId');
+      const hasTable = searchParams.has('tableId') || searchParams.has('t') || searchParams.has('table') || searchParams.has('tablenum');
+
+      if (isDineInPath || hasQrRest || hasTable) {
+        return 'customer';
+      }
+
+      // Default at root "/" shows the Landing Page
+      return 'landing';
+    }
+    return 'landing';
+  });
 
   const [catalog, setCatalog] =
     useState(null);
@@ -1104,6 +1132,30 @@ export default function App() {
       }
     };
 
+  const handleLaunchCustomerView = useCallback(
+    (targetEncRestId?: string, targetTableNum: number | string | null = null) => {
+      setMode('customer');
+      const encId = targetEncRestId || catalog?.encryptedRestaurantId || 'bEfOdSjPPB6U8FPbxxQzTg';
+      loadMenuViaEncryptedEndpoint(encId, targetTableNum);
+      if (typeof window !== 'undefined' && window.history?.pushState) {
+        const newUrl = new URL(window.location.origin);
+        newUrl.searchParams.set('r', encId);
+        if (targetTableNum) {
+          newUrl.searchParams.set('tableId', String(targetTableNum));
+        }
+        window.history.pushState({}, '', newUrl.toString());
+      }
+    },
+    [catalog]
+  );
+
+  const handleNavigateLanding = useCallback(() => {
+    setMode('landing');
+    if (typeof window !== 'undefined' && window.history?.pushState) {
+      window.history.pushState({}, '', '/landing');
+    }
+  }, []);
+
   /* =========================
      QR
   ========================= */
@@ -2108,147 +2160,161 @@ export default function App() {
         </TouchableOpacity>
       ) : null}
 
-      <Header
-        restaurantName={
-          catalog?.restaurantName && !catalog.restaurantName.startsWith('Restaurant #')
-            ? catalog.restaurantName
-            : storeOperatingStatus?.restaurantName ||
-              catalog?.restaurantName ||
-              'Restaurant Menu'
-        }
-        restaurantAddress={
-          catalog?.restaurantAddress ||
-          catalog?.address ||
-          storeOperatingStatus?.restaurantAddress ||
-          storeOperatingStatus?.address ||
-          [catalog?.address, catalog?.city, catalog?.state].filter(Boolean).join(', ') ||
-          ''
-        }
-        restaurantImage={
-          catalog?.imageUrl ||
-          catalog?.restaurantImage ||
-          storeOperatingStatus?.storeImageUrl ||
-          storeOperatingStatus?.storeImage ||
-          storeOperatingStatus?.imageUrl ||
-          storeOperatingStatus?.bannerImage ||
-          storeOperatingStatus?.bannerUrl ||
-          ''
-        }
-        restaurantLogo={
-          catalog?.logoUrl ||
-          catalog?.logo ||
-          storeOperatingStatus?.storeImageUrl ||
-          storeOperatingStatus?.storeImage ||
-          storeOperatingStatus?.logoUrl ||
-          ''
-        }
-        loading={loading}
-        storeOperatingStatus={storeOperatingStatus}
-        activeTable={effectiveTable}
-        openQrModal={() =>
-          setQrModalOpen(true)
-        }
-        openCallWaiter={() =>
-          handleOpenCallWaiter('CALL_WAITER')
-        }
-        cartCount={cartItems.length}
-        openCart={() =>
-          setCartModalOpen(true)
-        }
-        openOrderTracker={handleOpenOrderTracker}
-        activeOrder={activeOrder}
-      />
-
-      {mode === 'customer' ? (
-        <CustomerView
+      {mode === 'landing' ? (
+        <LandingPage
+          onLaunchCustomerView={handleLaunchCustomerView}
+          onOpenStaffView={() => setMode('staff')}
+          onOpenScanner={() => setScannerOpen(true)}
+          onOpenQrModal={() => setQrModalOpen(true)}
           catalog={catalog}
-          categories={categories}
-          items={items}
-          activeTable={effectiveTable}
           activeOrder={activeOrder}
-          openOrderTracker={handleOpenOrderTracker}
-          openScanner={() =>
-            setScannerOpen(true)
-          }
-          openQrModal={() =>
-            setQrModalOpen(true)
-          }
-          openCallWaiter={
-            handleOpenCallWaiter
-          }
-          cartItems={cartItems}
-          openCart={() =>
-            setCartModalOpen(true)
-          }
-          onAddToCart={
-            handleAddToCart
-          }
-          onUpdateCartQuantity={
-            handleUpdateCartQuantity
-          }
-          onCallWaiter={
-            handleCallWaiter
-          }
-          onRequestBill={
-            handleRequestBill
-          }
-          loading={loading}
-          storeOperatingStatus={storeOperatingStatus}
         />
       ) : (
-        <StaffView
-          staffUser={staffUser}
-          restaurants={restaurants}
-          selectedRestaurant={
-            selectedRestaurant
-          }
-          onSelectRestaurant={(
-            rest
-          ) => {
-            setSelectedRestaurant(
-              rest
-            );
+        <>
+          <Header
+            restaurantName={
+              catalog?.restaurantName && !catalog.restaurantName.startsWith('Restaurant #')
+                ? catalog.restaurantName
+                : storeOperatingStatus?.restaurantName ||
+                  catalog?.restaurantName ||
+                  'Restaurant Menu'
+            }
+            restaurantAddress={
+              catalog?.restaurantAddress ||
+              catalog?.address ||
+              storeOperatingStatus?.restaurantAddress ||
+              storeOperatingStatus?.address ||
+              [catalog?.address, catalog?.city, catalog?.state].filter(Boolean).join(', ') ||
+              ''
+            }
+            restaurantImage={
+              catalog?.imageUrl ||
+              catalog?.restaurantImage ||
+              storeOperatingStatus?.storeImageUrl ||
+              storeOperatingStatus?.storeImage ||
+              storeOperatingStatus?.imageUrl ||
+              storeOperatingStatus?.bannerImage ||
+              storeOperatingStatus?.bannerUrl ||
+              ''
+            }
+            restaurantLogo={
+              catalog?.logoUrl ||
+              catalog?.logo ||
+              storeOperatingStatus?.storeImageUrl ||
+              storeOperatingStatus?.storeImage ||
+              storeOperatingStatus?.logoUrl ||
+              ''
+            }
+            loading={loading}
+            storeOperatingStatus={storeOperatingStatus}
+            activeTable={effectiveTable}
+            openQrModal={() =>
+              setQrModalOpen(true)
+            }
+            openCallWaiter={() =>
+              handleOpenCallWaiter('CALL_WAITER')
+            }
+            cartCount={cartItems.length}
+            openCart={() =>
+              setCartModalOpen(true)
+            }
+            openOrderTracker={handleOpenOrderTracker}
+            activeOrder={activeOrder}
+            onNavigateLanding={handleNavigateLanding}
+          />
 
-            const encId =
-              api.encryptRestaurantId(
-                rest.id
-              );
+          {mode === 'customer' ? (
+            <CustomerView
+              catalog={catalog}
+              categories={categories}
+              items={items}
+              activeTable={effectiveTable}
+              activeOrder={activeOrder}
+              openOrderTracker={handleOpenOrderTracker}
+              openScanner={() =>
+                setScannerOpen(true)
+              }
+              openQrModal={() =>
+                setQrModalOpen(true)
+              }
+              openCallWaiter={
+                handleOpenCallWaiter
+              }
+              cartItems={cartItems}
+              openCart={() =>
+                setCartModalOpen(true)
+              }
+              onAddToCart={
+                handleAddToCart
+              }
+              onUpdateCartQuantity={
+                handleUpdateCartQuantity
+              }
+              onCallWaiter={
+                handleCallWaiter
+              }
+              onRequestBill={
+                handleRequestBill
+              }
+              loading={loading}
+              storeOperatingStatus={storeOperatingStatus}
+            />
+          ) : (
+            <StaffView
+              staffUser={staffUser}
+              restaurants={restaurants}
+              selectedRestaurant={
+                selectedRestaurant
+              }
+              onSelectRestaurant={(
+                rest
+              ) => {
+                setSelectedRestaurant(
+                  rest
+                );
 
-            loadMenuViaEncryptedEndpoint(
-              encId
-            );
-          }}
-          onGenerateOtp={
-            api.generateOtp
-          }
-          onLogin={
-            handleStaffLogin
-          }
-          tables={tables}
-          orders={orders}
-          items={items}
-          onUpdateTableStatus={
-            handleUpdateTableStatus
-          }
-          onSettleTable={
-            handleSettleTable
-          }
-          onUpdateOrderStatus={
-            handleUpdateOrderStatus
-          }
-          onUpdateKitchenStatus={
-            handleUpdateKitchenStatus
-          }
-          onAddItemToOrder={
-            handleAddItemsToOrder
-          }
-          onRefreshData={
-            handleRefreshData
-          }
-          onOpenQrGenerator={() =>
-            setQrModalOpen(true)
-          }
-        />
+                const encId =
+                  api.encryptRestaurantId(
+                    rest.id
+                  );
+
+                loadMenuViaEncryptedEndpoint(
+                  encId
+                );
+              }}
+              onGenerateOtp={
+                api.generateOtp
+              }
+              onLogin={
+                handleStaffLogin
+              }
+              tables={tables}
+              orders={orders}
+              items={items}
+              onUpdateTableStatus={
+                handleUpdateTableStatus
+              }
+              onSettleTable={
+                handleSettleTable
+              }
+              onUpdateOrderStatus={
+                handleUpdateOrderStatus
+              }
+              onUpdateKitchenStatus={
+                handleUpdateKitchenStatus
+              }
+              onAddItemToOrder={
+                handleAddItemsToOrder
+              }
+              onRefreshData={
+                handleRefreshData
+              }
+              onOpenQrGenerator={() =>
+                setQrModalOpen(true)
+              }
+            />
+          )}
+        </>
       )}
 
       <CartModal
