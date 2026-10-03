@@ -13,7 +13,6 @@
     "@microsoft/signalr": "^10.0.11",
     "axios": "^1.7.9",
     "dotenv": "^18.0.5",
-    "expo": "^57.0.13",
     "framer-motion": "^13.2.0",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.475.0",
