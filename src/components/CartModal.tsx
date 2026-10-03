@@ -29,6 +29,8 @@ import {
   RefreshCw,
   Send,
   Check,
+  Utensils,
+  Clock,
 } from 'lucide-react';
 import * as api from '../services/api';
 import { joinOrderGroup } from '../services/signalr';
@@ -148,6 +150,100 @@ const getQuantityUnitText = (quantity: any, item: any, catalog: any = null): str
   return `${qty} ${cleanUnit}`;
 };
 
+/**
+ * Probes Cashfree API with timeout to auto-detect whether the paymentSessionId
+ * was generated in Cashfree Sandbox or Production.
+ * Eliminates "payment_session_id is not present or is invalid" errors caused by mode mismatches.
+ */
+async function detectCashfreeMode(
+  sessionId: string,
+  preferredMode: 'sandbox' | 'production' = 'sandbox'
+): Promise<'sandbox' | 'production'> {
+  if (typeof window === 'undefined' || !sessionId) return preferredMode;
+
+  const testMode = async (mode: 'sandbox' | 'production'): Promise<boolean> => {
+    try {
+      const url =
+        mode === 'production'
+          ? 'https://api.cashfree.com/pg/view/sessions/checkout'
+          : 'https://sandbox.cashfree.com/pg/view/sessions/checkout';
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1500);
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `payment_session_id=${encodeURIComponent(sessionId)}`,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+      return res.status === 200;
+    } catch {
+      return false;
+    }
+  };
+
+  try {
+    const preferredOk = await testMode(preferredMode);
+    if (preferredOk) return preferredMode;
+
+    const alternateMode: 'sandbox' | 'production' =
+      preferredMode === 'production' ? 'sandbox' : 'production';
+    const alternateOk = await testMode(alternateMode);
+    if (alternateOk) {
+      console.log(`⚡ [Cashfree] Auto-detected environment mismatch: Switching from ${preferredMode} to ${alternateMode}`);
+      return alternateMode;
+    }
+  } catch (e) {
+    console.warn('Cashfree mode auto-detection failed, using preferred mode:', e);
+  }
+
+  return preferredMode;
+}
+
+/**
+ * Dynamically ensures Cashfree JS SDK v3 is loaded and available on window.Cashfree
+ */
+function loadCashfreeSdk(): Promise<any> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Cashfree SDK is only available in browser environments'));
+      return;
+    }
+
+    if ((window as any).Cashfree) {
+      resolve((window as any).Cashfree);
+      return;
+    }
+
+    const scriptId = 'cashfree-js-sdk-v3';
+    let script = document.getElementById(scriptId) as HTMLScriptElement;
+    if (!script) {
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    script.onload = () => {
+      if ((window as any).Cashfree) {
+        resolve((window as any).Cashfree);
+      } else {
+        reject(new Error('Cashfree SDK script loaded, but window.Cashfree is undefined'));
+      }
+    };
+
+    script.onerror = () => {
+      reject(new Error('Failed to load Cashfree JS SDK from CDN'));
+    };
+  });
+}
+
 export interface CartModalProps {
   visible: boolean;
   onClose: () => void;
@@ -181,18 +277,72 @@ export default function CartModal({
   loading,
   storeOperatingStatus,
 }: CartModalProps) {
+  // Comprehensive table & dynamic QR detection
+  const isDynamicQrFromUrl = typeof window !== 'undefined' && (
+    window.location.pathname.includes('/mzt_') ||
+    window.location.search.includes('mzt_') ||
+    window.location.href.includes('mzt_') ||
+    window.location.pathname.toLowerCase().includes('/dinein')
+  );
+
+  const isDynamicQr = Boolean(
+    isDynamicQrFromUrl ||
+    (activeTable && (
+      activeTable.qrType === 'TABLE_INSTORE' ||
+      activeTable.isTimeBound ||
+      (typeof activeTable.tableSessionToken === 'string' && activeTable.tableSessionToken.startsWith('mzt_')) ||
+      (typeof activeTable.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds >= 0)
+    ))
+  );
+
+  const isTableOrder = Boolean(
+    isDynamicQr ||
+    Boolean(activeTable && (activeTable.id || activeTable.tableName || activeTable.tableNumber)) ||
+    (typeof window !== 'undefined' && (
+      window.location.pathname.toLowerCase().includes('/dinein') ||
+      new URLSearchParams(window.location.search).has('tableId') ||
+      new URLSearchParams(window.location.search).has('t') ||
+      new URLSearchParams(window.location.search).has('table') ||
+      new URLSearchParams(window.location.search).has('tablenum')
+    )) ||
+    (typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('menza_last_table_id')))
+  );
+
+  const isPostpaidTable = Boolean(activeTable && String(activeTable.dineInPaymentMode || '').toUpperCase() === 'POSTPAID');
+  const isPrepaidTable = !isPostpaidTable && Boolean(isTableOrder || isDynamicQr);
+  const isPayAtCounterOnly = isTableOrder || isDynamicQr;
+
   const [guestName, setGuestName] = useState<string>('');
   const [mobileNumber, setMobileNumber] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
   const [orderTypeId, setOrderTypeId] = useState<number>(1);
-  const [paymentMethod, setPaymentMethod] = useState<string>('cashfree');
+  const [paymentMethod, setPaymentMethod] = useState<string>(() => (isTableOrder || isDynamicQr) ? 'payatcounter' : 'cashfree');
+
+  useEffect(() => {
+    if (isTableOrder || isDynamicQr) {
+      setPaymentMethod('payatcounter');
+      setOrderTypeId(1);
+    } else {
+      setPaymentMethod('cashfree');
+    }
+  }, [isTableOrder, isDynamicQr, visible]);
+
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [processingPayment, setProcessingPayment] = useState<boolean>(false);
+  const [submittingOrder, setSubmittingOrder] = useState<boolean>(false);
   const [fetchingCart, setFetchingCart] = useState<boolean>(false);
   const [updatingItemId, setUpdatingItemId] = useState<any>(null);
   const [removingItemId, setRemovingItemId] = useState<any>(null);
   const [clearingCart, setClearingCart] = useState<boolean>(false);
   const [liveOrderTypes, setLiveOrderTypes] = useState<any[]>([]);
+  const [orderTypesLoading, setOrderTypesLoading] = useState<boolean>(false);
+
+  // Table orders and Dynamic QRs must strictly default and lock to Dine-In (OrderTypeId: 1)
+  useEffect(() => {
+    if (isTableOrder || isDynamicQr || activeTable) {
+      setOrderTypeId(1);
+    }
+  }, [isTableOrder, isDynamicQr, activeTable, visible]);
 
   /* Customer OTP Verification State */
   const [isVerified, setIsVerified] = useState<boolean>(false);
@@ -203,6 +353,15 @@ export default function CartModal({
   const [isVerifyingOtp, setIsVerifyingOtp] = useState<boolean>(false);
   const [otpSuccessMsg, setOtpSuccessMsg] = useState<string>('');
   const [verifiedCustomer, setVerifiedCustomer] = useState<any>(null);
+
+  // Reset modal overlay states on close
+  useEffect(() => {
+    if (!visible) {
+      setProcessingPayment(false);
+      setSubmittingOrder(false);
+      setErrorMsg('');
+    }
+  }, [visible]);
 
   // Check saved customer login on mount or modal open
   useEffect(() => {
@@ -226,6 +385,8 @@ export default function CartModal({
     }, 1000);
     return () => clearInterval(timer);
   }, [otpCountdown]);
+
+
 
   const handleSendOtp = async () => {
     const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
@@ -351,45 +512,56 @@ export default function CartModal({
     setOtpSuccessMsg('');
   };
 
-  // Refresh server cart and fetch live OrderTypeMaster whenever the modal opens.
+  // Fetch live OrderTypeMaster from API whenever the modal opens or restaurant changes
   useEffect(() => {
-    if (!visible) return;
-
     let mounted = true;
 
-    const fetchCartAndOrderTypes = async () => {
-      setFetchingCart(true);
-
+    const fetchOrderTypes = async () => {
       try {
-        if (onRefreshCart) {
-          await onRefreshCart();
-        }
-
+        setOrderTypesLoading(true);
         const restId =
           cart?.restaurantId ||
           catalog?.restaurantId ||
-          null;
+          (typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).get('restaurantId') ||
+              localStorage.getItem('menza_last_rest_id')
+            : null);
 
-        const types = await api.getOrderTypes(restId);
+        const types = await api.getOrderTypes(restId ? Number(restId) : null);
 
-        if (
-          mounted &&
-          Array.isArray(types) &&
-          types.length > 0
-        ) {
+        if (mounted && Array.isArray(types) && types.length > 0) {
           setLiveOrderTypes(types);
         }
       } catch (error) {
-        console.error(
-          'Cart and OrderTypeMaster refresh error:',
-          error
-        );
-
+        console.warn('Failed to fetch live OrderTypeMaster in CartModal:', error);
+      } finally {
         if (mounted) {
-          setErrorMsg(
-            'Unable to refresh cart. Please try again.'
-          );
+          setOrderTypesLoading(false);
         }
+      }
+    };
+
+    if (visible) {
+      fetchOrderTypes();
+    }
+
+    return () => {
+      mounted = false;
+    };
+  }, [visible, cart?.restaurantId, catalog?.restaurantId]);
+
+  // Refresh server cart items whenever the modal opens
+  useEffect(() => {
+    if (!visible || !onRefreshCart) return;
+
+    let mounted = true;
+
+    const refresh = async () => {
+      setFetchingCart(true);
+      try {
+        await onRefreshCart();
+      } catch (error) {
+        console.warn('Cart refresh warning:', error);
       } finally {
         if (mounted) {
           setFetchingCart(false);
@@ -397,51 +569,58 @@ export default function CartModal({
       }
     };
 
-    fetchCartAndOrderTypes();
+    refresh();
 
     return () => {
       mounted = false;
     };
   }, [visible]);
 
-  const effectiveOrderTypes =
-    Array.isArray(liveOrderTypes) &&
-    liveOrderTypes.length > 0
-      ? liveOrderTypes
-      : Array.isArray(cart?.availableOrderTypes) &&
-        cart.availableOrderTypes.length > 0
-      ? cart.availableOrderTypes
-      : Array.isArray(orderTypes) &&
-        orderTypes.length > 0
-      ? orderTypes
-      : [
-          {
-            id: 1,
-            typeName: 'Dine-In',
-            description: 'Dine-In order type',
-          },
-          {
-            id: 2,
-            typeName: 'Self Pickup',
-            description: 'Self Pickup / Takeaway',
-          },
-          {
-            id: 3,
-            typeName: 'Delivery',
-            description: 'Delivery order type',
-          },
-          {
-            id: 4,
-            typeName: 'Counter POS Ordering',
-            description:
-              'Express counter POS order processing',
-          },
+  const effectiveOrderTypes = React.useMemo(() => {
+    let rawList: any[] = [];
+    if (Array.isArray(liveOrderTypes) && liveOrderTypes.length > 0) {
+      rawList = liveOrderTypes;
+    } else if (Array.isArray(orderTypes) && orderTypes.length > 0) {
+      rawList = orderTypes;
+    } else if (Array.isArray(cart?.availableOrderTypes) && cart.availableOrderTypes.length > 0) {
+      rawList = cart.availableOrderTypes;
+    } else {
+      rawList = [
+        { id: 1, typeName: 'Dine-In', description: 'Dine-In order type' },
+        { id: 2, typeName: 'Self Pickup', description: 'Self Pickup / Takeaway' },
+        { id: 3, typeName: 'Delivery', description: 'Delivery order type' },
+        { id: 4, typeName: 'Counter POS Ordering', description: 'Express counter POS order processing' },
+      ];
+    }
+
+    if (isTableOrder || isDynamicQr || activeTable) {
+      const hasDineIn = rawList.some((t: any) => t.id === 1 || String(t.typeName || t.name).toLowerCase().includes('dine'));
+      if (!hasDineIn) {
+        return [
+          { id: 1, typeName: 'Dine-In', description: 'Dine-In table ordering' },
+          ...rawList,
         ];
+      }
+      const dineInItem = rawList.find((t: any) => t.id === 1 || String(t.typeName || t.name).toLowerCase().includes('dine'));
+      const otherItems = rawList.filter((t: any) => t !== dineInItem);
+      return [dineInItem, ...otherItems];
+    }
+    return rawList;
+  }, [liveOrderTypes, orderTypes, cart?.availableOrderTypes, isTableOrder, isDynamicQr, activeTable]);
 
   const activeCartItems =
     cart && Array.isArray(cart.items)
       ? cart.items
       : cartItems;
+
+  // Auto-clear cart if table session expires while viewing or using cart
+  useEffect(() => {
+    if (activeTable && Boolean(activeTable.isSessionExpired) && !Boolean(activeTable.isDiningActive)) {
+      if (activeCartItems.length > 0 && onClearCart) {
+        onClearCart();
+      }
+    }
+  }, [activeTable?.isSessionExpired, activeTable?.isDiningActive, activeCartItems.length, onClearCart]);
 
   // Items Subtotal calculated from active items
   const itemsSubTotal = (activeCartItems || []).reduce(
@@ -645,25 +824,7 @@ export default function CartModal({
 
     const cleanPhone = phoneDigits.slice(-10);
 
-    // Verify Customer Mobile & OTP before proceeding
-    if (!isVerified) {
-      if (isOtpSent && otpCode.trim().length >= 4) {
-        try {
-          await handleVerifyOtp();
-        } catch (e) {
-          return;
-        }
-      } else {
-        setErrorMsg(
-          'Mobile verification required. Please click "Get OTP" to verify your number before placing the order.'
-        );
-        if (!isOtpSent) {
-          handleSendOtp();
-        }
-        return;
-      }
-    }
-
+    // Direct checkout: mobile OTP verification removed
     if (activeTable?.isCleaning) {
       logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_CLEANING', `Checkout blocked: Table ${activeTable.tableName || activeTable.id} is cleaning`);
       setErrorMsg(
@@ -704,6 +865,15 @@ export default function CartModal({
           ? `Kitchen is temporarily paused (${storeOperatingStatus.remainingPauseMinutes || 0}m left). Reopening soon.`
           : 'Kitchen is currently closed for ordering.')
       );
+      return;
+    }
+
+    if (activeTable && Boolean(activeTable.isSessionExpired) && !Boolean(activeTable.isDiningActive)) {
+      logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_SESSION_EXPIRED', `Checkout blocked: Table ${activeTable.tableName || activeTable.id} ordering session expired`);
+      setErrorMsg('Your in-store table ordering session has expired (15-minute limit). Please re-scan your table QR code to place an order.');
+      if (onClearCart) {
+        onClearCart();
+      }
       return;
     }
 
@@ -750,6 +920,24 @@ export default function CartModal({
       }
     );
 
+    const effectiveTableId = activeTable?.id ||
+      (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tableId') : null) ||
+      (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('table') : null) ||
+      (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('t') : null) ||
+      null;
+
+    const effectiveTableName = activeTable?.tableName ||
+      (activeTable?.id ? `Table ${activeTable.id}` : (effectiveTableId ? `Table ${effectiveTableId}` : 'Dine-In Table'));
+
+    const effectiveTableToken =
+      activeTable?.tableSessionToken ||
+      activeTable?.encryptedTableId ||
+      (typeof window !== 'undefined' ? window.location.pathname.split('/').find(p => p.startsWith('mzt_')) : null) ||
+      (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('t') : null) ||
+      null;
+
+    const isThisTableOrder = Boolean(isTableOrder || isDynamicQr || effectiveTableId || effectiveTableToken);
+
     const orderPayload = {
       restaurantId: restId,
       name: guestName.trim(),
@@ -758,38 +946,36 @@ export default function CartModal({
       customerUserId: verifiedCustomer?.userId || null,
       remarks: remarks.trim(),
       isHomeDelivery: false,
-      orderTypeId,
-      tableId: activeTable
-        ? activeTable.id
-        : null,
-      tableNumber: activeTable
-        ? String(activeTable.id)
-        : '1',
+      orderTypeId: isThisTableOrder ? 1 : orderTypeId,
+      tableId: effectiveTableId,
+      tableNumber: effectiveTableName,
+      encryptedTableId: activeTable?.encryptedTableId || effectiveTableToken || null,
+      tableSessionToken: effectiveTableToken,
       items: orderItems,
-      deliveryType: activeTable ? 'Dine-In' : 'Takeaway / Counter',
+      deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
       paymentMode:
-        paymentMethod === 'cashfree'
+        (paymentMethod === 'cashfree' && !isThisTableOrder)
           ? 'ONLINE'
           : 'CASH',
       paymentType:
-        paymentMethod === 'cashfree'
+        (paymentMethod === 'cashfree' && !isThisTableOrder)
           ? 'ONLINE_CASHFREE'
           : 'COUNTER_CASH',
       paymentMethod:
-        paymentMethod === 'cashfree'
+        (paymentMethod === 'cashfree' && !isThisTableOrder)
           ? 'CASHFREE_SPLIT'
           : 'COUNTER_CASH',
       paymentStatus:
-        paymentMethod === 'cashfree'
+        (paymentMethod === 'cashfree' && !isThisTableOrder)
           ? 'Paid'
           : 'Pending',
       orderStatus:
-        paymentMethod === 'cashfree'
+        (paymentMethod === 'cashfree' && !isThisTableOrder)
           ? 'Confirmed'
           : 'Placed',
-      isOnline: paymentMethod === 'cashfree',
-      isSettled: paymentMethod === 'cashfree',
-      requiresCashierConfirmation: paymentMethod !== 'cashfree',
+      isOnline: paymentMethod === 'cashfree' && !isThisTableOrder,
+      isSettled: paymentMethod === 'cashfree' && !isThisTableOrder,
+      requiresCashierConfirmation: isThisTableOrder || paymentMethod !== 'cashfree',
       source: 'QR_DINEIN',
       gstNumber: gstNumber || null,
       cgstPercentage,
@@ -800,6 +986,76 @@ export default function CartModal({
       taxAmount,
       totalAmount: grandTotal,
     };
+
+    const isDirectPlaceOrder = isThisTableOrder || isPayAtCounterOnly || paymentMethod === 'payatcounter';
+
+    if (isDirectPlaceOrder) {
+      // DINE-IN SEATED TABLE (DYNAMIC QR, TTL QR, OR POSTPAID):
+      // Customer is physically sitting at table. Directly place order to table tab!
+      // NEVER REDIRECT TO CASHFREE PAYMENT GATEWAY!
+      setSubmittingOrder(true);
+      setProcessingPayment(false);
+      try {
+        const directTableOrderPayload = {
+          ...orderPayload,
+          tableId: effectiveTableId,
+          tableNumber: effectiveTableName,
+          encryptedTableId: activeTable?.encryptedTableId || effectiveTableToken || null,
+          tableSessionToken: effectiveTableToken,
+          paymentMode: 'CASH',
+          paymentType: 'COUNTER_CASH',
+          paymentMethod: 'COUNTER_CASH',
+          paymentStatus: 'Pending',
+          orderStatus: 'Placed',
+          isOnline: false,
+          isSettled: false,
+          requiresCashierConfirmation: true,
+          source: 'QR_DINEIN',
+          deliveryType: 'Dine-In',
+          orderTypeId: 1,
+        };
+
+        logger.checkout('CHECKOUT_DINEIN_SUBMIT', `Customer placed Dine-In order for ${effectiveTableName}: ₹${grandTotal}`, {
+          tableId: effectiveTableId,
+          tableName: effectiveTableName,
+          grandTotal,
+          itemsCount: orderItems.length,
+          paymentMode: 'COUNTER_CASH',
+          isDynamicQr,
+        });
+
+        if (typeof onPlaceOrder === 'function') {
+          await onPlaceOrder(directTableOrderPayload);
+        } else {
+          await api.placeOrder(directTableOrderPayload);
+        }
+
+        setSubmittingOrder(false);
+        setProcessingPayment(false);
+        onClose();
+        if (typeof onClearCart === 'function') {
+          await onClearCart();
+        }
+        return; // ABSOLUTE RETURN - PREVENTS CASHFREE
+      } catch (placeErr: any) {
+        console.error('Dine-In place order error:', placeErr);
+        logger.error('CHECKOUT', 'CHECKOUT_DINEIN_FAILED', placeErr, {
+          tableId: effectiveTableId,
+          amount: grandTotal,
+        });
+        setErrorMsg(placeErr?.response?.data?.message || placeErr?.message || 'Unable to place order. Please alert restaurant staff.');
+        setSubmittingOrder(false);
+        setProcessingPayment(false);
+        return; // ABSOLUTE RETURN - PREVENTS CASHFREE EVEN ON ERROR
+      }
+    }
+
+    // Double-guard: Dynamic QR and Table Orders MUST NEVER proceed to Cashfree
+    if (isThisTableOrder || isDynamicQr) {
+      setErrorMsg('Dynamic QR and Table orders must be placed directly at counter.');
+      setProcessingPayment(false);
+      return;
+    }
 
     if (paymentMethod === 'cashfree') {
       setProcessingPayment(true);
@@ -848,19 +1104,33 @@ export default function CartModal({
 
         const paymentSessionId =
           checkoutRes?.paymentSessionId ||
+          checkoutRes?.PaymentSessionId ||
           checkoutRes?.payment_session_id ||
-          checkoutRes?.data
-            ?.paymentSessionId;
+          checkoutRes?.data?.paymentSessionId ||
+          checkoutRes?.data?.PaymentSessionId ||
+          checkoutRes?.data?.payment_session_id ||
+          checkoutRes?.order_token ||
+          checkoutRes?.orderToken;
 
-        const paymentLink =
+        let paymentLink =
           checkoutRes?.paymentLink ||
+          checkoutRes?.PaymentLink ||
           checkoutRes?.payment_link ||
-          checkoutRes?.data?.paymentLink;
+          checkoutRes?.data?.paymentLink ||
+          checkoutRes?.data?.PaymentLink ||
+          checkoutRes?.data?.payment_link ||
+          checkoutRes?.instrumentResponseUrl ||
+          checkoutRes?.data?.instrumentResponseUrl;
 
         const cashfreeOrderId =
           checkoutRes?.orderId ||
+          checkoutRes?.OrderId ||
           checkoutRes?.order_id ||
-          checkoutRes?.data?.orderId;
+          checkoutRes?.data?.orderId ||
+          checkoutRes?.data?.OrderId ||
+          checkoutRes?.data?.order_id ||
+          checkoutRes?.cfOrderId ||
+          checkoutRes?.data?.cfOrderId;
 
         logger.payment('PAYMENT_SESSION_CREATED', `Cashfree order: ${cashfreeOrderId || 'N/A'}, session: ${paymentSessionId ? 'present' : 'none'}`, {
           cashfreeOrderId,
@@ -885,7 +1155,8 @@ export default function CartModal({
               ? activeTable.id
               : null,
           tableNumber: effectiveTable,
-          deliveryType: activeTable ? 'Dine-In' : 'Takeaway / Counter',
+          orderTypeId: activeTable ? 1 : orderTypeId,
+          deliveryType: activeTable ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
           paymentMode: 'CASHFREE',
           paymentType: 'ONLINE_CASHFREE',
           paymentStatus: 'Paid',
@@ -935,43 +1206,69 @@ export default function CartModal({
           }
         }
 
-        if (
-          typeof window !== 'undefined' &&
-          (window as any).Cashfree &&
-          paymentSessionId
-        ) {
-          try {
-            const cfMode =
-              ENV.CASHFREE_MODE ||
-              (checkoutRes?.environment?.toLowerCase() === 'production' ||
-              checkoutRes?.data?.environment?.toLowerCase() === 'production'
-                ? 'production'
-                : 'sandbox');
+        if (paymentSessionId) {
+          const preferredMode =
+            (checkoutRes?.environment?.toLowerCase() === 'production' ||
+            checkoutRes?.data?.environment?.toLowerCase() === 'production')
+              ? 'production'
+              : (checkoutRes?.environment?.toLowerCase() === 'sandbox' ||
+                checkoutRes?.data?.environment?.toLowerCase() === 'sandbox')
+              ? 'sandbox'
+              : ENV.CASHFREE_MODE;
 
-            const cashfree =
-              (window as any).Cashfree({
-                mode: cfMode,
-              });
+          // Probe Cashfree API to verify whether this session belongs to Sandbox or Production
+          const detectedMode = await detectCashfreeMode(paymentSessionId, preferredMode);
+
+          // If no paymentLink was returned by backend, generate direct hosted fallback URL
+          if (!paymentLink) {
+            paymentLink = `https://${detectedMode === 'sandbox' ? 'payments-test' : 'payments'}.cashfree.com/order/#${paymentSessionId}`;
+          }
+
+          logger.payment('PAYMENT_SESSION_READY', `Cashfree order: ${cashfreeOrderId || 'N/A'}, mode: ${detectedMode}`, {
+            cashfreeOrderId,
+            mode: detectedMode,
+            hasSessionId: true,
+            hasPaymentLink: Boolean(paymentLink),
+          });
+
+          try {
+            const CashfreeConstructor = await loadCashfreeSdk();
+            const cashfree = CashfreeConstructor({
+              mode: detectedMode,
+            });
+
+            logger.payment('PAYMENT_CHECKOUT_REDIRECT', `Submitting checkout via Cashfree JS SDK in ${detectedMode} mode`, {
+              cashfreeOrderId,
+              mode: detectedMode,
+            });
 
             cashfree.checkout({
-              paymentSessionId:
-                paymentSessionId,
+              paymentSessionId: paymentSessionId,
               redirectTarget: '_self',
             });
 
             return;
-          } catch (sdkError) {
+          } catch (sdkError: any) {
             console.warn(
               'Cashfree SDK checkout fallback to paymentLink:',
               sdkError
             );
-          }
-        }
+            logger.error('PAYMENT', 'PAYMENT_SDK_ERROR', sdkError, {
+              cashfreeOrderId,
+              paymentSessionId,
+              mode: detectedMode,
+            });
 
-        if (paymentLink) {
-          window.location.href =
-            paymentLink;
+            if (paymentLink && typeof window !== 'undefined') {
+              window.location.href = paymentLink;
+              return;
+            }
+          }
+        } else if (paymentLink && typeof window !== 'undefined') {
+          window.location.href = paymentLink;
           return;
+        } else {
+          throw new Error('Payment gateway did not return a valid payment session. Please try again.');
         }
       } catch (err: any) {
         console.error(
@@ -1002,7 +1299,7 @@ export default function CartModal({
   if (!visible) return null;
 
   const isLoadingState =
-    loading || processingPayment;
+    loading || submittingOrder || processingPayment;
 
   const selectedItemsCount = activeCartItems.length;
 
@@ -1015,7 +1312,36 @@ export default function CartModal({
     >
       <View style={styles.overlay} className="responsive-modal-overlay">
         <View style={styles.sheetContainer} className="responsive-modal-sheet">
-          {processingPayment && (
+          {submittingOrder && (
+            <View
+              style={
+                styles.paymentProcessingOverlay
+              }
+            >
+              <ActivityIndicator
+                size="large"
+                color="#10b981"
+              />
+
+              <Text
+                style={
+                  styles.paymentProcessingTitle
+                }
+              >
+                Placing Your Table Order...
+              </Text>
+
+              <Text
+                style={
+                  styles.paymentProcessingSubtitle
+                }
+              >
+                Sending your order directly to the restaurant kitchen. Please wait a moment.
+              </Text>
+            </View>
+          )}
+
+          {processingPayment && !isTableOrder && !isDynamicQr && !isPayAtCounterOnly && (
             <View
               style={
                 styles.paymentProcessingOverlay
@@ -1083,6 +1409,70 @@ export default function CartModal({
             </TouchableOpacity>
           </View>
 
+          {/* Prominent Table Session Countdown Banner */}
+          {Boolean(isTableOrder || isDynamicQr) && (
+            <View style={[
+              styles.cartTopSessionBar,
+              activeTable?.isSessionExpired
+                ? styles.cartTopSessionBarExpired
+                : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                ? styles.cartTopSessionBarUrgent
+                : styles.cartTopSessionBarActive
+            ]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={[
+                  styles.cartTopSessionIconBox,
+                  activeTable?.isSessionExpired
+                    ? { backgroundColor: '#fee2e2' }
+                    : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                    ? { backgroundColor: '#fef3c7' }
+                    : { backgroundColor: '#dcfce7' }
+                ]}>
+                  <Clock
+                    size={18}
+                    color={
+                      activeTable?.isSessionExpired
+                        ? '#dc2626'
+                        : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                        ? '#d97706'
+                        : '#15803d'
+                    }
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[
+                    styles.cartTopSessionTitle,
+                    activeTable?.isSessionExpired
+                      ? { color: '#b91c1c' }
+                      : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                      ? { color: '#b45309' }
+                      : { color: '#166534' }
+                  ]}>
+                    {activeTable?.isSessionExpired
+                      ? '⚠️ Table Ordering Session Expired'
+                      : typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0
+                      ? `⏱️ Table Session: ${Math.floor(activeTable.sessionRemainingSeconds / 60)}m ${String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s remaining`
+                      : `Table ${activeTable?.tableName || activeTable?.id || 'Dine-In'} Session Active`}
+                  </Text>
+                  <Text style={[
+                    styles.cartTopSessionSub,
+                    activeTable?.isSessionExpired
+                      ? { color: '#991b1b' }
+                      : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                      ? { color: '#92400e' }
+                      : { color: '#15803d' }
+                  ]}>
+                    {activeTable?.isSessionExpired
+                      ? 'The 15-minute table session limit was reached. Please re-scan your table QR code to place an order.'
+                      : typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180
+                      ? 'Session expiring soon! Please tap Place Order below before your table session finishes.'
+                      : 'Please place your order before the dynamic 15-minute table session ends.'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
           <ScrollView
             style={styles.bodyScroll}
             contentContainerStyle={
@@ -1123,15 +1513,18 @@ export default function CartModal({
               >
                 <ShoppingBag
                   size={48}
-                  color="#334155"
+                  color={Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive) ? "#dc2626" : "#334155"}
                 />
 
                 <Text
-                  style={
-                    styles.emptyCartTitle
-                  }
+                  style={[
+                    styles.emptyCartTitle,
+                    Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive) && { color: '#dc2626' }
+                  ]}
                 >
-                  Your Basket is Empty
+                  {Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
+                    ? 'Table Session Expired'
+                    : 'Your Basket is Empty'}
                 </Text>
 
                 <Text
@@ -1139,7 +1532,9 @@ export default function CartModal({
                     styles.emptyCartSub
                   }
                 >
-                  Browse our menu catalog and add delicious dishes.
+                  {Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
+                    ? 'The 15-minute table session limit was reached and your cart has been cleared. Please re-scan your table QR code to place a new order.'
+                    : 'Browse our menu catalog and add delicious dishes.'}
                 </Text>
               </View>
             ) : (
@@ -1558,11 +1953,72 @@ export default function CartModal({
                 <View
                   style={styles.formSection}
                 >
-                  <Text
-                    style={styles.sectionTitle}
-                  >
-                    Order Details
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text
+                      style={styles.sectionTitle}
+                    >
+                      Order Type
+                    </Text>
+                    {(isTableOrder || isDynamicQr || activeTable) ? (
+                      <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        backgroundColor: '#ecfdf5',
+                        borderWidth: 1,
+                        borderColor: '#a7f3d0',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 12,
+                      }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }}>
+                          Table {activeTable?.tableName || activeTable?.id || 'Dine-In'} (Dine-In)
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {Boolean(isTableOrder || isDynamicQr) && (
+                      typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0 && !activeTable?.isSessionExpired ? (
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: activeTable.sessionRemainingSeconds <= 180 ? '#fff7ed' : '#ecfdf5',
+                          borderWidth: 1,
+                          borderColor: activeTable.sessionRemainingSeconds <= 180 ? '#fed7aa' : '#a7f3d0',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 12,
+                        }}>
+                          <Clock size={11} color={activeTable.sessionRemainingSeconds <= 180 ? '#c2410c' : '#047857'} />
+                          <Text style={{
+                            fontSize: 11,
+                            fontWeight: '700',
+                            color: activeTable.sessionRemainingSeconds <= 180 ? '#c2410c' : '#047857'
+                          }}>
+                            {Math.floor(activeTable.sessionRemainingSeconds / 60)}m {String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s left
+                          </Text>
+                        </View>
+                      ) : activeTable?.isSessionExpired ? (
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: '#fef2f2',
+                          borderWidth: 1,
+                          borderColor: '#fecaca',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 12,
+                        }}>
+                          <AlertCircle size={11} color="#dc2626" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#b91c1c' }}>
+                            Session Expired
+                          </Text>
+                        </View>
+                      ) : null
+                    )}
+                  </View>
 
                   <View
                     style={
@@ -1577,8 +2033,10 @@ export default function CartModal({
 
                         const icon =
                           getOrderTypeIcon(
-                            type.typeName
+                            type.typeName || type.code || type.name
                           );
+
+                        const isLockedForTable = Boolean((isTableOrder || isDynamicQr || activeTable) && type.id !== 1);
 
                         return (
                           <TouchableOpacity
@@ -1587,13 +2045,19 @@ export default function CartModal({
                               styles.orderTypeTab,
                               isSelected &&
                                 styles.orderTypeTabActive,
+                              isLockedForTable && {
+                                opacity: 0.45,
+                              },
                             ]}
-                            onPress={() =>
-                              setOrderTypeId(
-                                type.id
-                              )
-                            }
-                            activeOpacity={0.8}
+                            onPress={() => {
+                              if (isLockedForTable) {
+                                setErrorMsg(`You are seated at Table ${activeTable.tableName || activeTable.id}. Table orders must be Dine-In.`);
+                                return;
+                              }
+                              setErrorMsg('');
+                              setOrderTypeId(type.id);
+                            }}
+                            activeOpacity={isLockedForTable ? 1 : 0.8}
                           >
                             <Text
                               style={[
@@ -1603,9 +2067,7 @@ export default function CartModal({
                               ]}
                             >
                               {icon}{' '}
-                              {type.id === 1
-                              ? 'Dine-in'
-                              : type.typeName}
+                              {type.typeName || type.name || 'Dine-In'}
                             </Text>
                           </TouchableOpacity>
                         );
@@ -1635,167 +2097,22 @@ export default function CartModal({
                     />
                   </View>
 
-                  {/* Customer Mobile & OTP Verification Flow */}
-                  {isVerified ? (
-                    <View style={styles.verifiedCard}>
-                      <View style={styles.verifiedCardLeft}>
-                        <View style={styles.verifiedIconWrap}>
-                          <ShieldCheck size={20} color="#15803d" />
-                        </View>
-                        <View>
-                          <View style={styles.verifiedBadgeRow}>
-                            <Text style={styles.verifiedBadgeText}>
-                              ✓ Mobile Verified
-                            </Text>
-                          </View>
-                          <Text style={styles.verifiedMobileText}>
-                            +91 {mobileNumber} {guestName ? `(${guestName})` : ''}
-                          </Text>
-                        </View>
-                      </View>
-                      <TouchableOpacity
-                        onPress={handleResetVerification}
-                        style={styles.changePhoneBtn}
-                      >
-                        <Text style={styles.changePhoneBtnText}>Change</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={styles.inputGroup}>
-                      <View style={styles.inputLabelRow}>
-                        <Text style={styles.inputLabel}>
-                          Mobile Number *
-                        </Text>
-                        <Text style={styles.inputHelperText}>
-                          (Verification required)
-                        </Text>
-                      </View>
+                  {/* Customer Mobile Number */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>
+                      Mobile Number *
+                    </Text>
 
-                      <View style={styles.phoneInputRow}>
-                        <TextInput
-                          style={[
-                            styles.textInput,
-                            styles.phoneInputFlex,
-                          ] as any}
-                          placeholder="Enter 10-digit mobile number *"
-                          placeholderTextColor="#64748b"
-                          keyboardType="phone-pad"
-                          maxLength={15}
-                          value={mobileNumber}
-                          onChangeText={(val) => {
-                            setMobileNumber(val);
-                            if (isOtpSent) {
-                              setIsOtpSent(false);
-                              setOtpCode('');
-                            }
-                          }}
-                        />
-
-                        <TouchableOpacity
-                          style={[
-                            styles.sendOtpBtn,
-                            (isSendingOtp || mobileNumber.replace(/\D/g, '').length < 10) &&
-                              styles.sendOtpBtnDisabled,
-                          ]}
-                          disabled={isSendingOtp || mobileNumber.replace(/\D/g, '').length < 10}
-                          onPress={handleSendOtp}
-                          activeOpacity={0.8}
-                        >
-                          {isSendingOtp ? (
-                            <ActivityIndicator size="small" color="#ffffff" />
-                          ) : (
-                            <View style={styles.sendOtpBtnContent}>
-                              <Smartphone size={14} color="#ffffff" />
-                              <Text style={styles.sendOtpBtnText}>
-                                {isOtpSent ? 'Resend' : 'Get OTP'}
-                              </Text>
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Success / Info message banner */}
-                      {otpSuccessMsg ? (
-                        <View style={styles.otpSuccessBanner}>
-                          <CheckCircle2 size={14} color="#15803d" />
-                          <Text style={styles.otpSuccessBannerText}>
-                            {otpSuccessMsg}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      {/* OTP Input & Verification Card */}
-                      {isOtpSent && (
-                        <View style={styles.otpCard}>
-                          <View style={styles.otpCardHeader}>
-                            <View style={styles.otpCardHeaderLeft}>
-                              <KeyRound size={16} color="#D33401" />
-                              <Text style={styles.otpCardTitle}>
-                                Enter 6-Digit OTP
-                              </Text>
-                            </View>
-                            <Text style={styles.otpCardSubtitle}>
-                              Sent to +91 {mobileNumber.replace(/\D/g, '').slice(-10)}
-                            </Text>
-                          </View>
-
-                          <View style={styles.otpInputRow}>
-                            <TextInput
-                              style={styles.otpInput as any}
-                              placeholder="• • • • • •"
-                              placeholderTextColor="#94a3b8"
-                              keyboardType="number-pad"
-                              maxLength={6}
-                              value={otpCode}
-                              onChangeText={setOtpCode}
-                              autoFocus
-                            />
-
-                            <TouchableOpacity
-                              style={[
-                                styles.verifyOtpBtn,
-                                (isVerifyingOtp || otpCode.trim().length < 4) &&
-                                  styles.verifyOtpBtnDisabled,
-                              ]}
-                              disabled={isVerifyingOtp || otpCode.trim().length < 4}
-                              onPress={handleVerifyOtp}
-                              activeOpacity={0.8}
-                            >
-                              {isVerifyingOtp ? (
-                                <ActivityIndicator size="small" color="#ffffff" />
-                              ) : (
-                                <View style={styles.verifyOtpBtnContent}>
-                                  <Check size={14} color="#ffffff" />
-                                  <Text style={styles.verifyOtpBtnText}>
-                                    Verify OTP
-                                  </Text>
-                                </View>
-                              )}
-                            </TouchableOpacity>
-                          </View>
-
-                          <View style={styles.otpFooterRow}>
-                            {otpCountdown > 0 ? (
-                              <Text style={styles.countdownText}>
-                                Resend available in {otpCountdown}s
-                              </Text>
-                            ) : (
-                              <TouchableOpacity
-                                onPress={handleSendOtp}
-                                disabled={isSendingOtp}
-                                style={styles.resendBtn}
-                              >
-                                <RefreshCw size={12} color="#D33401" />
-                                <Text style={styles.resendBtnText}>
-                                  Resend OTP
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        </View>
-                      )}
-                    </View>
-                  )}
+                    <TextInput
+                      style={styles.textInput as any}
+                      placeholder="Enter 10-digit mobile number *"
+                      placeholderTextColor="#64748b"
+                      keyboardType="phone-pad"
+                      maxLength={15}
+                      value={mobileNumber}
+                      onChangeText={setMobileNumber}
+                    />
+                  </View>
 
                   <View
                     style={styles.inputGroup}
@@ -1823,80 +2140,95 @@ export default function CartModal({
                   </View>
                 </View>
 
-                <View
-                  style={styles.formSection}
-                >
-                  <Text
-                    style={styles.sectionTitle}
-                  >
-                    Payment Method
-                  </Text>
-
+                {(isTableOrder || isDynamicQr || isPayAtCounterOnly || activeTable) ? (
+                  <View style={{
+                    marginTop: 14,
+                    padding: 14,
+                    borderRadius: 14,
+                    backgroundColor: '#f0fdf4',
+                    borderWidth: 1,
+                    borderColor: '#bbf7d0',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}>
+                    <View style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 19,
+                      backgroundColor: '#dcfce7',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      <Utensils size={18} color="#15803d" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#166534' }}>
+                        Dine-In • Table {activeTable?.tableName || activeTable?.tableNumber || activeTable?.id || '16'}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#15803d', marginTop: 3, lineHeight: 16 }}>
+                        Dishes will be prepared and served to your table upon order confirmation.
+                      </Text>
+                      {typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0 && (
+                        <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 3 }}>
+                          ⏱ Table Session: {Math.floor(activeTable.sessionRemainingSeconds / 60)}m {String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s remaining
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                ) : (
                   <View
-                    style={
-                      styles.paymentMethodRow
-                    }
+                    style={styles.formSection}
                   >
-                    <View
-                      style={[
-                        styles.paymentCard,
-                        styles.paymentCardActive,
-                        { flex: 1 }
-                      ]}
+                    <Text
+                      style={styles.sectionTitle}
                     >
-                      <CreditCard
-                        size={22}
-                        color="#10b981"
-                      />
+                      Payment Method
+                    </Text>
 
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[
-                            styles.paymentCardTitle,
-                            styles.paymentCardTitleActive,
-                          ]}
-                        >
-                          Online Direct Pay
-                        </Text>
+                    <View
+                      style={
+                        styles.paymentMethodRow
+                      }
+                    >
+                      <View
+                        style={[
+                          styles.paymentCard,
+                          styles.paymentCardActive,
+                          { flex: 1 }
+                        ]}
+                      >
+                        <CreditCard
+                          size={22}
+                          color="#10b981"
+                        />
 
-                        <Text
-                          style={
-                            styles.paymentCardSub
-                          }
-                        >
-                          UPI (GPay / PhonePe / Paytm) • Cards • NetBanking
-                        </Text>
-                        <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '700', marginTop: 4 }}>
-                          ⚡ Instant Auto-Confirmed & Kitchen Dispatched
-                        </Text>
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={[
+                              styles.paymentCardTitle,
+                              styles.paymentCardTitleActive,
+                            ]}
+                          >
+                            Online Direct Pay
+                          </Text>
+
+                          <Text
+                            style={
+                              styles.paymentCardSub
+                            }
+                          >
+                            UPI (GPay / PhonePe / Paytm) • Cards • NetBanking
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '700', marginTop: 4 }}>
+                            ⚡ Instant Auto-Confirmed & Kitchen Dispatched
+                          </Text>
+                        </View>
                       </View>
                     </View>
                   </View>
-
-                  {/* Prefer to Pay with Cash Banner */}
-                  <View style={{
-                    marginTop: 12,
-                    padding: 12,
-                    borderRadius: 10,
-                    backgroundColor: '#fffbeb',
-                    borderWidth: 1,
-                    borderColor: '#fde68a',
-                    flexDirection: 'row',
-                    alignItems: 'flex-start',
-                    gap: 10,
-                  }}>
-                    <AlertCircle size={18} color="#b45309" style={{ marginTop: 2, flexShrink: 0 }} />
-                    <Text style={{
-                      flex: 1,
-                      fontSize: 12,
-                      color: '#92400e',
-                      lineHeight: 18,
-                      fontWeight: '600'
-                    }}>
-                      Prefer to pay with Cash? Your waiter can take your order directly at your table/Give order at POS Counter.
-                    </Text>
-                  </View>
-                </View>
+                )}
 
                 <View
                   style={styles.summarySection}
@@ -2133,6 +2465,42 @@ export default function CartModal({
             <View
               style={styles.footerContainer}
             >
+              {Boolean(isTableOrder || isDynamicQr) && (
+                <View style={[
+                  styles.sessionFooterBadge,
+                  activeTable?.isSessionExpired
+                    ? styles.sessionFooterBadgeExpired
+                    : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                    ? styles.sessionFooterBadgeUrgent
+                    : styles.sessionFooterBadgeActive
+                ]}>
+                  <Clock
+                    size={14}
+                    color={
+                      activeTable?.isSessionExpired
+                        ? '#dc2626'
+                        : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                        ? '#c2410c'
+                        : '#15803d'
+                    }
+                  />
+                  <Text style={[
+                    styles.sessionFooterBadgeText,
+                    activeTable?.isSessionExpired
+                      ? { color: '#b91c1c' }
+                      : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                      ? { color: '#9a3412' }
+                      : { color: '#166534' }
+                  ]}>
+                    {activeTable?.isSessionExpired
+                      ? '⚠️ Table session expired (15-min limit). Please re-scan table QR to order.'
+                      : typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0
+                      ? `⏱️ Table Session: ${Math.floor(activeTable.sessionRemainingSeconds / 60)}m ${String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s remaining to place order`
+                      : `Table ${activeTable?.tableName || activeTable?.id || 'Dine-In'} ordering window active`}
+                  </Text>
+                </View>
+              )}
+
               <TouchableOpacity
                 style={[
                   styles.checkoutBtn,
@@ -2150,7 +2518,7 @@ export default function CartModal({
                   isLoadingState ||
                   hasUnavailableItems ||
                   Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) ||
-                  Boolean(activeTable?.isLocked || activeTable?.occupiedByOther)
+                  Boolean(activeTable?.isLocked || activeTable?.occupiedByOther) || Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
                 }
                 activeOpacity={0.85}
               >
@@ -2176,9 +2544,9 @@ export default function CartModal({
                         ? (storeOperatingStatus.status === 'PAUSED'
                             ? `KITCHEN PAUSED (${storeOperatingStatus.remainingPauseMinutes || 0}M LEFT)`
                             : 'KITCHEN CLOSED FOR ORDERING')
-                        : (activeTable?.isOccupied
-                            ? 'PAY ONLINE & ADD TO TABLE TAB'
-                            : 'PAY ONLINE & PLACE ORDER (UPI / CARDS)') + ` • ₹${money(grandTotal)}`}
+                        : Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
+                        ? 'SESSION EXPIRED • RE-SCAN TABLE QR'
+                        : ((isTableOrder || isDynamicQr || isPayAtCounterOnly) ? `PLACE ORDER • ₹${money(grandTotal)}` : `PAY ONLINE & PLACE ORDER • ₹${money(grandTotal)}`)}
                     </Text>
 
                     <ArrowRight
@@ -3024,5 +3392,68 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     lineHeight: 18,
+  },
+  cartTopSessionBar: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  cartTopSessionBarActive: {
+    backgroundColor: '#f0fdf4',
+    borderBottomColor: '#bbf7d0',
+  },
+  cartTopSessionBarUrgent: {
+    backgroundColor: '#fffbeb',
+    borderBottomColor: '#fde68a',
+  },
+  cartTopSessionBarExpired: {
+    backgroundColor: '#fef2f2',
+    borderBottomColor: '#fecaca',
+  },
+  cartTopSessionIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  cartTopSessionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  cartTopSessionSub: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  sessionFooterBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  sessionFooterBadgeActive: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0',
+  },
+  sessionFooterBadgeUrgent: {
+    backgroundColor: '#fff7ed',
+    borderColor: '#fed7aa',
+  },
+  sessionFooterBadgeExpired: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+  },
+  sessionFooterBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

@@ -517,37 +517,36 @@ export const switchRestaurant = async (
 ========================================================= */
 
 export const getOrderTypes = async (restaurantId = null) => {
+  // 1. Try restaurant-specific active order types if restaurantId is provided
+  if (restaurantId && Number(restaurantId) > 0) {
+    try {
+      const res = await api.get(`/api/OrderTypeMaster/restaurant/${restaurantId}/active`);
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.filter((t) => t.isActive !== false);
+      }
+    } catch (err) {
+      console.warn('Restaurant-specific order types unavailable, trying platform master:', err?.message);
+    }
+  }
+
+  // 2. Fetch platform master order types from OrderTypeMaster
   try {
-    const url =
-      restaurantId && Number(restaurantId) > 0
-        ? `/api/OrderTypeMaster/restaurant/${restaurantId}/active`
-        : '/api/OrderTypeMaster';
-
-    const res = await api.get(url);
-
-    if (
-      Array.isArray(res.data) &&
-      res.data.length > 0
-    ) {
-      return res.data.filter(
-        (t) => t.isActive !== false
-      );
+    const res = await api.get('/api/OrderTypeMaster');
+    if (Array.isArray(res.data) && res.data.length > 0) {
+      return res.data.filter((t) => t.isActive !== false);
     }
   } catch (error) {
-    try {
-      const fallbackRes = await api.get('/api/Order/Types');
-      if (
-        fallbackRes.data &&
-        Array.isArray(fallbackRes.data) &&
-        fallbackRes.data.length > 0
-      ) {
-        return fallbackRes.data.filter((t) => t.isActive !== false);
-      }
-    } catch {
-      console.log(
-        'OrderType API unavailable, using fallback.'
-      );
+    console.warn('Platform OrderTypeMaster unavailable, trying fallback:', error?.message);
+  }
+
+  // 3. Fallback to /api/Order/Types
+  try {
+    const fallbackRes = await api.get('/api/Order/Types');
+    if (fallbackRes.data && Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
+      return fallbackRes.data.filter((t) => t.isActive !== false);
     }
+  } catch {
+    console.log('OrderType API unavailable, using fallback.');
   }
 
   return [
@@ -1058,6 +1057,8 @@ export const getStoreProfile = async (
       params.set('encryptedTableId', String(encryptedTableId));
     }
     if (tableId) params.set('tableId', String(tableId));
+    const devId = getDeviceId();
+    if (devId) params.set('deviceId', devId);
 
     const res = await api.get(`/api/public/store/profile?${params.toString()}`);
     if (res?.data) {
@@ -2503,7 +2504,7 @@ export const placeOrder =
 
     const isNumericTable = orderPayload.tableId && !isNaN(Number(orderPayload.tableId)) && Number(orderPayload.tableId) > 0;
     const rawTableIdStr = orderPayload.tableId ? String(orderPayload.tableId) : null;
-    const effectiveEncTable = !isNumericTable && rawTableIdStr ? rawTableIdStr : (orderPayload.encryptedTableId || null);
+    const effectiveEncTable = !isNumericTable && rawTableIdStr ? rawTableIdStr : (orderPayload.encryptedTableId || orderPayload.tableSessionToken || null);
 
     const resolvedRestId = Number(orderPayload.restaurantId) || 1;
     const resolvedEncRestId =
@@ -2525,6 +2526,7 @@ export const placeOrder =
       tableId: isNumericTable ? Number(orderPayload.tableId) : null,
       encryptedTableId: effectiveEncTable,
       tableToken: effectiveEncTable,
+      tableSessionToken: orderPayload.tableSessionToken || effectiveEncTable,
       tableNumber: orderPayload.tableNumber
         ? String(orderPayload.tableNumber)
         : isNumericTable
@@ -2534,6 +2536,7 @@ export const placeOrder =
       customerPhone: validPhone,
       otpCode: orderPayload.otpCode || null,
       customerUserId: orderPayload.customerUserId || null,
+      deviceId: orderPayload.deviceId || getDeviceId(),
       orderTypeId: Number(orderPayload.orderTypeId || 1),
       deliveryType:
         orderPayload.deliveryType ||

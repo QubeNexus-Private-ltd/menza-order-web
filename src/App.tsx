@@ -81,6 +81,9 @@ export default function App() {
   const [orders, setOrders] =
     useState([]);
 
+  const [orderTypes, setOrderTypes] =
+    useState([]);
+
   const [cart, setCart] = useState({
     userId: 0,
     deviceId: '',
@@ -370,6 +373,17 @@ export default function App() {
       } else if ((st.includes('prep') || st.includes('cook')) && isKitchenActive) {
         showToast(`Chef started preparing Order ${displayId} in the kitchen (~15m).`, 'cooking', changedOrderId);
       } else if (st.includes('confirm')) {
+        setActiveTable((prevTable: any) => {
+          if (!prevTable) return prevTable;
+          return {
+            ...prevTable,
+            isDiningActive: true,
+            isSessionExpired: false,
+            sessionRemainingSeconds: null,
+            activeOrderId: changedOrderId || prevTable.activeOrderId,
+            activeOrderStatus: 'Confirmed',
+          };
+        });
         showToast(
           isKitchenActive
             ? `Order ${displayId} confirmed and sent to kitchen KOT.`
@@ -771,11 +785,14 @@ export default function App() {
               const subTotalVal = cartItems.reduce((acc, it) => acc + (Number(it.unitPrice || it.price || 0) * (Number(it.quantity) || 1)), 0);
               const taxVal = Math.round(subTotalVal * 0.05 * 100) / 100;
               const grandVal = Math.round((subTotalVal + taxVal) * 100) / 100;
+              const isFallbackTableOrder = Boolean(targetTableNum);
               pendingPayload = {
                 restaurantId: Number(urlRestId) || catalog?.restaurantId || 1,
                 encryptedRestaurantId: targetEncryptedId || catalog?.encryptedRestaurantId || '',
                 tableId: targetTableNum || null,
                 tableNumber: targetTableNum ? String(targetTableNum) : null,
+                orderTypeId: isFallbackTableOrder ? 1 : 2,
+                deliveryType: isFallbackTableOrder ? 'Dine-In' : 'Takeaway / Counter',
                 customerName: 'Guest Diner',
                 customerPhone: '9999999999',
                 mobileNumber: '9999999999',
@@ -806,10 +823,13 @@ export default function App() {
                 const effectivePhone = String(pendingPayload.customerPhone || pendingPayload.mobileNumber || '').trim();
                 const validPhone = effectivePhone.length >= 10 ? effectivePhone : '9999999999';
 
+                const isTableOrder = Boolean(targetTableNum || pendingPayload.tableId);
                 const placeRes = await api.placeOrder({
                   ...pendingPayload,
                   restaurantId: effectiveRestId,
                   encryptedRestaurantId: effectiveEncRestId,
+                  orderTypeId: isTableOrder ? 1 : (pendingPayload.orderTypeId || 2),
+                  deliveryType: isTableOrder ? 'Dine-In' : (pendingPayload.deliveryType || 'Takeaway / Counter'),
                   customerName: pendingPayload.name || pendingPayload.customerName || 'Guest Diner',
                   name: pendingPayload.name || pendingPayload.customerName || 'Guest Diner',
                   customerPhone: validPhone,
@@ -1074,7 +1094,7 @@ export default function App() {
           ) || 1;
 
         const restName = resolvedCatalog?.restaurantName || `Restaurant #${numericRestId}`;
-        logger.setRestaurant(numericRestId, restName);
+        logger.setRestaurantId(numericRestId, restName);
         logger.info('MENU', 'CATALOG_LOADED', `Menu loaded for ${restName} (${(resolvedCatalog.items || []).length} items)`, {
           restaurantId: numericRestId,
           restaurantName: restName,
@@ -1103,6 +1123,11 @@ export default function App() {
 
         // 2. Secondary metadata in background (parallel, non-blocking)
         Promise.allSettled([
+          api.getOrderTypes(numericRestId).then((types) => {
+            if (Array.isArray(types) && types.length > 0) {
+              setOrderTypes(types);
+            }
+          }),
           api.getStoreOperatingStatus(numericRestId).then((statusData) => {
             if (statusData) {
               setStoreOperatingStatus(statusData);
@@ -1214,9 +1239,16 @@ export default function App() {
                 occupiedByOther: false,
                 activeOrderId: storeProfile?.activeOrderId || savedOrder?.id || null,
                 activeOrderPhoneLast4: storeProfile?.activeOrderPhoneLast4 || null,
+                isDiningActive: Boolean(storeProfile?.isDiningActive),
+                activeOrderStatus: storeProfile?.activeOrderStatus || null,
+                tableSessionToken: storeProfile?.tableSessionToken || targetTableId,
+                sessionRemainingSeconds: storeProfile?.sessionRemainingSeconds ?? null,
+                isSessionExpired: Boolean(storeProfile?.isSessionExpired),
+                qrType: storeProfile?.qrType || null,
+                dineInPaymentMode: storeProfile?.dineInPaymentMode || 'PREPAID',
               };
 
-              logger.setTable(resolvedTable.id, resolvedTable.tableName);
+              logger.setTableId(resolvedTable.id, resolvedTable.tableName);
               logger.info('SESSION', 'TABLE_RESOLVED', `Customer seated at ${resolvedTable.tableName || `Table ${resolvedTable.id}`}`, {
                 tableId: resolvedTable.id,
                 tableName: resolvedTable.tableName,
@@ -1226,12 +1258,19 @@ export default function App() {
                 isReserved: resolvedTable.isReserved,
               });
               setActiveTable(resolvedTable);
+              if (resolvedTable.isSessionExpired && !resolvedTable.isDiningActive) {
+                await api.clearCart();
+                syncCart(null);
+                setCartModalOpen(false);
+              } else {
+                await refreshCart();
+              }
             } else {
-              logger.setTable(undefined, undefined);
+              logger.setTableId(undefined, undefined);
               setActiveTable(null);
+              await refreshCart();
             }
           }),
-          refreshCart(),
           api.getAllOrders().then((allOrd) => {
             if (Array.isArray(allOrd)) setOrders(allOrd);
           }),
@@ -1393,6 +1432,13 @@ export default function App() {
         );
         return;
       }
+      if (activeTable?.isSessionExpired && !activeTable?.isDiningActive) {
+        showToast(
+          'Your table ordering session has expired. Please re-scan your table QR code to order.',
+          'warn'
+        );
+        return;
+      }
 
       const restId =
         catalog
@@ -1496,6 +1542,13 @@ export default function App() {
         );
         return;
       }
+      if (activeTable?.isSessionExpired && !activeTable?.isDiningActive) {
+        showToast(
+          'Your table ordering session has expired. Please re-scan your table QR code to order.',
+          'warn'
+        );
+        return;
+      }
 
       const targetQty = Number(quantity);
 
@@ -1559,6 +1612,58 @@ export default function App() {
         'Cart cleared'
       );
     };
+
+  // Ticking countdown effect for time-bound 15-minute table session
+  useEffect(() => {
+    if (!activeTable || activeTable.isDiningActive || !activeTable.sessionRemainingSeconds || activeTable.sessionRemainingSeconds <= 0) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setActiveTable((prev: any) => {
+        if (!prev || prev.isDiningActive || !prev.sessionRemainingSeconds) {
+          return prev;
+        }
+        const rem = prev.sessionRemainingSeconds - 1;
+        if (rem <= 0) {
+          return {
+            ...prev,
+            sessionRemainingSeconds: 0,
+            isSessionExpired: true,
+          };
+        }
+        return {
+          ...prev,
+          sessionRemainingSeconds: rem,
+        };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [activeTable?.isDiningActive, activeTable?.sessionRemainingSeconds]);
+
+  const sessionExpiredRef = React.useRef(false);
+
+  // When table ordering session expires, immediately clear cart from DB and local state
+  useEffect(() => {
+    if (activeTable?.isSessionExpired && !activeTable?.isDiningActive) {
+      if (!sessionExpiredRef.current) {
+        sessionExpiredRef.current = true;
+        api.clearCart()
+          .then(() => {
+            syncCart(null);
+          })
+          .catch((err) => {
+            console.error('Failed to clear cart on session expiry:', err);
+            syncCart(null);
+          });
+        setCartModalOpen(false);
+        showToast('Your table ordering session has expired. Cart items cleared.', 'info');
+      }
+    } else {
+      sessionExpiredRef.current = false;
+    }
+  }, [activeTable?.isSessionExpired, activeTable?.isDiningActive]);
 
   /* =========================
      ORDER
@@ -1824,8 +1929,12 @@ export default function App() {
         setCartModalOpen(false);
         setOrderTrackerOpen(true);
 
+        const grandTotalAmt = completePlacedOrder.totalAmount || payload.totalAmount || 0;
+        const isPrepaidOrder = String(activeTable?.dineInPaymentMode || '').toUpperCase() === 'PREPAID' && (payload.paymentMode === 'CASH' || payload.paymentType === 'COUNTER_CASH');
         showToast(
-          `Order #${result.orderId} created successfully!`
+          isPrepaidOrder
+            ? `Order #${result.orderId} placed! Please pay ₹${grandTotalAmt} at the counter to start preparation.`
+            : `Order #${result.orderId} created successfully!`
         );
 
         return result;
@@ -1835,10 +1944,16 @@ export default function App() {
           err
         );
         logger.error('ORDER', 'ORDER_PLACEMENT_FAILED', err, {
-          tableId: payload?.tableId,
-          totalAmount: payload?.totalAmount,
-          paymentMode: payload?.paymentMode,
+          tableId: orderPayload?.tableId,
+          totalAmount: orderPayload?.totalAmount,
+          paymentMode: orderPayload?.paymentMode,
         });
+
+        if (String(err?.response?.data?.message || err?.message || '').toLowerCase().includes('expired')) {
+          await api.clearCart();
+          syncCart(null);
+          setCartModalOpen(false);
+        }
 
         if (err?.isRateLimited) {
           showToast(
@@ -2475,6 +2590,7 @@ export default function App() {
         }
         activeTable={effectiveTable}
         catalog={catalog}
+        orderTypes={orderTypes}
         loading={loading}
         storeOperatingStatus={storeOperatingStatus}
       />

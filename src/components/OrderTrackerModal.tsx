@@ -33,6 +33,7 @@ import {
   Bell,
   Droplets,
   Receipt,
+  AlertTriangle,
   Sparkles,
 } from 'lucide-react';
 import * as api from '../services/api';
@@ -283,11 +284,6 @@ const normalizeDeliveryType = (value) =>
     .replace(/[_\s]+/g, '-')
     .replace(/-+/g, '-');
 
-const isDineInOrder = (ord) =>
-  ['dine-in', 'dine-in-order', 'dinein'].includes(
-    normalizeDeliveryType(ord?.deliveryType || ord?.DeliveryType)
-  );
-
 const hasOrderTableId = (ord) => {
   if (!ord) return false;
   const tid = ord.tableId ?? ord.TableId ?? ord.tableNumber ?? ord.TableNumber;
@@ -298,6 +294,14 @@ const hasOrderTableId = (ord) => {
   }
   return String(tid).trim().length > 0;
 };
+
+const isDineInOrder = (ord) =>
+  hasOrderTableId(ord) ||
+  ['dine-in', 'dine-in-order', 'dinein'].includes(
+    normalizeDeliveryType(ord?.deliveryType || ord?.DeliveryType || ord?.orderTypeName || ord?.OrderTypeName)
+  ) ||
+  ord?.orderTypeId === 1 ||
+  ord?.OrderTypeId === 1;
 
 const getOrderDiningType = (ord) =>
   isDineInOrder(ord) ? 'Dine-In' : 'Self Pickup';
@@ -797,6 +801,12 @@ export default function OrderTrackerModal({
         storeOperatingStatus
       );
 
+      const isAwaitingCounterPayment =
+        !isPaid &&
+        !isOnline &&
+        String(curOrder?.paymentStatus || '').toLowerCase() !== 'paid' &&
+        !['Served', 'Completed', 'Cancelled', 'Delivered'].includes(normalizedStatus);
+
       let prepCountdown = {
         formatted: 'Order confirmed',
         shortFormatted: 'Confirmed',
@@ -1052,6 +1062,57 @@ export default function OrderTrackerModal({
             </Text>
           </View>
         </View>
+
+        {/* ACTION REQUIRED BANNER FOR PREPAID UNPAID ORDERS */}
+        {isAwaitingCounterPayment && (
+          <View style={{
+            marginHorizontal: 16,
+            marginTop: 12,
+            padding: 14,
+            borderRadius: 14,
+            backgroundColor: '#FFFBEB',
+            borderWidth: 1.5,
+            borderColor: '#FDE68A',
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: 12,
+          }}>
+            <View style={{
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              backgroundColor: '#FEF3C7',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <AlertTriangle size={20} color="#D97706" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: '#92400E' }}>
+                  Action Required to Start Preparation
+                </Text>
+                <View style={{
+                  backgroundColor: '#FDE68A',
+                  paddingHorizontal: 6,
+                  paddingVertical: 1,
+                  borderRadius: 4,
+                }}>
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: '#B45309' }}>
+                    UNPAID
+                  </Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 12, color: '#B45309', marginTop: 3, lineHeight: 17, fontWeight: '600' }}>
+                Please pay ₹{grandTotal} at the counter first to get your order sent to the kitchen.
+              </Text>
+              <Text style={{ fontSize: 11, color: '#92400E', marginTop: 4, fontWeight: '700' }}>
+                Quote Order #{curOrder.id || curOrder.orderId} at the POS billing counter.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* TABLE SERVICE & CALL WAITER ACTIONS */}
         {isTableOrder && (
@@ -1869,7 +1930,7 @@ export default function OrderTrackerModal({
               <Text style={{ fontSize: 11, color: (isPaid || isOnline) ? '#166534' : '#92400e', fontWeight: '500', lineHeight: 15 }}>
                 {(isPaid || isOnline)
                   ? '✓ This online order is settled and confirmed directly to kitchen for preparation.'
-                  : '⏳ This cash order requires manual acceptance & confirmation by the cashier or restaurant owner before kitchen prep.'}
+                  : '⏳ Please pay at the counter first to get the orders.'}
               </Text>
             </View>
 
