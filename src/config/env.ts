@@ -25,9 +25,9 @@ const readEnvNumber = (key: string, defaultValue: number): number => {
 // Raw base values
 const rawApiBase = readEnv(
   'VITE_API_BASE_URL',
-  'https://restadmin20260810182511-b7gaaqbfesdxa3cu.centralindia-01.azurewebsites.net'
+  'https://menzaposapi20260927220419-efbdafa3buaccge8.centralindia-01.azurewebsites.net'
 );
-const cleanApiBase = rawApiBase.replace(/\/+$/, '');
+const cleanApiBase = rawApiBase.replace(/\/+$/, '').replace(/\/api$/, '');
 
 const rawBlobBase = readEnv(
   'VITE_AZURE_BLOB_BASE_URL',
@@ -76,7 +76,7 @@ export const ENV = {
   /**
    * Public Web Application Origin (for generating QR codes and share links)
    */
-  APP_URL: readEnv('VITE_APP_URL', ''),
+  APP_URL: readEnv('VITE_APP_URL', 'https://menza-order-web.vercel.app'),
 
   /**
    * Default Veg Fallback Image CDN

@@ -1,6 +1,7 @@
 import { HubConnectionBuilder, LogLevel, HttpTransportType } from '@microsoft/signalr';
 import { getBaseUrl } from './api';
 import { ENV } from '../config/env';
+import { logger } from './logger';
 
 let hubConnection = null;
 let currentRestaurantId = null;
@@ -326,6 +327,11 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
 
     await hubConnection.start();
     console.log('⚡ [SignalR] OrderNotificationHub Connected successfully to', hubUrl);
+    logger.signalr('SIGNALR_CONNECTED', 'SignalR hub connected successfully', {
+      hubUrl,
+      restaurantId,
+      orderId,
+    });
 
     if (restaurantId) {
       await joinRestaurantGroup(restaurantId);
@@ -334,15 +340,33 @@ export async function startSignalRConnection(restaurantId = null, orderId = null
       await joinOrderGroup(orderId);
     }
 
-    hubConnection.onreconnected(async () => {
+    hubConnection.onreconnecting((err) => {
+      console.warn('⚡ [SignalR] Connection lost. Reconnecting...', err);
+      logger.signalr('SIGNALR_RECONNECTING', 'SignalR connection lost, attempting auto-reconnect', {
+        error: err?.message,
+      });
+    });
+
+    hubConnection.onreconnected(async (connectionId) => {
       console.log('⚡ [SignalR] Reconnected. Rejoining groups...');
+      logger.signalr('SIGNALR_CONNECTED', 'SignalR reconnected successfully', { connectionId });
       if (currentRestaurantId) await joinRestaurantGroup(currentRestaurantId);
       if (currentOrderId) await joinOrderGroup(currentOrderId);
+    });
+
+    hubConnection.onclose((err) => {
+      console.warn('⚡ [SignalR] Connection closed:', err);
+      logger.signalr('SIGNALR_DISCONNECTED', 'SignalR connection closed', {
+        error: err?.message,
+      });
     });
 
     return hubConnection;
   } catch (err) {
     console.warn('⚡ [SignalR] Connection warning (fallback to polling active):', err?.message || err);
+    logger.signalr('SIGNALR_ERROR', 'Failed to establish SignalR connection (polling active)', {
+      error: err?.message,
+    });
     return null;
   }
 }

@@ -29,6 +29,7 @@ import LandingPage from './components/LandingPage';
 
 import * as api from './services/api';
 import * as signalrService from './services/signalr';
+import { logger } from './services/logger';
 
 export default function App() {
   const [mode, setMode] = useState<'customer' | 'staff' | 'landing'>(() => {
@@ -1032,6 +1033,12 @@ export default function App() {
             encryptedRestId
           ) || 1;
 
+        logger.setRestaurantId(numericRestId);
+        logger.info('MENU', 'CATALOG_LOADED', `Menu loaded for restaurant ${numericRestId}`, {
+          restaurantId: numericRestId,
+          itemCount: (resolvedCatalog.items || []).length,
+        });
+
         const rObj =
           (
             restaurants || []
@@ -1183,6 +1190,7 @@ export default function App() {
           'Failed to load menu:',
           err
         );
+        logger.error('MENU', 'MENU_LOAD_FAILED', err, { encryptedRestId });
         const fallbackCat = api.getCachedMenuCatalog(encryptedRestId);
         if (fallbackCat && Array.isArray(fallbackCat.items) && fallbackCat.items.length > 0) {
           setCatalog(fallbackCat);

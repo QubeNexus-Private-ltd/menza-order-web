@@ -2,6 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './responsive.css';
+import { initGlobalErrorLogging } from './services/logger';
+
+// Initialize production Vercel error ingestion
+initGlobalErrorLogging();
 
 declare global {
   interface Window {

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { ENV } from '../config/env';
+import { logger } from './logger';
 import {
   consumeRateLimit,
   checkRateLimit,
@@ -42,11 +43,12 @@ const api = axios.create({
 });
 
 /* =========================================================
-   AXIOS INTERCEPTORS (AUTH & RATE LIMITING)
+   AXIOS INTERCEPTORS (AUTH & RATE LIMITING & VERCEL LOGS)
 ========================================================= */
 
 api.interceptors.request.use(
   (config) => {
+    config._startTime = Date.now();
     if (authToken) {
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${authToken}`;
@@ -54,27 +56,58 @@ api.interceptors.request.use(
 
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    logger.api('API_ERROR', 'Axios request interceptor failed', { error: error?.message });
+    return Promise.reject(error);
+  }
 );
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const durationMs = Date.now() - (response.config?._startTime || Date.now());
+    if (durationMs > 3500) {
+      logger.api(
+        'API_SLOW_REQUEST',
+        `Slow API response: ${response.config?.method?.toUpperCase()} ${response.config?.url} took ${durationMs}ms`,
+        { durationMs },
+        {
+          apiEndpoint: response.config?.url,
+          httpMethod: response.config?.method?.toUpperCase(),
+          statusCode: response.status,
+          durationMs,
+        }
+      );
+    }
+    return response;
+  },
   (error) => {
-    if (error?.response?.status === 429) {
+    const durationMs = Date.now() - (error.config?._startTime || Date.now());
+    const status = error?.response?.status;
+    const url = error.config?.url;
+    const method = error.config?.method?.toUpperCase();
+
+    if (status === 429) {
       const retryAfter =
-        Number(error.response.headers['retry-after']) ||
-        error.response.data?.retryAfterSeconds ||
+        Number(error.response?.headers?.['retry-after']) ||
+        error.response?.data?.retryAfterSeconds ||
         30;
       const message =
-        error.response.data?.message ||
+        error.response?.data?.message ||
         `Rate limit exceeded. Please wait ${retryAfter}s before retrying.`;
 
       broadcastRateLimitExceeded({
         status: 429,
         retryAfterSeconds: retryAfter,
         message,
-        url: error.config?.url,
+        url,
       });
+
+      logger.api(
+        'API_ERROR',
+        `Rate Limit Exceeded (HTTP 429) on ${method} ${url}`,
+        { retryAfterSeconds: retryAfter, message },
+        { apiEndpoint: url, httpMethod: method, statusCode: 429, durationMs }
+      );
 
       const rateLimitError = new Error(message);
       rateLimitError.name = 'RateLimitError';
@@ -83,6 +116,26 @@ api.interceptors.response.use(
       rateLimitError.isRateLimited = true;
       return Promise.reject(rateLimitError);
     }
+
+    // Log all 4xx/5xx/Network failures directly to Vercel runtime logs
+    logger.api(
+      'API_ERROR',
+      `API request failed: ${method} ${url} -> ${status || 'Network Error'} (${error?.message || ''})`,
+      {
+        responseBody: error.response?.data,
+        errorMessage: error.message,
+      },
+      {
+        apiEndpoint: url,
+        httpMethod: method,
+        statusCode: status,
+        durationMs,
+        errorName: error.name,
+        errorMessage: error.message,
+        errorStack: error.stack,
+      }
+    );
+
     return Promise.reject(error);
   }
 );
