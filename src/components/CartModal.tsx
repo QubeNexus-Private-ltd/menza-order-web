@@ -33,6 +33,7 @@ import {
 import * as api from '../services/api';
 import { joinOrderGroup } from '../services/signalr';
 import { Catalog, Table, StoreOperatingStatus, OrderItem } from '../types';
+import { ENV } from '../config/env';
 
 interface ItemImageWithFallbackProps {
   uri?: string;
@@ -882,10 +883,11 @@ export default function CartModal({
         ) {
           try {
             const cfMode =
-              checkoutRes?.environment?.toLowerCase() === 'production' ||
+              ENV.CASHFREE_MODE ||
+              (checkoutRes?.environment?.toLowerCase() === 'production' ||
               checkoutRes?.data?.environment?.toLowerCase() === 'production'
                 ? 'production'
-                : 'sandbox';
+                : 'sandbox');
 
             const cashfree =
               (window as any).Cashfree({

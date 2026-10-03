@@ -1,5 +1,6 @@
 import { HubConnectionBuilder, LogLevel, HttpTransportType } from '@microsoft/signalr';
 import { getBaseUrl } from './api';
+import { ENV } from '../config/env';
 
 let hubConnection = null;
 let currentRestaurantId = null;
@@ -114,8 +115,8 @@ export function sendBrowserNotification(title, body = '', tag = 'order-update') 
  * Initializes and starts the SignalR Hub connection
  */
 export async function startSignalRConnection(restaurantId = null, orderId = null) {
-  const baseUrl = (typeof getBaseUrl === 'function' ? getBaseUrl() : 'https://restadmin20260810182511-b7gaaqbfesdxa3cu.centralindia-01.azurewebsites.net').replace(/\/+$/, '');
-  const hubUrl = `${baseUrl}/hubs/order`;
+  const baseUrl = (typeof getBaseUrl === 'function' ? getBaseUrl() : ENV.API_BASE_URL).replace(/\/+$/, '');
+  const hubUrl = ENV.SIGNALR_HUB_URL || `${baseUrl}/hubs/order`;
 
   if (hubConnection && hubConnection.state === 'Connected') {
     if (restaurantId && restaurantId !== currentRestaurantId) {

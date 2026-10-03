@@ -36,30 +36,34 @@ export default function App() {
       const searchParams = new URLSearchParams(window.location.search);
       const path = window.location.pathname.toLowerCase();
 
-      // Explicit landing or home route
-      if (path === '/landing' || searchParams.get('page') === 'landing' || searchParams.get('view') === 'landing') {
-        return 'landing';
-      }
-
       // Explicit staff route
       if (path === '/staff' || searchParams.get('staff') === 'true' || searchParams.get('view') === 'staff') {
         return 'staff';
       }
 
-      // Check if user came via a direct QR code link
+      // Check if user came via a QR code link that provides a restaurant context candidate
       const isDineInPath = path.includes('/dinein');
-      const hasQrRest = searchParams.has('r') || searchParams.has('encRestId') || searchParams.has('enc') || searchParams.has('eid') || searchParams.has('restId') || searchParams.has('restaurantId');
-      const hasTable = searchParams.has('tableId') || searchParams.has('t') || searchParams.has('table') || searchParams.has('tablenum');
+      const hasQrRest =
+        searchParams.has('r') ||
+        searchParams.has('encRestId') ||
+        searchParams.has('enc') ||
+        searchParams.has('eid') ||
+        searchParams.has('restId') ||
+        searchParams.has('restaurantId') ||
+        searchParams.has('id');
 
-      if (isDineInPath || hasQrRest || hasTable) {
+      if (isDineInPath || hasQrRest) {
+        // Candidate restaurant present in URL; will be validated against catalog API
         return 'customer';
       }
 
-      // Default at root "/" shows the Landing Page
+      // All other routes without restaurant context (/, /random, ?foo=bar, ?tableId=T12, /landing) -> Landing Page
       return 'landing';
     }
     return 'landing';
   });
+
+  const [isInvalidRestaurant, setIsInvalidRestaurant] = useState(false);
 
   const [catalog, setCatalog] =
     useState(null);
@@ -201,7 +205,12 @@ export default function App() {
      SIGNALR REAL-TIME SYNC
   ========================= */
   useEffect(() => {
-    const restId = catalog?.restaurantId || selectedRestaurant?.id || 1;
+    if (mode === 'landing' || (!catalog?.restaurantId && !selectedRestaurant?.id)) {
+      return;
+    }
+    const restId = catalog?.restaurantId || selectedRestaurant?.id;
+    if (!restId) return;
+
     signalrService.startSignalRConnection(restId, activeOrder?.id || null);
 
     // Request notification permission
@@ -460,7 +469,7 @@ export default function App() {
       if (typeof unsubItemAvailability === 'function') unsubItemAvailability();
       if (typeof unsubTableStatus === 'function') unsubTableStatus();
     };
-  }, [catalog?.restaurantId, selectedRestaurant?.id, activeOrder?.id, activeOrder?.orderStatus, activeOrder?.tableId]);
+  }, [catalog?.restaurantId, selectedRestaurant?.id, activeOrder?.id, activeOrder?.orderStatus, activeOrder?.tableId, mode]);
 
   /* =========================
      CART
@@ -555,26 +564,38 @@ export default function App() {
 
     const initializeMenu =
       async () => {
-        let targetEncryptedId =
-          encRestId;
+        // If no restaurant parameter exists in URL (TYPE C: e.g. /, /random, ?foo=bar, ?tableId=T12)
+        if (!encRestId && !urlRestId) {
+          setCatalog(null);
+          setCategories([]);
+          setItems([]);
+          setActiveTable(null);
+          setMode('landing');
+          setLoading(false);
+          return;
+        }
 
-        if (!targetEncryptedId && typeof localStorage !== 'undefined') {
-          targetEncryptedId = localStorage.getItem('menza_last_enc_rest_id');
+        let targetEncryptedId = encRestId;
+
+        if (!targetEncryptedId && urlRestId) {
+          const rawId = Number(urlRestId);
+          if (isNaN(rawId) || rawId <= 0) {
+            setCatalog(null);
+            setMode('landing');
+            setIsInvalidRestaurant(true);
+            setLoading(false);
+            return;
+          }
+          const encResult = await api.getEncryptedRestaurantIdFromApi(rawId);
+          targetEncryptedId = encResult?.encryptedRestaurantId || api.encryptRestaurantId(rawId);
         }
 
         if (!targetEncryptedId) {
-          const rawId = urlRestId
-            ? Number(urlRestId)
-            : (typeof localStorage !== 'undefined' && localStorage.getItem('menza_last_rest_id')
-                ? Number(localStorage.getItem('menza_last_rest_id'))
-                : 1);
-          const encResult =
-            await api.getEncryptedRestaurantIdFromApi(
-              rawId
-            );
-
-          targetEncryptedId =
-            encResult?.encryptedRestaurantId || api.encryptRestaurantId(rawId);
+          setCatalog(null);
+          setMode('landing');
+          setIsInvalidRestaurant(true);
+          setLoading(false);
+          return;
         }
 
         // If table ID is not in URL, do NOT resurrect old table from localStorage.
@@ -589,10 +610,21 @@ export default function App() {
           localStorage.removeItem('menza_last_table_id');
         }
 
-        await loadMenuViaEncryptedEndpoint(
+        const isLoaded = await loadMenuViaEncryptedEndpoint(
           targetEncryptedId,
           targetTableNum
         );
+
+        if (!isLoaded) {
+          setCatalog(null);
+          setCategories([]);
+          setItems([]);
+          setActiveTable(null);
+          setMode('landing');
+          setIsInvalidRestaurant(true);
+          setLoading(false);
+          return;
+        }
 
         // Check for any recently saved active order from persistent storage
         try {
@@ -938,12 +970,23 @@ export default function App() {
       encryptedRestId,
       targetTableId = null
     ) => {
-      // 1. Instant cache retrieval for 0ms initial render
+      if (!encryptedRestId) {
+        setCatalog(null);
+        setCategories([]);
+        setItems([]);
+        setActiveTable(null);
+        setMode('landing');
+        setLoading(false);
+        return false;
+      }
+
+      // 1. Instant cache retrieval for 0ms initial render if specifically cached for this restaurant
       const cachedData = api.getCachedMenuCatalog(encryptedRestId);
       if (cachedData && Array.isArray(cachedData.items) && cachedData.items.length > 0) {
         setCatalog(cachedData);
         setCategories(cachedData.categories || []);
         setItems(cachedData.items || []);
+        setMode('customer');
         setLoading(false);
       } else {
         setLoading(true);
@@ -955,18 +998,36 @@ export default function App() {
             encryptedRestId
           );
 
-        if (catData && Array.isArray(catData.items) && catData.items.length > 0) {
-          setCatalog(catData);
-          setCategories(
-            catData.categories || []
-          );
-          setItems(
-            catData.items || []
-          );
+        const resolvedCatalog = (catData && Array.isArray(catData.items) && catData.items.length > 0)
+          ? catData
+          : (cachedData && Array.isArray(cachedData.items) && cachedData.items.length > 0)
+          ? cachedData
+          : null;
+
+        if (!resolvedCatalog) {
+          // Validation failed: Not a valid restaurant!
+          setCatalog(null);
+          setCategories([]);
+          setItems([]);
+          setActiveTable(null);
+          setMode('landing');
+          setIsInvalidRestaurant(true);
+          setLoading(false);
+          return false;
         }
 
+        setIsInvalidRestaurant(false);
+        setCatalog(resolvedCatalog);
+        setCategories(
+          resolvedCatalog.categories || []
+        );
+        setItems(
+          resolvedCatalog.items || []
+        );
+        setMode('customer');
+
         const numericRestId =
-          catData?.restaurantId ||
+          resolvedCatalog?.restaurantId ||
           api.decryptRestaurantId(
             encryptedRestId
           ) || 1;
@@ -980,7 +1041,7 @@ export default function App() {
           ) || {
             id: numericRestId,
             name:
-              catData?.restaurantName ||
+              resolvedCatalog?.restaurantName ||
               `Restaurant #${numericRestId}`,
           };
 
@@ -1116,6 +1177,7 @@ export default function App() {
             if (Array.isArray(allOrd)) setOrders(allOrd);
           }),
         ]);
+        return true;
       } catch (err) {
         console.error(
           'Failed to load menu:',
@@ -1126,35 +1188,44 @@ export default function App() {
           setCatalog(fallbackCat);
           setCategories(fallbackCat.categories || []);
           setItems(fallbackCat.items || []);
+          setMode('customer');
+          return true;
+        } else {
+          setCatalog(null);
+          setCategories([]);
+          setItems([]);
+          setActiveTable(null);
+          setMode('landing');
+          setIsInvalidRestaurant(true);
+          return false;
         }
       } finally {
         setLoading(false);
       }
     };
 
-  const handleLaunchCustomerView = useCallback(
-    (targetEncRestId?: string, targetTableNum: number | string | null = null) => {
-      setMode('customer');
-      const encId = targetEncRestId || catalog?.encryptedRestaurantId || 'bEfOdSjPPB6U8FPbxxQzTg';
-      loadMenuViaEncryptedEndpoint(encId, targetTableNum);
-      if (typeof window !== 'undefined' && window.history?.pushState) {
-        const newUrl = new URL(window.location.origin);
-        newUrl.searchParams.set('r', encId);
-        if (targetTableNum) {
-          newUrl.searchParams.set('tableId', String(targetTableNum));
+  const handleEnterRestaurantCode = useCallback(
+    async (code: string) => {
+      if (!code) return;
+      let targetCode = code.trim();
+      let tableParam: any = null;
+      try {
+        if (targetCode.includes('http://') || targetCode.includes('https://') || targetCode.includes('?')) {
+          const urlStr = targetCode.startsWith('http') ? targetCode : `https://dummy.com/${targetCode}`;
+          const u = new URL(urlStr);
+          targetCode = u.searchParams.get('r') || u.searchParams.get('encRestId') || targetCode;
+          tableParam = u.searchParams.get('tableId') || u.searchParams.get('table') || null;
         }
-        window.history.pushState({}, '', newUrl.toString());
-      }
-    },
-    [catalog]
-  );
+      } catch {}
 
-  const handleNavigateLanding = useCallback(() => {
-    setMode('landing');
-    if (typeof window !== 'undefined' && window.history?.pushState) {
-      window.history.pushState({}, '', '/landing');
-    }
-  }, []);
+      if (tableParam && typeof localStorage !== 'undefined') {
+        localStorage.setItem('menza_last_table_id', String(tableParam));
+      }
+
+      await loadMenuViaEncryptedEndpoint(targetCode, tableParam);
+    },
+    []
+  );
 
   /* =========================
      QR
@@ -1162,44 +1233,40 @@ export default function App() {
 
   const handleSelectScanResult =
     async (
-      restaurantId,
-      tableId
+      scannedRestOrEnc: string | number,
+      tableId: string | number | null = null
     ) => {
-      const encResult =
-        await api.getEncryptedRestaurantIdFromApi(
-          restaurantId
-        );
+      let encId = String(scannedRestOrEnc || '').trim();
 
-      const encId =
-        encResult.encryptedRestaurantId;
+      const numId = Number(encId);
+      if (!isNaN(numId) && numId > 0 && encId.length <= 6) {
+        try {
+          const encResult = await api.getEncryptedRestaurantIdFromApi(numId);
+          if (encResult?.encryptedRestaurantId) {
+            encId = encResult.encryptedRestaurantId;
+          }
+        } catch (err) {}
+      }
+
+      if (!encId) return;
 
       if (
         catalog &&
-        Number(
-          catalog.restaurantId
-        ) !==
-          Number(restaurantId)
+        catalog.encryptedRestaurantId &&
+        catalog.encryptedRestaurantId !== encId
       ) {
         await api.clearCart();
         syncCart(null);
       }
 
       try {
-        const url =
-          new URL(
-            window.location.href
-          );
-
-        url.searchParams.set(
-          'restaurantId',
-          restaurantId
-        );
+        const url = new URL(window.location.href);
+        url.searchParams.set('r', encId);
+        url.searchParams.delete('restaurantId');
+        url.searchParams.delete('encRestId');
 
         if (tableId) {
-          url.searchParams.set(
-            'tableId',
-            String(tableId)
-          );
+          url.searchParams.set('tableId', String(tableId));
           if (typeof localStorage !== 'undefined') {
             localStorage.setItem('menza_last_table_id', String(tableId));
           }
@@ -1210,15 +1277,7 @@ export default function App() {
           }
         }
 
-        url.searchParams.delete(
-          'encRestId'
-        );
-
-        window.history.pushState(
-          {},
-          '',
-          url
-        );
+        window.history.pushState({}, '', url.toString());
       } catch (e) {}
 
       await loadMenuViaEncryptedEndpoint(
@@ -2162,12 +2221,8 @@ export default function App() {
 
       {mode === 'landing' ? (
         <LandingPage
-          onLaunchCustomerView={handleLaunchCustomerView}
-          onOpenStaffView={() => setMode('staff')}
           onOpenScanner={() => setScannerOpen(true)}
-          onOpenQrModal={() => setQrModalOpen(true)}
-          catalog={catalog}
-          activeOrder={activeOrder}
+          isInvalidRestaurant={isInvalidRestaurant}
         />
       ) : (
         <>
@@ -2220,7 +2275,6 @@ export default function App() {
             }
             openOrderTracker={handleOpenOrderTracker}
             activeOrder={activeOrder}
-            onNavigateLanding={handleNavigateLanding}
           />
 
           {mode === 'customer' ? (
@@ -2367,17 +2421,8 @@ export default function App() {
 
       <QrScannerModal
         visible={scannerOpen}
-        onClose={() =>
-          setScannerOpen(false)
-        }
-        onSelectScanResult={
-          handleSelectScanResult
-        }
-        activeRestaurantId={
-          catalog
-            ? catalog.restaurantId
-            : 1
-        }
+        onClose={() => setScannerOpen(false)}
+        onSelectScanResult={handleSelectScanResult}
       />
 
       <RestaurantQrModal

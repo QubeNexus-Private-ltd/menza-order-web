@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ENV } from '../config/env';
 import {
   consumeRateLimit,
   checkRateLimit,
@@ -25,8 +26,7 @@ export {
 
 export const getBaseUrl = () => API_BASE_URL;
 
-let API_BASE_URL =
-  'https://restadmin20260810182511-b7gaaqbfesdxa3cu.centralindia-01.azurewebsites.net';
+let API_BASE_URL = ENV.API_BASE_URL;
 
 let authToken =
   typeof localStorage !== 'undefined'
@@ -38,7 +38,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 7000,
+  timeout: ENV.API_TIMEOUT_MS,
 });
 
 /* =========================================================
@@ -163,7 +163,8 @@ export const encryptRestaurantId = (restaurantId) => {
     return KNOWN_ENCRYPTED_IDS[num];
   }
 
-  const rawStr = `MenzaSalt2026_${num}_Key`;
+  const salt = ENV.ENCRYPTION_SALT || 'MenzaSalt2026';
+  const rawStr = `${salt}_${num}_Key`;
 
   try {
     return (
@@ -198,10 +199,10 @@ export const decryptRestaurantId = (encryptedId) => {
     }
 
     const decodedStr = atob(clean);
+    const salt = ENV.ENCRYPTION_SALT || 'MenzaSalt2026';
+    const saltRegex = new RegExp(`(?:${salt}|MenzaSalt2026)_(\\d+)_Key`);
 
-    const match = decodedStr.match(
-      /MenzaSalt2026_(\d+)_Key/
-    );
+    const match = decodedStr.match(saltRegex);
 
     if (match && match[1]) {
       return Number(match[1]);
@@ -529,18 +530,15 @@ export const IMAGE_NOT_AVAILABLE =
 
 export const DEFAULT_ITEM_IMAGE = IMAGE_NOT_AVAILABLE;
 
-export const DEFAULT_VEG_IMAGE =
-  'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=600';
+export const DEFAULT_VEG_IMAGE = ENV.DEFAULT_VEG_IMAGE;
 
-export const DEFAULT_NON_VEG_IMAGE =
-  'https://images.unsplash.com/photo-1544025162-d76694265947?w=600';
+export const DEFAULT_NON_VEG_IMAGE = ENV.DEFAULT_NON_VEG_IMAGE;
 
 export const getDefaultItemImage = () => {
   return IMAGE_NOT_AVAILABLE;
 };
 
-const AZURE_BLOB_BASE =
-  'https://screstdev.blob.core.windows.net/sarest/';
+const AZURE_BLOB_BASE = ENV.AZURE_BLOB_BASE_URL;
 
 export const getOriginalImageUrl = (url) => {
   if (!url || typeof url !== 'string') {
@@ -888,8 +886,17 @@ export const getCachedMenuCatalog = (encryptedRestaurantId) => {
   if (typeof localStorage === 'undefined') return null;
   try {
     const cleanEncId = (encryptedRestaurantId || '').trim();
-    const raw = (cleanEncId ? localStorage.getItem(`menza_cached_catalog_${cleanEncId}`) : null) ||
-                localStorage.getItem('menza_cached_catalog');
+    if (cleanEncId) {
+      const specificRaw = localStorage.getItem(`menza_cached_catalog_${cleanEncId}`);
+      if (specificRaw) {
+        const parsed = JSON.parse(specificRaw);
+        if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+          return parsed;
+        }
+      }
+      return null;
+    }
+    const raw = localStorage.getItem('menza_cached_catalog');
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
@@ -901,13 +908,11 @@ export const getCachedMenuCatalog = (encryptedRestaurantId) => {
 
 export const getMenuCatalogByEncryptedId =
   async (encryptedRestaurantId) => {
-    const cleanEncId = (
-      encryptedRestaurantId ||
-      encryptRestaurantId(1)
-    ).trim();
+    const cleanEncId = (encryptedRestaurantId || '').trim();
+    if (!cleanEncId) return null;
 
     let catalogData = null;
-    let decryptedRestId = 1;
+    let decryptedRestId = null;
 
     try {
       const pubRes = await api.get(
@@ -918,7 +923,7 @@ export const getMenuCatalogByEncryptedId =
       if (
         pubRes?.data &&
         (pubRes.data.restaurantId ||
-          pubRes.data.items)
+          (Array.isArray(pubRes.data.items) && pubRes.data.items.length > 0))
       ) {
         decryptedRestId =
           pubRes.data.restaurantId ||
@@ -941,10 +946,16 @@ export const getMenuCatalogByEncryptedId =
             cleanEncId
           )}`
         );
-        decryptedRestId =
-          res.data?.restaurantId ||
-          decryptRestaurantId(cleanEncId);
-        catalogData = res.data;
+        if (
+          res?.data &&
+          (res.data.restaurantId ||
+            (Array.isArray(res.data.items) && res.data.items.length > 0))
+        ) {
+          decryptedRestId =
+            res.data?.restaurantId ||
+            decryptRestaurantId(cleanEncId);
+          catalogData = res.data;
+        }
       } catch (err) {
         console.log('MenuCatalog fallback failed:', err?.message);
       }
@@ -954,12 +965,16 @@ export const getMenuCatalogByEncryptedId =
       const cached = getCachedMenuCatalog(cleanEncId);
       if (cached) {
         catalogData = cached;
-        decryptedRestId = cached.restaurantId || decryptedRestId || decryptRestaurantId(cleanEncId) || 1;
+        decryptedRestId = cached.restaurantId || decryptedRestId || decryptRestaurantId(cleanEncId);
       }
     }
 
+    if (!catalogData || !Array.isArray(catalogData.items) || catalogData.items.length === 0) {
+      return null;
+    }
+
     const normalized = normalizeCatalogData(
-      catalogData || {},
+      catalogData,
       decryptedRestId,
       cleanEncId
     );

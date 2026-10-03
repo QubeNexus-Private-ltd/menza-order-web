@@ -20,6 +20,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { encryptRestaurantId } from '../services/api';
 import { Catalog, Table } from '../types';
+import { ENV } from '../config/env';
 
 export interface DownloadQrCodeImageOptions {
   svgElementId: string;
@@ -217,9 +218,10 @@ export default function RestaurantQrModal({
   const encId =
     catalog?.encryptedRestaurantId || encryptRestaurantId(restId);
 
+  const baseUrl = ENV.APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
   const targetUrl = selectedTableId
-    ? `${window.location.origin}/?encRestId=${encId}&tableId=${selectedTableId}`
-    : `${window.location.origin}/?encRestId=${encId}`;
+    ? `${baseUrl}/?encRestId=${encId}&tableId=${selectedTableId}`
+    : `${baseUrl}/?encRestId=${encId}`;
 
   const qrElementId = `modal-qr-code-${selectedTableId || 'main'}`;
 

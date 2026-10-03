@@ -7,7 +7,6 @@ import {
   QrCode,
   MapPin,
   Bell,
-  Utensils,
 } from 'lucide-react';
 import { getOriginalImageUrl } from '../services/api';
 import { Order, Table, StoreOperatingStatus } from '../types';
@@ -127,7 +126,6 @@ export interface HeaderProps {
   openOrderTracker?: (targetOrder?: any) => void;
   openQrModal?: () => void;
   openCallWaiter?: () => void;
-  onNavigateLanding?: () => void;
   activeOrder?: Order | null;
   activeTable?: Table | null;
   storeOperatingStatus?: StoreOperatingStatus | null;
@@ -146,7 +144,6 @@ export default function Header({
   openOrderTracker,
   openQrModal,
   openCallWaiter,
-  onNavigateLanding,
   activeOrder,
   activeTable,
   storeOperatingStatus,
@@ -413,30 +410,6 @@ export default function Header({
           </View>
         ) : (
           <View style={[styles.actionsRow, isMobile && styles.actionsRowMobile]}>
-            {/* MenzaOrder Landing / Home Button */}
-            {typeof onNavigateLanding === 'function' && (
-              <Pressable
-                className="header-action-btn"
-                style={({ pressed }) => [
-                  styles.homeButton,
-                  isMobile && styles.iconBtnMobile,
-                  pressed && styles.qrButtonPressed,
-                ]}
-                onPress={onNavigateLanding}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityRole="button"
-                accessibilityLabel="MenzaOrder Home"
-                title="MenzaOrder Home"
-              >
-                <Utensils size={isMobile ? 15 : 14} color="#D33401" strokeWidth={2.2} />
-                {!isMobile && (
-                  <Text style={styles.homeButtonText}>
-                    Home
-                  </Text>
-                )}
-              </Pressable>
-            )}
-
             {/* QR Scanner / Modal Button */}
             {typeof openQrModal === 'function' && (
               <Pressable
@@ -726,24 +699,6 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  homeButton: {
-    height: 36,
-    minWidth: 50,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-    borderRadius: 18,
-    backgroundColor: '#FFF1EC',
-    borderWidth: 1,
-    borderColor: '#FED7AA',
-    gap: 4,
-  },
-  homeButtonText: {
-    color: '#D33401',
-    fontSize: 11.5,
-    fontWeight: '800',
   },
   qrButton: {
     height: 36,
