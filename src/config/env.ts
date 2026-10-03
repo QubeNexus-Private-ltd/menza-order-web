@@ -64,9 +64,9 @@ export const ENV = {
   /**
    * Cashfree Gateway Environment: 'production' | 'sandbox'
    */
-  CASHFREE_MODE: (readEnv('VITE_CASHFREE_MODE', 'production').toLowerCase() === 'sandbox'
-    ? 'sandbox'
-    : 'production') as 'production' | 'sandbox',
+  CASHFREE_MODE: (readEnv('VITE_CASHFREE_MODE', 'sandbox').toLowerCase() === 'production'
+    ? 'production'
+    : 'sandbox') as 'production' | 'sandbox',
 
   /**
    * Axios Request Timeout in ms (default: 7000ms)

@@ -148,6 +148,100 @@ const getQuantityUnitText = (quantity: any, item: any, catalog: any = null): str
   return `${qty} ${cleanUnit}`;
 };
 
+/**
+ * Probes Cashfree API with timeout to auto-detect whether the paymentSessionId
+ * was generated in Cashfree Sandbox or Production.
+ * Eliminates "payment_session_id is not present or is invalid" errors caused by mode mismatches.
+ */
+async function detectCashfreeMode(
+  sessionId: string,
+  preferredMode: 'sandbox' | 'production' = 'sandbox'
+): Promise<'sandbox' | 'production'> {
+  if (typeof window === 'undefined' || !sessionId) return preferredMode;
+
+  const testMode = async (mode: 'sandbox' | 'production'): Promise<boolean> => {
+    try {
+      const url =
+        mode === 'production'
+          ? 'https://api.cashfree.com/pg/view/sessions/checkout'
+          : 'https://sandbox.cashfree.com/pg/view/sessions/checkout';
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1500);
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `payment_session_id=${encodeURIComponent(sessionId)}`,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+      return res.status === 200;
+    } catch {
+      return false;
+    }
+  };
+
+  try {
+    const preferredOk = await testMode(preferredMode);
+    if (preferredOk) return preferredMode;
+
+    const alternateMode: 'sandbox' | 'production' =
+      preferredMode === 'production' ? 'sandbox' : 'production';
+    const alternateOk = await testMode(alternateMode);
+    if (alternateOk) {
+      console.log(`⚡ [Cashfree] Auto-detected environment mismatch: Switching from ${preferredMode} to ${alternateMode}`);
+      return alternateMode;
+    }
+  } catch (e) {
+    console.warn('Cashfree mode auto-detection failed, using preferred mode:', e);
+  }
+
+  return preferredMode;
+}
+
+/**
+ * Dynamically ensures Cashfree JS SDK v3 is loaded and available on window.Cashfree
+ */
+function loadCashfreeSdk(): Promise<any> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Cashfree SDK is only available in browser environments'));
+      return;
+    }
+
+    if ((window as any).Cashfree) {
+      resolve((window as any).Cashfree);
+      return;
+    }
+
+    const scriptId = 'cashfree-js-sdk-v3';
+    let script = document.getElementById(scriptId) as HTMLScriptElement;
+    if (!script) {
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    script.onload = () => {
+      if ((window as any).Cashfree) {
+        resolve((window as any).Cashfree);
+      } else {
+        reject(new Error('Cashfree SDK script loaded, but window.Cashfree is undefined'));
+      }
+    };
+
+    script.onerror = () => {
+      reject(new Error('Failed to load Cashfree JS SDK from CDN'));
+    };
+  });
+}
+
 export interface CartModalProps {
   visible: boolean;
   onClose: () => void;
@@ -848,19 +942,33 @@ export default function CartModal({
 
         const paymentSessionId =
           checkoutRes?.paymentSessionId ||
+          checkoutRes?.PaymentSessionId ||
           checkoutRes?.payment_session_id ||
-          checkoutRes?.data
-            ?.paymentSessionId;
+          checkoutRes?.data?.paymentSessionId ||
+          checkoutRes?.data?.PaymentSessionId ||
+          checkoutRes?.data?.payment_session_id ||
+          checkoutRes?.order_token ||
+          checkoutRes?.orderToken;
 
-        const paymentLink =
+        let paymentLink =
           checkoutRes?.paymentLink ||
+          checkoutRes?.PaymentLink ||
           checkoutRes?.payment_link ||
-          checkoutRes?.data?.paymentLink;
+          checkoutRes?.data?.paymentLink ||
+          checkoutRes?.data?.PaymentLink ||
+          checkoutRes?.data?.payment_link ||
+          checkoutRes?.instrumentResponseUrl ||
+          checkoutRes?.data?.instrumentResponseUrl;
 
         const cashfreeOrderId =
           checkoutRes?.orderId ||
+          checkoutRes?.OrderId ||
           checkoutRes?.order_id ||
-          checkoutRes?.data?.orderId;
+          checkoutRes?.data?.orderId ||
+          checkoutRes?.data?.OrderId ||
+          checkoutRes?.data?.order_id ||
+          checkoutRes?.cfOrderId ||
+          checkoutRes?.data?.cfOrderId;
 
         logger.payment('PAYMENT_SESSION_CREATED', `Cashfree order: ${cashfreeOrderId || 'N/A'}, session: ${paymentSessionId ? 'present' : 'none'}`, {
           cashfreeOrderId,
@@ -935,43 +1043,69 @@ export default function CartModal({
           }
         }
 
-        if (
-          typeof window !== 'undefined' &&
-          (window as any).Cashfree &&
-          paymentSessionId
-        ) {
-          try {
-            const cfMode =
-              ENV.CASHFREE_MODE ||
-              (checkoutRes?.environment?.toLowerCase() === 'production' ||
-              checkoutRes?.data?.environment?.toLowerCase() === 'production'
-                ? 'production'
-                : 'sandbox');
+        if (paymentSessionId) {
+          const preferredMode =
+            (checkoutRes?.environment?.toLowerCase() === 'production' ||
+            checkoutRes?.data?.environment?.toLowerCase() === 'production')
+              ? 'production'
+              : (checkoutRes?.environment?.toLowerCase() === 'sandbox' ||
+                checkoutRes?.data?.environment?.toLowerCase() === 'sandbox')
+              ? 'sandbox'
+              : ENV.CASHFREE_MODE;
 
-            const cashfree =
-              (window as any).Cashfree({
-                mode: cfMode,
-              });
+          // Probe Cashfree API to verify whether this session belongs to Sandbox or Production
+          const detectedMode = await detectCashfreeMode(paymentSessionId, preferredMode);
+
+          // If no paymentLink was returned by backend, generate direct hosted fallback URL
+          if (!paymentLink) {
+            paymentLink = `https://${detectedMode === 'sandbox' ? 'payments-test' : 'payments'}.cashfree.com/order/#${paymentSessionId}`;
+          }
+
+          logger.payment('PAYMENT_SESSION_READY', `Cashfree order: ${cashfreeOrderId || 'N/A'}, mode: ${detectedMode}`, {
+            cashfreeOrderId,
+            mode: detectedMode,
+            hasSessionId: true,
+            hasPaymentLink: Boolean(paymentLink),
+          });
+
+          try {
+            const CashfreeConstructor = await loadCashfreeSdk();
+            const cashfree = CashfreeConstructor({
+              mode: detectedMode,
+            });
+
+            logger.payment('PAYMENT_CHECKOUT_REDIRECT', `Submitting checkout via Cashfree JS SDK in ${detectedMode} mode`, {
+              cashfreeOrderId,
+              mode: detectedMode,
+            });
 
             cashfree.checkout({
-              paymentSessionId:
-                paymentSessionId,
+              paymentSessionId: paymentSessionId,
               redirectTarget: '_self',
             });
 
             return;
-          } catch (sdkError) {
+          } catch (sdkError: any) {
             console.warn(
               'Cashfree SDK checkout fallback to paymentLink:',
               sdkError
             );
-          }
-        }
+            logger.error('PAYMENT', 'PAYMENT_SDK_ERROR', sdkError, {
+              cashfreeOrderId,
+              paymentSessionId,
+              mode: detectedMode,
+            });
 
-        if (paymentLink) {
-          window.location.href =
-            paymentLink;
+            if (paymentLink && typeof window !== 'undefined') {
+              window.location.href = paymentLink;
+              return;
+            }
+          }
+        } else if (paymentLink && typeof window !== 'undefined') {
+          window.location.href = paymentLink;
           return;
+        } else {
+          throw new Error('Payment gateway did not return a valid payment session. Please try again.');
         }
       } catch (err: any) {
         console.error(
