@@ -567,6 +567,10 @@ export default function App() {
       async () => {
         // If no restaurant parameter exists in URL (TYPE C: e.g. /, /random, ?foo=bar, ?tableId=T12)
         if (!encRestId && !urlRestId) {
+          logger.info('NAVIGATION', 'LANDING_PAGE_ACCESSED', 'Customer opened home page without restaurant QR', {
+            path: window.location.pathname,
+            search: window.location.search,
+          });
           setCatalog(null);
           setCategories([]);
           setItems([]);
@@ -575,6 +579,17 @@ export default function App() {
           setLoading(false);
           return;
         }
+
+        logger.info('NAVIGATION', 'QR_SCAN_OPENED', `Customer scanned & opened QR link: ${isDineInPath ? 'Dine-In Table' : 'Storefront'}`, {
+          isDineInPath,
+          pathEncRestId,
+          pathEncTableId,
+          urlTableId,
+          rawUrlTableId,
+          encRestId,
+          urlRestId,
+          fullUrl: window.location.href,
+        });
 
         let targetEncryptedId = encRestId;
 

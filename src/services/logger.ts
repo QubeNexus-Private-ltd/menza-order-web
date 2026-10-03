@@ -180,23 +180,30 @@ class Logger {
       }
     }
 
-    // Forward WARN, ERROR, and critical events to Vercel /api/log
+    // Forward all INFO, WARN, and ERROR events to Vercel /api/log
     const shouldForwardToVercel =
       typeof window !== 'undefined' &&
       !this.isDispatchingToApi &&
-      (entry.level === 'ERROR' ||
-        entry.level === 'WARN' ||
-        entry.event === 'ORDER_PLACED' ||
-        entry.event === 'PAYMENT_FAILED' ||
-        entry.event === 'SIGNALR_DISCONNECTED');
+      (entry.level === 'ERROR' || entry.level === 'WARN' || entry.level === 'INFO');
 
     if (shouldForwardToVercel) {
       this.isDispatchingToApi = true;
       try {
         const payload = JSON.stringify(entry);
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon('/api/log', payload);
-        } else {
+        let sent = false;
+
+        // Try navigator.sendBeacon with explicit application/json Blob
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          try {
+            const blob = new Blob([payload], { type: 'application/json' });
+            sent = navigator.sendBeacon('/api/log', blob);
+          } catch {
+            sent = false;
+          }
+        }
+
+        // Reliable fetch fallback with keepalive: true
+        if (!sent && typeof fetch !== 'undefined') {
           fetch('/api/log', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -289,6 +296,15 @@ export const logger = Logger.getInstance();
  */
 export function initGlobalErrorLogging(): void {
   if (typeof window === 'undefined') return;
+
+  // Emit immediate startup diagnostic so Vercel logs show every device connection
+  logger.info('SYSTEM', 'APP_BOOT', `MenzaOrder Web Client loaded on ${navigator.userAgent || 'unknown device'}`, {
+    url: window.location.href,
+    pathname: window.location.pathname,
+    search: window.location.search,
+    screen: `${window.innerWidth}x${window.innerHeight}`,
+    referrer: document.referrer || '',
+  });
 
   window.addEventListener('error', (event) => {
     logger.error('SYSTEM', 'UNCAUGHT_BROWSER_ERROR', event.error || event.message, {

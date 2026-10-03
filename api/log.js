@@ -35,7 +35,13 @@ export default async function handler(req, res) {
 
     try {
       let body = req.body;
-      if (typeof body === 'string') {
+      if (typeof Buffer !== 'undefined' && Buffer.isBuffer(body)) {
+        try {
+          body = JSON.parse(body.toString('utf-8'));
+        } catch {
+          body = {};
+        }
+      } else if (typeof body === 'string') {
         try {
           body = JSON.parse(body);
         } catch {
@@ -46,7 +52,7 @@ export default async function handler(req, res) {
       }
 
       const {
-        level = 'ERROR',
+        level = 'INFO',
         category = 'ORDER_WEB',
         event = 'CLIENT_EVENT',
         message = 'No message provided',
@@ -94,13 +100,14 @@ export default async function handler(req, res) {
       };
 
       const serialized = JSON.stringify(structuredLog);
+      const summary = `⚡ [${level}] [${category}:${event}] ${message} (RestId: ${restaurantId || 'N/A'}, TableId: ${tableId || 'N/A'})`;
 
       if (level === 'ERROR') {
-        console.error(serialized);
+        console.error(`${summary}\n${serialized}`);
       } else if (level === 'WARN') {
-        console.warn(serialized);
+        console.warn(`${summary}\n${serialized}`);
       } else {
-        console.log(serialized);
+        console.log(`${summary}\n${serialized}`);
       }
 
       return res.status(200).json({ success: true });
