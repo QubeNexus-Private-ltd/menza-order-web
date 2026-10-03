@@ -252,6 +252,10 @@ export default function App() {
           };
 
       setStoreOperatingStatus(normalized);
+      logger.info('SYSTEM', 'STORE_STATUS_UPDATED', `Store status changed to ${normalized.status} (Ordering: ${normalized.canPlaceOrder ? 'Enabled' : 'Disabled'})`, {
+        status: normalized.status,
+        canPlaceOrder: normalized.canPlaceOrder,
+      });
       showToast(
         normalized.canPlaceOrder
           ? '🟢 Store is now OPEN for ordering!'
@@ -269,6 +273,13 @@ export default function App() {
       const changedOrderId = Number(data?.orderId || data?.OrderId || data?.id || data?.Id || 0);
       const newOrderStatus = data?.orderStatus || data?.OrderStatus || data?.status || data?.Status;
       let newKitchenStatus = data?.kitchenStatus || data?.KitchenStatus || data?.kitchenOrderStatus;
+
+      logger.order('ORDER_STATUS_CHANGED', `Kitchen/Order update: Order #${changedOrderId} -> Status: ${newOrderStatus}, Kitchen: ${newKitchenStatus}`, {
+        orderId: changedOrderId,
+        orderStatus: newOrderStatus,
+        kitchenStatus: newKitchenStatus,
+        paymentStatus: data?.paymentStatus,
+      });
 
       const oStLower = String(newOrderStatus || '').toLowerCase();
       if (oStLower.includes('serve') || oStLower.includes('deliver') || oStLower.includes('complete') || oStLower.includes('settled')) {
@@ -372,6 +383,7 @@ export default function App() {
     const unsubServiceRequest = signalrService.onServiceRequestResolved((data) => {
       if (!data) return;
       console.log('⚡ [App.jsx] Real-Time ServiceRequestResolved received:', data);
+      logger.service('SERVICE_REQUEST_RESOLVED', 'Waiter acknowledged customer service call and is en route', { data });
       showToast('🔔 Waiter has acknowledged your request and is heading to your table!', 'success');
     });
 
@@ -699,6 +711,7 @@ export default function App() {
 
         if (paymentReturnOrderId) {
           try {
+            logger.payment('PAYMENT_RETURN_RECEIVED', `Payment callback received for order: ${paymentReturnOrderId}`, { paymentReturnOrderId });
             // Join real-time SignalR group for immediate settlement events
             signalrService.joinOrderGroup(paymentReturnOrderId);
 
@@ -715,6 +728,7 @@ export default function App() {
             }
 
             if (statusRes && (statusRes?.status === 'FAILED' || statusRes?.order_status === 'FAILED' || statusRes?.status === 'CANCELLED' || statusRes?.order_status === 'CANCELLED')) {
+              logger.payment('PAYMENT_RETURN_FAILED', `Payment was cancelled or failed for order: ${paymentReturnOrderId}`, { statusRes });
               showToast('❌ Payment was cancelled or failed. Your order was not placed.');
               return;
             }
@@ -913,6 +927,17 @@ export default function App() {
 
               setActiveOrder(finalOrder);
               setTrackerTargetOrder(finalOrder);
+              logger.setOrderId(finalOrder.id || finalOrder.orderId);
+              logger.payment('PAYMENT_CONFIRMED', `Online payment verified for Order #${finalOrder.id || finalOrder.orderId} (₹${finalOrder.totalAmount})`, {
+                orderId: finalOrder.id || finalOrder.orderId,
+                totalAmount: finalOrder.totalAmount,
+                cashfreeOrderId: paymentReturnOrderId,
+              });
+              logger.order('ORDER_CONFIRMED', `Order #${finalOrder.id || finalOrder.orderId} confirmed and dispatched to kitchen`, {
+                orderId: finalOrder.id || finalOrder.orderId,
+                itemsCount: (finalOrder.items || []).length,
+                totalAmount: finalOrder.totalAmount,
+              });
               if (typeof localStorage !== 'undefined') {
                 localStorage.setItem('menza_active_order', JSON.stringify(finalOrder));
               }
@@ -1048,9 +1073,11 @@ export default function App() {
             encryptedRestId
           ) || 1;
 
-        logger.setRestaurantId(numericRestId);
-        logger.info('MENU', 'CATALOG_LOADED', `Menu loaded for restaurant ${numericRestId}`, {
+        const restName = resolvedCatalog?.restaurantName || `Restaurant #${numericRestId}`;
+        logger.setRestaurant(numericRestId, restName);
+        logger.info('MENU', 'CATALOG_LOADED', `Menu loaded for ${restName} (${(resolvedCatalog.items || []).length} items)`, {
           restaurantId: numericRestId,
+          restaurantName: restName,
           itemCount: (resolvedCatalog.items || []).length,
         });
 
@@ -1189,8 +1216,18 @@ export default function App() {
                 activeOrderPhoneLast4: storeProfile?.activeOrderPhoneLast4 || null,
               };
 
+              logger.setTable(resolvedTable.id, resolvedTable.tableName);
+              logger.info('SESSION', 'TABLE_RESOLVED', `Customer seated at ${resolvedTable.tableName || `Table ${resolvedTable.id}`}`, {
+                tableId: resolvedTable.id,
+                tableName: resolvedTable.tableName,
+                status: resolvedTable.status,
+                isCleaning: resolvedTable.isCleaning,
+                isOccupied: resolvedTable.isOccupied,
+                isReserved: resolvedTable.isReserved,
+              });
               setActiveTable(resolvedTable);
             } else {
+              logger.setTable(undefined, undefined);
               setActiveTable(null);
             }
           }),
@@ -1422,8 +1459,15 @@ export default function App() {
         } else {
           await refreshCart();
         }
+        logger.cart('ITEM_ADDED', `Added ${itemName} (Qty: ${quantity}, ₹${unitPrice}) to cart`, {
+          itemId,
+          itemName,
+          quantity,
+          unitPrice,
+        });
       } catch (err) {
         console.error('addToCart error:', err);
+        logger.error('CART', 'ITEM_ADD_FAILED', err, { itemId, itemName });
         await refreshCart();
       }
 
@@ -1747,6 +1791,14 @@ export default function App() {
 
         setActiveOrder(completePlacedOrder);
         setTrackerTargetOrder(completePlacedOrder);
+        logger.setOrderId(result.orderId);
+        logger.order('ORDER_PLACED', `Order #${result.orderId} placed successfully (₹${completePlacedOrder.totalAmount}, Mode: ${payload.paymentMode})`, {
+          orderId: result.orderId,
+          tableId: payload.tableId,
+          totalAmount: completePlacedOrder.totalAmount,
+          paymentMode: payload.paymentMode,
+          itemsCount: (completePlacedOrder.items || []).length,
+        });
 
         /*
          * Update order list
@@ -1777,11 +1829,16 @@ export default function App() {
         );
 
         return result;
-      } catch (err) {
+      } catch (err: any) {
         console.error(
           'PLACE ORDER ERROR:',
           err
         );
+        logger.error('ORDER', 'ORDER_PLACEMENT_FAILED', err, {
+          tableId: payload?.tableId,
+          totalAmount: payload?.totalAmount,
+          paymentMode: payload?.paymentMode,
+        });
 
         if (err?.isRateLimited) {
           showToast(

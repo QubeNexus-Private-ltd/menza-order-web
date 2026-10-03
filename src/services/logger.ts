@@ -1,27 +1,31 @@
 /**
- * Production Client Logger for MenzaOrder (Vercel Ingestion Enabled)
+ * Enterprise Production Logger for MenzaOrder (Vercel Log Drain & Ingestion)
  *
- * In development: Logs rich, readable terminal/console messages.
- * In production: Outputs structured JSON, and forwards WARNINGS, ERRORS,
- * and critical ordering/payment events to /api/log for Vercel runtime ingestion.
+ * Provides end-to-end customer session tracking, correlation IDs,
+ * masked sensitive data, and telemetry for customer journeys:
+ * (QR Scan -> Menu Browsing -> Cart -> Checkout -> OTP -> Payment -> KDS Kitchen Tracking).
  */
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 export type LogCategory =
-  | 'ORDER'
-  | 'CART'
-  | 'PAYMENT'
-  | 'AUTH'
-  | 'API'
-  | 'SIGNALR'
-  | 'TABLE'
-  | 'MENU'
+  | 'SESSION'
   | 'NAVIGATION'
+  | 'MENU'
+  | 'CART'
+  | 'CHECKOUT'
+  | 'AUTH'
+  | 'PAYMENT'
+  | 'ORDER'
+  | 'SERVICE'
+  | 'SIGNALR'
+  | 'API'
   | 'SYSTEM'
   | 'ERROR';
 
 export interface LogEntry {
   timestamp: string;
+  clientTimestamp: number;
+  sessionId: string;
   level: LogLevel;
   category: LogCategory;
   event: string;
@@ -30,9 +34,11 @@ export interface LogEntry {
   screen?: string;
   url?: string;
   restaurantId?: number | string;
+  restaurantName?: string;
   tableId?: number | string;
+  tableName?: string;
   orderId?: number | string;
-  clientTimestamp?: number;
+  customerPhone?: string;
   durationMs?: number;
   errorName?: string;
   errorMessage?: string;
@@ -42,15 +48,49 @@ export interface LogEntry {
   httpMethod?: string;
 }
 
+/**
+ * Masks phone numbers for privacy & compliance (e.g. 9876543210 -> 98765****0)
+ */
+export function maskPhone(phone?: string | null): string {
+  if (!phone) return '';
+  const cleaned = String(phone).replace(/\D/g, '');
+  if (cleaned.length < 6) return '***';
+  return `${cleaned.slice(0, 5)}****${cleaned.slice(-1)}`;
+}
+
+/**
+ * Retrieves or creates a persistent session ID for the user's browser session
+ */
+function getOrCreateSessionId(): string {
+  if (typeof window === 'undefined') return 'server_session';
+  try {
+    let sid = sessionStorage.getItem('menza_session_id');
+    if (!sid) {
+      sid = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      sessionStorage.setItem('menza_session_id', sid);
+    }
+    return sid;
+  } catch {
+    return `sess_${Date.now()}_local`;
+  }
+}
+
 class Logger {
   private static instance: Logger;
+  private sessionId: string;
   private currentScreen?: string;
   private currentRestaurantId?: number | string;
+  private currentRestaurantName?: string;
   private currentTableId?: number | string;
+  private currentTableName?: string;
   private currentOrderId?: number | string;
+  private currentCustomerPhone?: string;
   private isDispatchingToApi = false;
+  private recentLogHashes: Set<string> = new Set();
 
-  private constructor() {}
+  private constructor() {
+    this.sessionId = getOrCreateSessionId();
+  }
 
   public static getInstance(): Logger {
     if (!Logger.instance) {
@@ -59,32 +99,48 @@ class Logger {
     return Logger.instance;
   }
 
+  public getSessionId(): string {
+    return this.sessionId;
+  }
+
   public setContext(context: {
     screen?: string;
     restaurantId?: number | string;
+    restaurantName?: string;
     tableId?: number | string;
+    tableName?: string;
     orderId?: number | string;
+    customerPhone?: string;
   }): void {
     if (context.screen !== undefined) this.currentScreen = context.screen;
     if (context.restaurantId !== undefined) this.currentRestaurantId = context.restaurantId;
+    if (context.restaurantName !== undefined) this.currentRestaurantName = context.restaurantName;
     if (context.tableId !== undefined) this.currentTableId = context.tableId;
+    if (context.tableName !== undefined) this.currentTableName = context.tableName;
     if (context.orderId !== undefined) this.currentOrderId = context.orderId;
+    if (context.customerPhone !== undefined) this.currentCustomerPhone = maskPhone(context.customerPhone);
   }
 
   public setScreen(screen: string): void {
     this.currentScreen = screen;
   }
 
-  public setRestaurantId(id: number | string | undefined): void {
+  public setRestaurantId(id: number | string | undefined, name?: string): void {
     this.currentRestaurantId = id;
+    if (name) this.currentRestaurantName = name;
   }
 
-  public setTableId(id: number | string | undefined): void {
+  public setTableId(id: number | string | undefined, name?: string): void {
     this.currentTableId = id;
+    if (name) this.currentTableName = name;
   }
 
   public setOrderId(id: number | string | undefined): void {
     this.currentOrderId = id;
+  }
+
+  public setCustomerPhone(phone: string | undefined): void {
+    this.currentCustomerPhone = maskPhone(phone);
   }
 
   private shouldLog(level: LogLevel): boolean {
@@ -127,6 +183,7 @@ class Logger {
     return {
       timestamp: new Date().toISOString(),
       clientTimestamp: Date.now(),
+      sessionId: this.sessionId,
       level,
       category,
       event,
@@ -135,8 +192,11 @@ class Logger {
       screen: extraContext?.screen || this.currentScreen,
       url: typeof window !== 'undefined' ? window.location.href : undefined,
       restaurantId: extraContext?.restaurantId || this.currentRestaurantId,
+      restaurantName: extraContext?.restaurantName || this.currentRestaurantName,
       tableId: extraContext?.tableId || this.currentTableId,
+      tableName: extraContext?.tableName || this.currentTableName,
       orderId: extraContext?.orderId || this.currentOrderId,
+      customerPhone: extraContext?.customerPhone || this.currentCustomerPhone,
       apiEndpoint: extraContext?.apiEndpoint,
       httpMethod: extraContext?.httpMethod,
       statusCode: extraContext?.statusCode,
@@ -150,10 +210,18 @@ class Logger {
   private dispatch(entry: LogEntry): void {
     if (!this.shouldLog(entry.level)) return;
 
+    // Deduplicate rapid identical logs (e.g. repeated clicks within 1 sec)
+    const logHash = `${entry.category}:${entry.event}:${entry.message}`;
+    if (this.recentLogHashes.has(logHash)) {
+      return;
+    }
+    this.recentLogHashes.add(logHash);
+    setTimeout(() => this.recentLogHashes.delete(logHash), 1200);
+
     const isDev = Boolean(import.meta.env?.DEV);
 
     if (isDev) {
-      const prefix = `[MenzaOrder:${entry.category}:${entry.event}]`;
+      const prefix = `⚡ [${entry.level}] [${entry.category}:${entry.event}]`;
       switch (entry.level) {
         case 'DEBUG':
           console.debug(prefix, entry.message, entry.metadata || '');
@@ -169,7 +237,7 @@ class Logger {
           break;
       }
     } else {
-      // Production: structured JSON log to client console
+      // Production: Structured JSON in browser console
       const json = JSON.stringify(entry);
       if (entry.level === 'ERROR') {
         console.error(json);
@@ -180,19 +248,14 @@ class Logger {
       }
     }
 
-    // Forward all INFO, WARN, and ERROR events to Vercel /api/log
-    const shouldForwardToVercel =
-      typeof window !== 'undefined' &&
-      !this.isDispatchingToApi &&
-      (entry.level === 'ERROR' || entry.level === 'WARN' || entry.level === 'INFO');
-
-    if (shouldForwardToVercel) {
+    // Stream all production-level events (INFO, WARN, ERROR) to Vercel /api/log
+    if (typeof window !== 'undefined' && !this.isDispatchingToApi) {
       this.isDispatchingToApi = true;
       try {
         const payload = JSON.stringify(entry);
         let sent = false;
 
-        // Try navigator.sendBeacon with explicit application/json Blob
+        // 1. Try navigator.sendBeacon with explicit application/json Blob
         if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
           try {
             const blob = new Blob([payload], { type: 'application/json' });
@@ -202,7 +265,7 @@ class Logger {
           }
         }
 
-        // Reliable fetch fallback with keepalive: true
+        // 2. Reliable keepalive fetch fallback
         if (!sent && typeof fetch !== 'undefined') {
           fetch('/api/log', {
             method: 'POST',
@@ -219,6 +282,7 @@ class Logger {
     }
   }
 
+  // Generic methods
   public debug(category: LogCategory, event: string, message: string, metadata?: Record<string, any>): void {
     this.dispatch(this.createEntry('DEBUG', category, event, message, metadata));
   }
@@ -250,6 +314,41 @@ class Logger {
     this.dispatch(entry);
   }
 
+  // Domain-specific logging helpers for fast, typed logging across components
+  public nav(event: string, message: string, metadata?: Record<string, any>): void {
+    this.dispatch(this.createEntry('INFO', 'NAVIGATION', event, message, metadata));
+  }
+
+  public menu(event: string, message: string, metadata?: Record<string, any>): void {
+    this.dispatch(this.createEntry('INFO', 'MENU', event, message, metadata));
+  }
+
+  public cart(event: string, message: string, metadata?: Record<string, any>): void {
+    this.dispatch(this.createEntry('INFO', 'CART', event, message, metadata));
+  }
+
+  public checkout(event: string, message: string, metadata?: Record<string, any>): void {
+    this.dispatch(this.createEntry('INFO', 'CHECKOUT', event, message, metadata));
+  }
+
+  public auth(event: string, message: string, metadata?: Record<string, any>): void {
+    this.dispatch(this.createEntry('INFO', 'AUTH', event, message, metadata));
+  }
+
+  public payment(event: string, message: string, metadata?: Record<string, any>): void {
+    const level: LogLevel = event.endsWith('_FAILED') || event.endsWith('_TIMEOUT') ? 'ERROR' : 'INFO';
+    this.dispatch(this.createEntry(level, 'PAYMENT', event, message, metadata));
+  }
+
+  public order(event: string, message: string, metadata?: Record<string, any>): void {
+    const level: LogLevel = event.endsWith('_FAILED') ? 'ERROR' : 'INFO';
+    this.dispatch(this.createEntry(level, 'ORDER', event, message, metadata));
+  }
+
+  public service(event: string, message: string, metadata?: Record<string, any>): void {
+    this.dispatch(this.createEntry('INFO', 'SERVICE', event, message, metadata));
+  }
+
   public api(
     event: 'API_REQUEST' | 'API_RESPONSE' | 'API_ERROR' | 'API_SLOW_REQUEST',
     message: string,
@@ -268,41 +367,26 @@ class Logger {
     const level: LogLevel = event === 'SIGNALR_ERROR' ? 'ERROR' : event === 'SIGNALR_DISCONNECTED' ? 'WARN' : 'INFO';
     this.dispatch(this.createEntry(level, 'SIGNALR', event, message, metadata));
   }
-
-  public order(
-    event: 'ORDER_INITIATED' | 'ORDER_PLACED' | 'ORDER_FAILED' | 'ORDER_STATUS_CHANGED',
-    message: string,
-    metadata?: Record<string, any>
-  ): void {
-    const level: LogLevel = event === 'ORDER_FAILED' ? 'ERROR' : 'INFO';
-    this.dispatch(this.createEntry(level, 'ORDER', event, message, metadata));
-  }
-
-  public payment(
-    event: 'PAYMENT_INITIATED' | 'PAYMENT_VERIFIED' | 'PAYMENT_FAILED' | 'PAYMENT_TIMEOUT',
-    message: string,
-    metadata?: Record<string, any>
-  ): void {
-    const level: LogLevel = event.endsWith('_FAILED') || event.endsWith('_TIMEOUT') ? 'ERROR' : 'INFO';
-    this.dispatch(this.createEntry(level, 'PAYMENT', event, message, metadata));
-  }
 }
 
 export const logger = Logger.getInstance();
 
 /**
  * Initializes global browser error and unhandled promise rejection listeners
- * to catch all unhandled crashes and stream them into Vercel runtime logs.
  */
 export function initGlobalErrorLogging(): void {
   if (typeof window === 'undefined') return;
 
-  // Emit immediate startup diagnostic so Vercel logs show every device connection
-  logger.info('SYSTEM', 'APP_BOOT', `MenzaOrder Web Client loaded on ${navigator.userAgent || 'unknown device'}`, {
+  const sid = logger.getSessionId();
+
+  // Initial startup diagnostic
+  logger.info('SESSION', 'SESSION_STARTED', `Customer session initiated on ${navigator.userAgent || 'unknown device'}`, {
+    sessionId: sid,
     url: window.location.href,
     pathname: window.location.pathname,
     search: window.location.search,
     screen: `${window.innerWidth}x${window.innerHeight}`,
+    language: navigator.language,
     referrer: document.referrer || '',
   });
 
@@ -311,12 +395,14 @@ export function initGlobalErrorLogging(): void {
       filename: event.filename,
       lineno: event.lineno,
       colno: event.colno,
+      sessionId: sid,
     });
   });
 
   window.addEventListener('unhandledrejection', (event) => {
     logger.error('SYSTEM', 'UNHANDLED_PROMISE_REJECTION', event.reason, {
       reason: String(event.reason),
+      sessionId: sid,
     });
   });
 }

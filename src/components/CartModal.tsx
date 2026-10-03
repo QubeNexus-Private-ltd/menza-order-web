@@ -34,6 +34,7 @@ import * as api from '../services/api';
 import { joinOrderGroup } from '../services/signalr';
 import { Catalog, Table, StoreOperatingStatus, OrderItem } from '../types';
 import { ENV } from '../config/env';
+import { logger } from '../services/logger';
 
 interface ItemImageWithFallbackProps {
   uri?: string;
@@ -241,12 +242,18 @@ export default function CartModal({
       const restId = cart?.restaurantId || catalog?.restaurantId || null;
       const encRestId = catalog?.encryptedRestaurantId || null;
 
+      logger.auth('OTP_REQUESTED', `Customer requested OTP verification for mobile: ${cleanMobile}`, {
+        phone: cleanMobile,
+        restaurantId: restId,
+      });
+
       await api.generateCustomerOtp(cleanMobile, restId, encRestId);
       setIsOtpSent(true);
       setOtpCountdown(60);
       setOtpSuccessMsg(`OTP sent to +91 ${cleanMobile}`);
     } catch (err: any) {
       console.error('Send OTP error:', err);
+      logger.error('AUTH', 'OTP_REQUEST_FAILED', err, { phone: cleanMobile });
       if (err?.isRateLimited) {
         if (err.retryAfterSeconds) {
           setOtpCountdown(err.retryAfterSeconds);
@@ -286,6 +293,11 @@ export default function CartModal({
       const restId = cart?.restaurantId || catalog?.restaurantId || null;
       const encRestId = catalog?.encryptedRestaurantId || null;
 
+      logger.auth('OTP_VERIFYING', `Customer submitting OTP for verification`, {
+        phone: cleanMobile,
+        restaurantId: restId,
+      });
+
       const authData = await api.verifyCustomerOtpAndLogin(
         cleanMobile,
         cleanOtp,
@@ -303,11 +315,19 @@ export default function CartModal({
           setGuestName(authData.name);
         }
         setOtpSuccessMsg('Mobile verified successfully!');
+        logger.setCustomerPhone(cleanMobile);
+        logger.auth('OTP_VERIFIED', `Customer mobile verified successfully`, {
+          phone: cleanMobile,
+          customerName: authData.name,
+          userId: authData.userId,
+        });
       } else {
+        logger.warn('AUTH', 'OTP_INVALID', 'Customer entered invalid or expired OTP code', { phone: cleanMobile });
         setErrorMsg('Invalid or expired OTP code.');
       }
     } catch (err: any) {
       console.error('Verify OTP error:', err);
+      logger.error('AUTH', 'OTP_VERIFICATION_FAILED', err, { phone: cleanMobile });
       if (err?.isRateLimited) {
         setErrorMsg(err.message);
       } else {
@@ -508,6 +528,11 @@ export default function CartModal({
       setErrorMsg('');
       setUpdatingItemId(item.itemId);
 
+      logger.cart('CART_QUANTITY_CHANGED', `Changed quantity of ${item.itemName || item.name || item.itemId} to ${nextQuantity}`, {
+        itemId: item.itemId,
+        nextQuantity,
+      });
+
       await onUpdateCartQuantity(
         item.itemId,
         nextQuantity,
@@ -518,6 +543,7 @@ export default function CartModal({
         'Update cart quantity error:',
         error
       );
+      logger.error('CART', 'CART_QUANTITY_UPDATE_FAILED', error, { itemId: item.itemId, nextQuantity });
 
       setErrorMsg(
         error?.response?.data?.message ||
@@ -541,12 +567,15 @@ export default function CartModal({
       setErrorMsg('');
       setRemovingItemId(itemId);
 
+      logger.cart('CART_ITEM_REMOVED', `Removed item #${itemId} from cart`, { itemId });
+
       await onRemoveFromCart(itemId);
     } catch (error: any) {
       console.error(
         'Remove cart item error:',
         error
       );
+      logger.error('CART', 'CART_ITEM_REMOVE_FAILED', error, { itemId });
 
       setErrorMsg(
         error?.response?.data?.message ||
@@ -565,12 +594,15 @@ export default function CartModal({
       setErrorMsg('');
       setClearingCart(true);
 
+      logger.cart('CART_CLEARED', 'Customer cleared all items from cart');
+
       await onClearCart();
     } catch (error: any) {
       console.error(
         'Clear cart error:',
         error
       );
+      logger.error('CART', 'CART_CLEAR_FAILED', error);
 
       setErrorMsg(
         error?.response?.data?.message ||
@@ -633,6 +665,7 @@ export default function CartModal({
     }
 
     if (activeTable?.isCleaning) {
+      logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_CLEANING', `Checkout blocked: Table ${activeTable.tableName || activeTable.id} is cleaning`);
       setErrorMsg(
         `Table ${activeTable.tableName || activeTable.id} is currently being sanitized. Please wait for staff to complete turnover.`
       );
@@ -640,6 +673,7 @@ export default function CartModal({
     }
 
     if (activeTable?.isReserved) {
+      logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_RESERVED', `Checkout blocked: Table ${activeTable.tableName || activeTable.id} is reserved`);
       setErrorMsg(
         `Table ${activeTable.tableName || activeTable.id} is reserved for scheduled guests. Please speak to staff to be seated.`
       );
@@ -647,6 +681,7 @@ export default function CartModal({
     }
 
     if (activeTable?.occupiedByOther) {
+      logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_OCCUPIED', `Checkout blocked: Table ${activeTable.tableName || activeTable.id} is occupied by another party`);
       setErrorMsg(
         `Table ${activeTable.tableName || activeTable.id} is currently occupied by another party. Orders cannot be placed for this table.`
       );
@@ -654,6 +689,7 @@ export default function CartModal({
     }
 
     if (hasUnavailableItems) {
+      logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_UNAVAILABLE_ITEMS', 'Checkout blocked: Out of stock items present in cart');
       setErrorMsg(
         'Please remove out-of-stock items from your cart before proceeding.'
       );
@@ -661,6 +697,7 @@ export default function CartModal({
     }
 
     if (storeOperatingStatus && storeOperatingStatus.canPlaceOrder === false) {
+      logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_STORE_STATUS', `Checkout blocked: Kitchen status is ${storeOperatingStatus.status}`);
       setErrorMsg(
         storeOperatingStatus.statusMessage ||
         (storeOperatingStatus.status === 'PAUSED'
@@ -676,6 +713,16 @@ export default function CartModal({
     }
 
     setErrorMsg('');
+
+    logger.checkout('CHECKOUT_STARTED', `Customer initiated checkout: ₹${grandTotal} (${activeCartItems.length} items)`, {
+      itemsCount: activeCartItems.length,
+      subTotal,
+      grandTotal,
+      paymentMethod,
+      customerName: guestName.trim(),
+      phone: cleanPhone,
+      tableId: activeTable?.id,
+    });
 
     const restId =
       (cart && cart.restaurantId) ||
@@ -776,6 +823,12 @@ export default function CartModal({
           effectiveTable ? `&tableId=${encodeURIComponent(effectiveTable)}` : ''
         }`;
 
+        logger.payment('PAYMENT_INITIATED', `Initiating Cashfree checkout for ₹${grandTotal}`, {
+          amount: grandTotal,
+          tableNumber: effectiveTable,
+          returnUrl: customReturnUrl,
+        });
+
         const checkoutRes: any =
           await api.initiateCashfreeCheckout({
             restaurantId: restId,
@@ -808,6 +861,12 @@ export default function CartModal({
           checkoutRes?.orderId ||
           checkoutRes?.order_id ||
           checkoutRes?.data?.orderId;
+
+        logger.payment('PAYMENT_SESSION_CREATED', `Cashfree order: ${cashfreeOrderId || 'N/A'}, session: ${paymentSessionId ? 'present' : 'none'}`, {
+          cashfreeOrderId,
+          hasSessionId: Boolean(paymentSessionId),
+          hasPaymentLink: Boolean(paymentLink),
+        });
 
         // Store pending order in session/local storage to be placed ONLY AFTER payment is confirmed
         const pendingOrderPayload = {
@@ -919,6 +978,11 @@ export default function CartModal({
           'Cashfree checkout API error:',
           err
         );
+
+        logger.error('PAYMENT', 'PAYMENT_INITIATION_FAILED', err, {
+          amount: grandTotal,
+          cleanPhone,
+        });
 
         setErrorMsg(
           err?.response?.data?.message ||

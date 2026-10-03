@@ -56,16 +56,24 @@ export default async function handler(req, res) {
         category = 'ORDER_WEB',
         event = 'CLIENT_EVENT',
         message = 'No message provided',
+        sessionId = 'unknown_session',
+        restaurantId,
+        restaurantName,
+        tableId,
+        tableName,
+        orderId,
+        customerPhone,
         metadata,
         errorName,
         errorMessage,
         errorStack,
         screen,
         url,
-        restaurantId,
-        tableId,
-        orderId,
         clientTimestamp,
+        durationMs,
+        apiEndpoint,
+        httpMethod,
+        statusCode,
       } = body;
 
       const structuredLog = {
@@ -74,11 +82,34 @@ export default async function handler(req, res) {
         environment: process.env.VERCEL_ENV || process.env.NODE_ENV || 'production',
         vercelRegion: process.env.VERCEL_REGION || 'local',
         clientReported: true,
+        sessionId,
         level,
         category,
         event,
         message,
+        restaurant: {
+          id: restaurantId || null,
+          name: restaurantName || null,
+        },
+        table: {
+          id: tableId || null,
+          name: tableName || null,
+        },
+        order: {
+          id: orderId || null,
+        },
+        customer: {
+          phone: customerPhone || null,
+        },
         metadata: metadata || undefined,
+        api: apiEndpoint
+          ? {
+              endpoint: apiEndpoint,
+              method: httpMethod,
+              statusCode,
+              durationMs,
+            }
+          : undefined,
         error:
           errorName || errorMessage || errorStack
             ? {
@@ -90,9 +121,6 @@ export default async function handler(req, res) {
         context: {
           screen,
           url,
-          restaurantId,
-          tableId,
-          orderId,
           clientTimestamp,
           clientIp: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown',
           userAgent: req.headers['user-agent'] || 'unknown',
@@ -100,7 +128,9 @@ export default async function handler(req, res) {
       };
 
       const serialized = JSON.stringify(structuredLog);
-      const summary = `⚡ [${level}] [${category}:${event}] ${message} (RestId: ${restaurantId || 'N/A'}, TableId: ${tableId || 'N/A'})`;
+      const restLabel = restaurantName ? `${restaurantName} (#${restaurantId})` : (restaurantId ? `#${restaurantId}` : 'N/A');
+      const tableLabel = tableName ? `${tableName}` : (tableId ? `#${tableId}` : 'N/A');
+      const summary = `⚡ [${level}] [${category}:${event}] ${message} | Session: ${sessionId} | Rest: ${restLabel} | Table: ${tableLabel}`;
 
       if (level === 'ERROR') {
         console.error(`${summary}\n${serialized}`);
@@ -138,22 +168,37 @@ export default async function handler(req, res) {
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
+    const rawText = await req.text().catch(() => '');
+    let body = {};
+    try {
+      body = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      body = {};
+    }
+
     const {
-      level = 'ERROR',
+      level = 'INFO',
       category = 'ORDER_WEB',
       event = 'CLIENT_EVENT',
       message = 'No message provided',
+      sessionId = 'unknown_session',
+      restaurantId,
+      restaurantName,
+      tableId,
+      tableName,
+      orderId,
+      customerPhone,
       metadata,
       errorName,
       errorMessage,
       errorStack,
       screen,
       url,
-      restaurantId,
-      tableId,
-      orderId,
       clientTimestamp,
+      durationMs,
+      apiEndpoint,
+      httpMethod,
+      statusCode,
     } = body;
 
     const structuredLog = {
@@ -162,11 +207,34 @@ export default async function handler(req, res) {
       environment: process.env.VERCEL_ENV || 'production',
       vercelRegion: process.env.VERCEL_REGION || 'local',
       clientReported: true,
+      sessionId,
       level,
       category,
       event,
       message,
+      restaurant: {
+        id: restaurantId || null,
+        name: restaurantName || null,
+      },
+      table: {
+        id: tableId || null,
+        name: tableName || null,
+      },
+      order: {
+        id: orderId || null,
+      },
+      customer: {
+        phone: customerPhone || null,
+      },
       metadata: metadata || undefined,
+      api: apiEndpoint
+        ? {
+            endpoint: apiEndpoint,
+            method: httpMethod,
+            statusCode,
+            durationMs,
+          }
+        : undefined,
       error:
         errorName || errorMessage || errorStack
           ? {
@@ -178,9 +246,6 @@ export default async function handler(req, res) {
       context: {
         screen,
         url,
-        restaurantId,
-        tableId,
-        orderId,
         clientTimestamp,
         clientIp: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown',
         userAgent: req.headers.get('user-agent') || 'unknown',
@@ -188,13 +253,16 @@ export default async function handler(req, res) {
     };
 
     const serialized = JSON.stringify(structuredLog);
+    const restLabel = restaurantName ? `${restaurantName} (#${restaurantId})` : (restaurantId ? `#${restaurantId}` : 'N/A');
+    const tableLabel = tableName ? `${tableName}` : (tableId ? `#${tableId}` : 'N/A');
+    const summary = `⚡ [${level}] [${category}:${event}] ${message} | Session: ${sessionId} | Rest: ${restLabel} | Table: ${tableLabel}`;
 
     if (level === 'ERROR') {
-      console.error(serialized);
+      console.error(`${summary}\n${serialized}`);
     } else if (level === 'WARN') {
-      console.warn(serialized);
+      console.warn(`${summary}\n${serialized}`);
     } else {
-      console.log(serialized);
+      console.log(`${summary}\n${serialized}`);
     }
 
     return new Response(JSON.stringify({ success: true }), {

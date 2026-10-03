@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { checkRateLimit } from '../services/rateLimiter';
 import { Catalog, Table } from '../types';
+import { logger } from '../services/logger';
 
 export interface ServiceOption {
   id: string;
@@ -168,6 +169,12 @@ export default function CallWaiterModal({
 
     setSubmitting(true);
     setErrorMessage('');
+    logger.service('SERVICE_REQUESTED', `Customer requested ${selectedOption?.title || selectedType} at table ${tableName || activeTable.id}`, {
+      serviceType: selectedType,
+      tableId: activeTable.id,
+      tableName,
+      note: customNote.trim(),
+    });
 
     try {
       let result: any = null;
@@ -176,6 +183,11 @@ export default function CallWaiterModal({
       } else if (typeof onCallWaiter === 'function') {
         result = await onCallWaiter(selectedType, customNote.trim());
       }
+
+      logger.service('SERVICE_DISPATCHED', `Service request sent successfully: ${selectedType}`, {
+        activeWaiterCount: result?.activeWaiterCount,
+        fallbackToCounter: result?.fallbackToCounter,
+      });
 
       setSuccessInfo({
         message: result?.message || `Help is on the way to ${tableName || 'your table'}!`,
@@ -191,6 +203,10 @@ export default function CallWaiterModal({
       }, 3000);
     } catch (err: any) {
       console.error('Call waiter error:', err);
+      logger.error('SERVICE', 'SERVICE_REQUEST_FAILED', err, {
+        serviceType: selectedType,
+        tableId: activeTable?.id,
+      });
       if (err?.isRateLimited) {
         setErrorMessage(err.message || 'Rate limit active. Please wait a moment.');
       } else {
