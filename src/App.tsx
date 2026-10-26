@@ -26,13 +26,42 @@ import QrScannerModal from './components/QrScannerModal';
 import RestaurantQrModal from './components/RestaurantQrModal';
 import CallWaiterModal from './components/CallWaiterModal';
 import LandingPage from './components/LandingPage';
+import OrderTrackingPage from './components/OrderTrackingPage';
 
 import * as api from './services/api';
 import * as signalrService from './services/signalr';
 import { logger } from './services/logger';
 
+function getTrackOrderIdFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const path = window.location.pathname;
+  const searchParams = new URLSearchParams(window.location.search);
+
+  // 1. Path match: /track/123 or /order/track/123
+  const match = path.match(/\/(?:order\/)?track\/([^/?#]+)/i);
+  if (match && match[1]) {
+    const val = decodeURIComponent(match[1]).trim();
+    if (val && !['undefined', 'null'].includes(val.toLowerCase())) {
+      return val;
+    }
+  }
+
+  // 2. Query param: ?trackOrderId=123, ?track=123, ?orderId=123 (if not returning from gateway checkout)
+  const isPaymentGatewayReturn = searchParams.has('order_token') || searchParams.has('cf_id');
+  if (!isPaymentGatewayReturn) {
+    const qId = searchParams.get('trackOrderId') || searchParams.get('track') || searchParams.get('orderId');
+    if (qId && qId.trim() && !['undefined', 'null'].includes(qId.trim().toLowerCase())) {
+      return qId.trim();
+    }
+  }
+
+  return null;
+}
+
 export default function App() {
-  const [mode, setMode] = useState<'customer' | 'staff' | 'landing'>(() => {
+  const [trackedOrderId, setTrackedOrderId] = useState<string | null>(() => getTrackOrderIdFromUrl());
+
+  const [mode, setMode] = useState<'customer' | 'staff' | 'landing' | 'track'>(() => {
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
       const path = window.location.pathname.toLowerCase();
@@ -40,6 +69,12 @@ export default function App() {
       // Explicit staff route
       if (path === '/staff' || searchParams.get('staff') === 'true' || searchParams.get('view') === 'staff') {
         return 'staff';
+      }
+
+      // Check if user came via track link: /track/:orderId or ?trackOrderId= or ?orderId=
+      const initialTrackId = getTrackOrderIdFromUrl();
+      if (initialTrackId) {
+        return 'track';
       }
 
       // Check if user came via a QR code link that provides a restaurant context candidate
@@ -292,7 +327,8 @@ export default function App() {
       // 1. Update activeOrder if it's the active one or if it matches current table
       setActiveOrderState((prev) => {
         if (!prev) {
-          if (activeTable && data.tableId && Number(data.tableId) === Number(activeTable)) {
+          const activeTid = Number(activeTable?.id ?? activeTable?.tableId ?? activeTable);
+          if (activeTid && data.tableId && Number(data.tableId) === activeTid) {
             api.getOrder(changedOrderId).then((fresh) => {
               if (fresh) setActiveOrder(fresh);
             });
@@ -593,6 +629,14 @@ export default function App() {
       async () => {
         // If no restaurant parameter exists in URL (TYPE C: e.g. /, /random, ?foo=bar, ?tableId=T12)
         if (!encRestId && !urlRestId) {
+          const trackId = getTrackOrderIdFromUrl();
+          if (mode === 'track' || trackId) {
+            setTrackedOrderId(trackId);
+            setMode('track');
+            setLoading(false);
+            return;
+          }
+
           logger.info('NAVIGATION', 'LANDING_PAGE_ACCESSED', 'Customer opened home page without restaurant QR', {
             path: window.location.pathname,
             search: window.location.search,
@@ -1303,6 +1347,31 @@ export default function App() {
       }
     };
 
+  const handleExploreMenuFromTracking = useCallback(
+    async (restaurantId: number, tableId: number | null = null) => {
+      if (!restaurantId || restaurantId <= 0) return;
+      try {
+        setLoading(true);
+        const encRest = api.encryptRestaurantId(restaurantId);
+        const encTable = tableId && tableId > 0 ? String(tableId) : null;
+        if (typeof window !== 'undefined') {
+          if (encTable) {
+            window.history.pushState({}, '', `/dinein/${encodeURIComponent(encRest)}/${encodeURIComponent(encTable)}`);
+          } else {
+            window.history.pushState({}, '', `/?r=${encodeURIComponent(encRest)}`);
+          }
+        }
+        await loadMenuViaEncryptedEndpoint(encRest, encTable);
+        setMode('customer');
+      } catch (e) {
+        console.warn('Failed to explore menu from tracking:', e);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [loadMenuViaEncryptedEndpoint]
+  );
+
   const handleEnterRestaurantCode = useCallback(
     async (code: string) => {
       if (!code) return;
@@ -1896,6 +1965,7 @@ export default function App() {
 
         setActiveOrder(completePlacedOrder);
         setTrackerTargetOrder(completePlacedOrder);
+        signalrService.joinOrderGroup(result.orderId);
         logger.setOrderId(result.orderId);
         logger.order('ORDER_PLACED', `Order #${result.orderId} placed successfully (₹${completePlacedOrder.totalAmount}, Mode: ${payload.paymentMode})`, {
           orderId: result.orderId,
@@ -2419,6 +2489,12 @@ export default function App() {
           onOpenScanner={() => setScannerOpen(true)}
           isInvalidRestaurant={isInvalidRestaurant}
         />
+      ) : mode === 'track' && trackedOrderId ? (
+        <OrderTrackingPage
+          orderId={trackedOrderId}
+          onExploreMenu={handleExploreMenuFromTracking}
+          onScanQr={() => setScannerOpen(true)}
+        />
       ) : (
         <>
           <Header
@@ -2458,9 +2534,6 @@ export default function App() {
             loading={loading}
             storeOperatingStatus={storeOperatingStatus}
             activeTable={effectiveTable}
-            openQrModal={() =>
-              setQrModalOpen(true)
-            }
             openCallWaiter={() =>
               handleOpenCallWaiter('CALL_WAITER')
             }
@@ -2482,9 +2555,6 @@ export default function App() {
               openOrderTracker={handleOpenOrderTracker}
               openScanner={() =>
                 setScannerOpen(true)
-              }
-              openQrModal={() =>
-                setQrModalOpen(true)
               }
               openCallWaiter={
                 handleOpenCallWaiter
@@ -2681,13 +2751,13 @@ const styles = StyleSheet.create({
   },
 
   toastReady: {
-    backgroundColor: '#7c3aed',
-    shadowColor: '#7c3aed',
+    backgroundColor: '#15803d',
+    shadowColor: '#15803d',
   },
 
   toastCooking: {
-    backgroundColor: '#ea580c',
-    shadowColor: '#ea580c',
+    backgroundColor: '#15803d',
+    shadowColor: '#15803d',
   },
 
   toastServed: {

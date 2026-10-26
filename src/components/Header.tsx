@@ -4,7 +4,6 @@ import {
   ShoppingBag as CartIcon,
   ClipboardList as OrderIcon,
   Store,
-  QrCode,
   MapPin,
   Bell,
 } from 'lucide-react';
@@ -124,7 +123,6 @@ export interface HeaderProps {
   cartCount?: number;
   openCart?: () => void;
   openOrderTracker?: (targetOrder?: any) => void;
-  openQrModal?: () => void;
   openCallWaiter?: () => void;
   activeOrder?: Order | null;
   activeTable?: Table | null;
@@ -142,7 +140,6 @@ export default function Header({
   cartCount = 0,
   openCart,
   openOrderTracker,
-  openQrModal,
   openCallWaiter,
   activeOrder,
   activeTable,
@@ -200,12 +197,6 @@ export default function Header({
   ]);
 
   const primaryImage = candidateImages[0] || '';
-
-  const handleQrPress = React.useCallback(() => {
-    if (typeof openQrModal === 'function') {
-      openQrModal();
-    }
-  }, [openQrModal]);
 
   const hasTable = React.useMemo(() => {
     if (!activeTable) return false;
@@ -399,7 +390,7 @@ export default function Header({
         )}
 
         {/* =========================================================
-            ACTION CONTROLS: QR, Call Waiter, Orders, Cart
+            ACTION CONTROLS: Call Waiter, Orders, Cart
             (Icon-only on mobile, labeled on tablet/desktop)
            ========================================================= */}
         {loading ? (
@@ -410,30 +401,6 @@ export default function Header({
           </View>
         ) : (
           <View style={[styles.actionsRow, isMobile && styles.actionsRowMobile]}>
-            {/* QR Scanner / Modal Button */}
-            {typeof openQrModal === 'function' && (
-              <Pressable
-                className="header-action-btn"
-                style={({ pressed }) => [
-                  styles.qrButton,
-                  isMobile && styles.iconBtnMobile,
-                  pressed && styles.qrButtonPressed,
-                ]}
-                onPress={handleQrPress}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityRole="button"
-                accessibilityLabel="View QR Code"
-                title="View QR Code"
-              >
-                <QrCode size={isMobile ? 16 : 15} color="#0F172A" strokeWidth={2.2} />
-                {!isMobile && (
-                  <Text style={styles.qrButtonText}>
-                    {isDesktop ? 'QR Code' : 'QR'}
-                  </Text>
-                )}
-              </Pressable>
-            )}
-
             {/* Call Waiter Button (Shown when active table exists) */}
             {hasTable && typeof openCallWaiter === 'function' && (
               <Pressable
@@ -477,11 +444,28 @@ export default function Header({
                 {!isMobile && (
                   <>
                     <Text style={styles.orderButtonText}>Orders</Text>
-                    {activeOrder && <View style={styles.orderDot} />}
+                    {activeOrder && (
+                    <View
+                      style={[
+                        styles.orderDot,
+                        ['confirmed', 'preparing', 'cooking', 'in kitchen', 'kitchen', 'ready', 'served', 'delivered', 'completed', 'settled'].includes(
+                          String(activeOrder.orderStatus || activeOrder.status || activeOrder.kitchenStatus || '').toLowerCase()
+                        ) && styles.orderDotGreen,
+                      ]}
+                    />
+                  )}
                   </>
                 )}
                 {isMobile && activeOrder && (
-                  <View style={styles.orderDotMobile} className="pulse-order-dot" />
+                  <View
+                    style={[
+                      styles.orderDotMobile,
+                      ['confirmed', 'preparing', 'cooking', 'in kitchen', 'kitchen', 'ready', 'served', 'delivered', 'completed', 'settled'].includes(
+                        String(activeOrder.orderStatus || activeOrder.status || activeOrder.kitchenStatus || '').toLowerCase()
+                      ) && styles.orderDotGreen,
+                    ]}
+                    className="pulse-order-dot"
+                  />
                 )}
               </Pressable>
             )}
@@ -700,28 +684,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  qrButton: {
-    height: 36,
-    minWidth: 50,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-    borderRadius: 18,
-    backgroundColor: '#F1F5F9',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    gap: 4,
-  },
-  qrButtonPressed: {
-    backgroundColor: '#E2E8F0',
-    transform: [{ scale: 0.96 }],
-  },
-  qrButtonText: {
-    color: '#0F172A',
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
   bellButton: {
     height: 36,
     minWidth: 52,
@@ -773,6 +735,10 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#D33401',
     marginLeft: 1,
+  },
+  orderDotGreen: {
+    backgroundColor: '#10b981',
+    borderColor: '#ffffff',
   },
   orderDotMobile: {
     position: 'absolute',

@@ -150,24 +150,24 @@ const getOrderStatusInfo = (ord, isKitchenActiveOverride = null, catalog = null,
       rawStatus = 'Cancelled';
     }
 
-    // Business Rule: For Cash QR orders, status will only be Confirmed AFTER Payment to cashier settlement.
-    if (!isOnline && !isPaid) {
-      if (rawStatus === 'Confirmed' || rawStatus === 'Preparing') {
-        rawStatus = 'Pending';
-      }
-    }
+    // Cash QR orders can be Confirmed and Preparing once approved by POS cashier
 
     const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
 
-    const kitchenBadgeByStatus = {
-      Confirmed: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
-      Preparing: { badgeColor: '#ea580c', badgeBg: '#ffedd5', label: 'In Kitchen' },
-      Ready: { badgeColor: '#7c3aed', badgeBg: '#ede9fe', label: 'Ready to Serve' },
-      Served: {
-        badgeColor: '#15803d',
-        badgeBg: '#dcfce7',
-        label: isDineInOrder(ord) ? 'Served to Table' : 'Picked Up',
-      },
+    const greenBadge = (lbl: string) => ({
+      badgeColor: '#15803d',
+      badgeBg: '#dcfce7',
+      label: lbl,
+    });
+
+    const kitchenBadgeByStatus: Record<string, { badgeColor: string; badgeBg: string; label: string }> = {
+      Confirmed: greenBadge('Confirmed'),
+      Preparing: greenBadge('In Kitchen'),
+      Ready: greenBadge('Ready to Serve'),
+      Served: greenBadge(isDineInOrder(ord) ? 'Served to Table' : 'Picked Up'),
+      Delivered: greenBadge(isDineInOrder(ord) ? 'Served to Table' : 'Delivered'),
+      Completed: greenBadge('Completed'),
+      Settled: greenBadge('Completed'),
       Cancelled: { badgeColor: '#dc2626', badgeBg: '#fee2e2', label: 'Cancelled' },
     };
 
@@ -203,29 +203,24 @@ const getOrderStatusInfo = (ord, isKitchenActiveOverride = null, catalog = null,
         ? orderStatusCandidates[0]
         : 'Pending';
 
-    // Business Rule: For Cash QR orders, status will only be Confirmed AFTER Payment to cashier settlement.
-    if (!isOnline && !isPaid) {
-      if (rawStatus === 'Confirmed') {
-        rawStatus = 'Pending';
-      }
-    }
+    // Cash QR orders can be Confirmed once approved by POS cashier
 
     const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
 
-    const orderBadgeByStatus = {
-      Confirmed: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
-      Preparing: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
-      Ready: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
-      Served: {
-        badgeColor: '#15803d',
-        badgeBg: '#dcfce7',
-        label: isDineInOrder(ord) ? 'Completed' : 'Picked Up',
-      },
-      Delivered: {
-        badgeColor: '#15803d',
-        badgeBg: '#dcfce7',
-        label: 'Completed',
-      },
+    const greenOrderBadge = (lbl: string) => ({
+      badgeColor: '#15803d',
+      badgeBg: '#dcfce7',
+      label: lbl,
+    });
+
+    const orderBadgeByStatus: Record<string, { badgeColor: string; badgeBg: string; label: string }> = {
+      Confirmed: greenOrderBadge('Confirmed'),
+      Preparing: greenOrderBadge('Confirmed'),
+      Ready: greenOrderBadge('Confirmed'),
+      Served: greenOrderBadge(isDineInOrder(ord) ? 'Completed' : 'Picked Up'),
+      Delivered: greenOrderBadge('Completed'),
+      Completed: greenOrderBadge('Completed'),
+      Settled: greenOrderBadge('Completed'),
       Cancelled: { badgeColor: '#dc2626', badgeBg: '#fee2e2', label: 'Cancelled' },
     };
 
@@ -670,9 +665,7 @@ export default function OrderTrackerModal({
       cancelled = true;
       if (interval) clearInterval(interval);
       unsubscribeSignalR();
-      if (activeOrderId) {
-        signalrService.leaveOrderGroup(activeOrderId);
-      }
+      // Keep active order subscribed so customer receives live alerts even when modal is minimized
     };
   }, [
     visible,
@@ -1259,7 +1252,7 @@ export default function OrderTrackerModal({
             </View>
 
             <View style={styles.statusMessageCallout}>
-              <Utensils size={18} color="#0d9488" />
+              <Utensils size={18} color="#15803d" />
               <View style={styles.statusMessageTextWrap}>
                 <Text style={styles.statusMessageTitle}>
                   {normalizedStatus === 'Served' || normalizedStatus === 'Delivered'
@@ -1282,7 +1275,7 @@ export default function OrderTrackerModal({
           <View style={styles.card}>
             <View style={[styles.sectionHeader, { justifyContent: 'space-between', alignItems: 'center' }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <ChefHat size={16} color="#D33401" />
+                <ChefHat size={16} color="#15803d" />
                 <Text style={styles.cardTitle}>Live Kitchen Progress</Text>
               </View>
               {!prepCountdown.isFinished && (
@@ -3219,8 +3212,13 @@ const styles = StyleSheet.create({
   },
 
   stepCircleCurrent: {
-    backgroundColor: '#D33401',
-    borderColor: '#D33401',
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 3,
   },
 
   stepNumText: {
@@ -3243,7 +3241,7 @@ const styles = StyleSheet.create({
   },
 
   stepLabelTextCurrent: {
-    color: '#D33401',
+    color: '#15803d',
     fontWeight: '800',
   },
 

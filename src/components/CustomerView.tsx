@@ -224,7 +224,6 @@ export interface CustomerViewProps {
   activeOrder?: Order | null;
   openOrderTracker?: (order?: Order | any) => void;
   openScanner?: () => void;
-  openQrModal?: () => void;
   cartItems?: OrderItem[];
   openCart?: () => void;
   onAddToCart?: (itemId: number | string, quantity: number, item?: MenuItem) => void | Promise<any>;
@@ -244,7 +243,6 @@ export default function CustomerView({
   activeOrder,
   openOrderTracker,
   openScanner,
-  openQrModal,
   cartItems = [],
   openCart,
   onAddToCart,
@@ -2487,10 +2485,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#0284c7',
   },
   liveOrderBarCooking: {
-    backgroundColor: '#ea580c',
+    backgroundColor: '#15803d',
   },
   liveOrderBarReady: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: '#15803d',
   },
   liveOrderBarServed: {
     backgroundColor: '#15803d',

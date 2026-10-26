@@ -512,9 +512,18 @@ export default function StaffView({
                         </View>
 
                         <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                          <View style={styles.orderStatusBadge}>
-                            <Text style={styles.orderStatusBadgeText}>{ord.orderStatus}</Text>
-                          </View>
+                          {(() => {
+                            const isDoneOrProgress = ['confirmed', 'preparing', 'cooking', 'in kitchen', 'kitchen', 'ready', 'served', 'delivered', 'completed', 'settled'].includes(
+                              String(ord.orderStatus || '').toLowerCase()
+                            );
+                            return (
+                              <View style={[styles.orderStatusBadge, isDoneOrProgress && styles.orderStatusBadgeGreen]}>
+                                <Text style={[styles.orderStatusBadgeText, isDoneOrProgress && styles.orderStatusBadgeTextGreen]}>
+                                  {ord.orderStatus}
+                                </Text>
+                              </View>
+                            );
+                          })()}
                           <View style={{
                             paddingHorizontal: 6,
                             paddingVertical: 2,
@@ -1407,6 +1416,13 @@ const styles = StyleSheet.create({
     color: '#f59e0b',
     fontSize: 11,
     fontWeight: '700',
+  },
+  orderStatusBadgeGreen: {
+    backgroundColor: 'rgba(21, 128, 61, 0.15)',
+    borderColor: '#15803d',
+  },
+  orderStatusBadgeTextGreen: {
+    color: '#15803d',
   },
   orderItemsBox: {
     backgroundColor: '#0f172a',

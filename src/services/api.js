@@ -2169,9 +2169,9 @@ export const normalizeOrder = (
   const deliveryType = order.deliveryType || (order.tableId ? 'Dine-In' : 'Takeaway / Counter');
   let orderStatus = order.orderStatus || order.status || (isOnline ? 'Confirmed' : 'Placed');
 
-  // Business Rule: For Cash QR orders, order status will only be Confirmed AFTER Payment to cashier settlement.
-  if (!isOnline && !isSettled && (orderStatus === 'Confirmed' || !orderStatus)) {
-    orderStatus = 'Placed';
+  // If order status is missing, default based on payment
+  if (!orderStatus) {
+    orderStatus = isOnline ? 'Confirmed' : 'Placed';
   }
 
   const requiresCashierConfirmation = !isOnline && !isSettled && (orderStatus === 'Placed' || orderStatus === 'Pending');
@@ -2190,10 +2190,7 @@ export const normalizeOrder = (
     orderStatus,
 
     kitchenStatus: (() => {
-      // For unsettled/unpaid cash orders, kitchen cannot be Confirmed before cashier settlement
-      if (!isOnline && !isSettled) {
-        return 'Pending';
-      }
+      // Kitchen status resolves to server status or order status
 
       const rawKitchen =
         order.kitchenStatus ||
