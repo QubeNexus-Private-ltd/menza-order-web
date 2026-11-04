@@ -1372,28 +1372,6 @@ export default function App() {
     [loadMenuViaEncryptedEndpoint]
   );
 
-  const handleEnterRestaurantCode = useCallback(
-    async (code: string) => {
-      if (!code) return;
-      let targetCode = code.trim();
-      let tableParam: any = null;
-      try {
-        if (targetCode.includes('http://') || targetCode.includes('https://') || targetCode.includes('?')) {
-          const urlStr = targetCode.startsWith('http') ? targetCode : `https://dummy.com/${targetCode}`;
-          const u = new URL(urlStr);
-          targetCode = u.searchParams.get('r') || u.searchParams.get('encRestId') || targetCode;
-          tableParam = u.searchParams.get('tableId') || u.searchParams.get('table') || null;
-        }
-      } catch {}
-
-      if (tableParam && typeof localStorage !== 'undefined') {
-        localStorage.setItem('menza_last_table_id', String(tableParam));
-      }
-
-      await loadMenuViaEncryptedEndpoint(targetCode, tableParam);
-    },
-    []
-  );
 
   /* =========================
      QR

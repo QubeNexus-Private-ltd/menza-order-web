@@ -145,6 +145,9 @@ export interface StoreOperatingStatus {
   status?: string;
   remainingPauseMinutes?: number;
   isLiveKitchenStatusEnabled?: boolean;
+  requiresCashierConfirmation?: boolean;
+  isOnlinePaymentEnabled?: boolean;
+  isPayAtCounterEnabled?: boolean;
   [key: string]: any;
 }
 

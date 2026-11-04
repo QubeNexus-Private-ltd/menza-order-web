@@ -310,22 +310,22 @@ export default function CartModal({
 
   const isPostpaidTable = Boolean(activeTable && String(activeTable.dineInPaymentMode || '').toUpperCase() === 'POSTPAID');
   const isPrepaidTable = !isPostpaidTable && Boolean(isTableOrder || isDynamicQr);
-  const isPayAtCounterOnly = isTableOrder || isDynamicQr;
+  // Store profile ordering is locked to Pay at Counter with Cashier confirmation required
+  const isPayAtCounterOnly = true;
+  const isOnlinePaymentVisible = false;
 
   const [guestName, setGuestName] = useState<string>('');
   const [mobileNumber, setMobileNumber] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
-  const [orderTypeId, setOrderTypeId] = useState<number>(1);
-  const [paymentMethod, setPaymentMethod] = useState<string>(() => (isTableOrder || isDynamicQr) ? 'payatcounter' : 'cashfree');
+  const [orderTypeId, setOrderTypeId] = useState<number>(() => (isTableOrder || isDynamicQr || activeTable) ? 1 : 2);
+  const [paymentMethod, setPaymentMethod] = useState<string>('payatcounter');
 
   useEffect(() => {
-    if (isTableOrder || isDynamicQr) {
-      setPaymentMethod('payatcounter');
+    setPaymentMethod('payatcounter');
+    if (isTableOrder || isDynamicQr || activeTable) {
       setOrderTypeId(1);
-    } else {
-      setPaymentMethod('cashfree');
     }
-  }, [isTableOrder, isDynamicQr, visible]);
+  }, [isTableOrder, isDynamicQr, activeTable, visible]);
 
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [processingPayment, setProcessingPayment] = useState<boolean>(false);
@@ -947,36 +947,21 @@ export default function CartModal({
       remarks: remarks.trim(),
       isHomeDelivery: false,
       orderTypeId: isThisTableOrder ? 1 : orderTypeId,
-      tableId: effectiveTableId,
-      tableNumber: effectiveTableName,
-      encryptedTableId: activeTable?.encryptedTableId || effectiveTableToken || null,
-      tableSessionToken: effectiveTableToken,
+      tableId: isThisTableOrder ? effectiveTableId : null,
+      tableNumber: isThisTableOrder ? effectiveTableName : null,
+      encryptedTableId: isThisTableOrder ? (activeTable?.encryptedTableId || effectiveTableToken || null) : null,
+      tableSessionToken: isThisTableOrder ? effectiveTableToken : null,
       items: orderItems,
       deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
-      paymentMode:
-        (paymentMethod === 'cashfree' && !isThisTableOrder)
-          ? 'ONLINE'
-          : 'CASH',
-      paymentType:
-        (paymentMethod === 'cashfree' && !isThisTableOrder)
-          ? 'ONLINE_CASHFREE'
-          : 'COUNTER_CASH',
-      paymentMethod:
-        (paymentMethod === 'cashfree' && !isThisTableOrder)
-          ? 'CASHFREE_SPLIT'
-          : 'COUNTER_CASH',
-      paymentStatus:
-        (paymentMethod === 'cashfree' && !isThisTableOrder)
-          ? 'Paid'
-          : 'Pending',
-      orderStatus:
-        (paymentMethod === 'cashfree' && !isThisTableOrder)
-          ? 'Confirmed'
-          : 'Placed',
-      isOnline: paymentMethod === 'cashfree' && !isThisTableOrder,
-      isSettled: paymentMethod === 'cashfree' && !isThisTableOrder,
-      requiresCashierConfirmation: isThisTableOrder || paymentMethod !== 'cashfree',
-      source: 'QR_DINEIN',
+      paymentMode: 'CASH',
+      paymentType: 'COUNTER_CASH',
+      paymentMethod: 'COUNTER_CASH',
+      paymentStatus: 'Pending',
+      orderStatus: 'Placed',
+      isOnline: false,
+      isSettled: false,
+      requiresCashierConfirmation: true,
+      source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
       gstNumber: gstNumber || null,
       cgstPercentage,
       sgstPercentage,
@@ -987,21 +972,20 @@ export default function CartModal({
       totalAmount: grandTotal,
     };
 
-    const isDirectPlaceOrder = isThisTableOrder || isPayAtCounterOnly || paymentMethod === 'payatcounter';
+    const isDirectPlaceOrder = true;
 
     if (isDirectPlaceOrder) {
-      // DINE-IN SEATED TABLE (DYNAMIC QR, TTL QR, OR POSTPAID):
-      // Customer is physically sitting at table. Directly place order to table tab!
+      // Store Profile & Dine-In orders: Locked to Pay at Counter with Cashier Confirmation Required
       // NEVER REDIRECT TO CASHFREE PAYMENT GATEWAY!
       setSubmittingOrder(true);
       setProcessingPayment(false);
       try {
-        const directTableOrderPayload = {
+        const directCounterOrderPayload = {
           ...orderPayload,
-          tableId: effectiveTableId,
-          tableNumber: effectiveTableName,
-          encryptedTableId: activeTable?.encryptedTableId || effectiveTableToken || null,
-          tableSessionToken: effectiveTableToken,
+          tableId: isThisTableOrder ? effectiveTableId : null,
+          tableNumber: isThisTableOrder ? effectiveTableName : null,
+          encryptedTableId: isThisTableOrder ? (activeTable?.encryptedTableId || effectiveTableToken || null) : null,
+          tableSessionToken: isThisTableOrder ? effectiveTableToken : null,
           paymentMode: 'CASH',
           paymentType: 'COUNTER_CASH',
           paymentMethod: 'COUNTER_CASH',
@@ -1010,24 +994,24 @@ export default function CartModal({
           isOnline: false,
           isSettled: false,
           requiresCashierConfirmation: true,
-          source: 'QR_DINEIN',
-          deliveryType: 'Dine-In',
-          orderTypeId: 1,
+          source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
+          deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
+          orderTypeId: isThisTableOrder ? 1 : orderTypeId,
         };
 
-        logger.checkout('CHECKOUT_DINEIN_SUBMIT', `Customer placed Dine-In order for ${effectiveTableName}: ₹${grandTotal}`, {
-          tableId: effectiveTableId,
-          tableName: effectiveTableName,
+        logger.checkout('CHECKOUT_COUNTER_SUBMIT', `Customer placed counter order for ${isThisTableOrder ? effectiveTableName : 'Storefront Counter'}: ₹${grandTotal}`, {
+          tableId: isThisTableOrder ? effectiveTableId : null,
+          tableName: isThisTableOrder ? effectiveTableName : null,
           grandTotal,
           itemsCount: orderItems.length,
           paymentMode: 'COUNTER_CASH',
-          isDynamicQr,
+          requiresCashierConfirmation: true,
         });
 
         if (typeof onPlaceOrder === 'function') {
-          await onPlaceOrder(directTableOrderPayload);
+          await onPlaceOrder(directCounterOrderPayload);
         } else {
-          await api.placeOrder(directTableOrderPayload);
+          await api.placeOrder(directCounterOrderPayload);
         }
 
         setSubmittingOrder(false);
@@ -1038,9 +1022,9 @@ export default function CartModal({
         }
         return; // ABSOLUTE RETURN - PREVENTS CASHFREE
       } catch (placeErr: any) {
-        console.error('Dine-In place order error:', placeErr);
-        logger.error('CHECKOUT', 'CHECKOUT_DINEIN_FAILED', placeErr, {
-          tableId: effectiveTableId,
+        console.error('Counter place order error:', placeErr);
+        logger.error('CHECKOUT', 'CHECKOUT_COUNTER_FAILED', placeErr, {
+          tableId: isThisTableOrder ? effectiveTableId : null,
           amount: grandTotal,
         });
         setErrorMsg(placeErr?.response?.data?.message || placeErr?.message || 'Unable to place order. Please alert restaurant staff.');
@@ -2140,7 +2124,7 @@ export default function CartModal({
                   </View>
                 </View>
 
-                {(isTableOrder || isDynamicQr || isPayAtCounterOnly || activeTable) ? (
+                {(isTableOrder || isDynamicQr || activeTable) ? (
                   <View style={{
                     marginTop: 14,
                     padding: 14,
@@ -2165,10 +2149,10 @@ export default function CartModal({
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#166534' }}>
-                        Dine-In • Table {activeTable?.tableName || activeTable?.tableNumber || activeTable?.id || '16'}
+                        Dine-In • Table {activeTable?.tableName || activeTable?.tableNumber || activeTable?.id || 'Table'}
                       </Text>
                       <Text style={{ fontSize: 11, color: '#15803d', marginTop: 3, lineHeight: 16 }}>
-                        Dishes will be prepared and served to your table upon order confirmation.
+                        Pay at Counter • Cashier Confirmation Required. Dishes will be prepared upon confirmation.
                       </Text>
                       {typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0 && (
                         <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 3 }}>
@@ -2178,53 +2162,53 @@ export default function CartModal({
                     </View>
                   </View>
                 ) : (
-                  <View
-                    style={styles.formSection}
-                  >
-                    <Text
-                      style={styles.sectionTitle}
-                    >
+                  <View style={styles.formSection}>
+                    <Text style={styles.sectionTitle}>
                       Payment Method
                     </Text>
 
-                    <View
-                      style={
-                        styles.paymentMethodRow
-                      }
-                    >
+                    {/* Online payment option is disabled / invisible (visible: false) */}
+                    {isOnlinePaymentVisible && (
+                      <View style={styles.paymentMethodRow}>
+                        <View style={[styles.paymentCard, styles.paymentCardActive, { flex: 1 }]}>
+                          <CreditCard size={22} color="#10b981" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.paymentCardTitle, styles.paymentCardTitleActive]}>
+                              Online Direct Pay
+                            </Text>
+                            <Text style={styles.paymentCardSub}>
+                              UPI (GPay / PhonePe / Paytm) • Cards • NetBanking
+                            </Text>
+                            <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '700', marginTop: 4 }}>
+                              ⚡ Instant Auto-Confirmed & Kitchen Dispatched
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Pay at Counter option (Active & Only payment option) */}
+                    <View style={styles.paymentMethodRow}>
                       <View
                         style={[
                           styles.paymentCard,
                           styles.paymentCardActive,
-                          { flex: 1 }
+                          { flex: 1, borderColor: '#10b981', backgroundColor: '#f0fdf4' }
                         ]}
                       >
-                        <CreditCard
-                          size={22}
-                          color="#10b981"
-                        />
-
+                        <IndianRupee size={22} color="#15803d" />
                         <View style={{ flex: 1 }}>
-                          <Text
-                            style={[
-                              styles.paymentCardTitle,
-                              styles.paymentCardTitleActive,
-                            ]}
-                          >
-                            Online Direct Pay
+                          <Text style={[styles.paymentCardTitle, { color: '#166534' }]}>
+                            Pay at Counter
                           </Text>
-
-                          <Text
-                            style={
-                              styles.paymentCardSub
-                            }
-                          >
-                            UPI (GPay / PhonePe / Paytm) • Cards • NetBanking
+                          <Text style={[styles.paymentCardSub, { color: '#15803d' }]}>
+                            Cash / UPI at Counter • Cashier Confirmation Required
                           </Text>
-                          <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '700', marginTop: 4 }}>
-                            ⚡ Instant Auto-Confirmed & Kitchen Dispatched
+                          <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 4 }}>
+                            ⏳ Confirmation Required: Dishes prepared once cashier accepts order
                           </Text>
                         </View>
+                        <CheckCircle2 size={18} color="#15803d" />
                       </View>
                     </View>
                   </View>

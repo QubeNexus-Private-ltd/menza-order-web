@@ -2542,6 +2542,7 @@ export const placeOrder =
         (orderPayload.paymentStatus === 'Paid' || orderPayload.cashfreeOrderId || orderPayload.paymentOrderId)
           ? 'CASHFREE'
           : (orderPayload.paymentMode || (orderPayload.paymentMethod === 'cashfree' ? 'CASHFREE' : 'CASH')),
+      requiresCashierConfirmation: orderPayload.requiresCashierConfirmation !== undefined ? Boolean(orderPayload.requiresCashierConfirmation) : true,
       paymentType:
         orderPayload.paymentType ||
         ((orderPayload.paymentMode === 'ONLINE' || orderPayload.paymentMode === 'CASHFREE' || orderPayload.paymentMethod === 'cashfree')
