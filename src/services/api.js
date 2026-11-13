@@ -557,12 +557,26 @@ export const switchRestaurant = async (
 ========================================================= */
 
 export const getOrderTypes = async (restaurantId = null) => {
+  const filterActiveAndNonDelivery = (list) => {
+    if (!Array.isArray(list)) return [];
+    return list.filter((t) => {
+      const name = String(t.typeName || t.name || t.code || '').toLowerCase();
+      const desc = String(t.description || '').toLowerCase();
+      return (
+        t.isActive !== false &&
+        Number(t.id) !== 3 &&
+        !name.includes('delivery') &&
+        !desc.includes('delivery')
+      );
+    });
+  };
+
   // 1. Try restaurant-specific active order types if restaurantId is provided
   if (restaurantId && Number(restaurantId) > 0) {
     try {
       const res = await api.get(`/api/OrderTypeMaster/restaurant/${restaurantId}/active`);
       if (Array.isArray(res.data) && res.data.length > 0) {
-        return res.data.filter((t) => t.isActive !== false);
+        return filterActiveAndNonDelivery(res.data);
       }
     } catch (err) {
       console.warn('Restaurant-specific order types unavailable, trying platform master:', err?.message);
@@ -573,7 +587,7 @@ export const getOrderTypes = async (restaurantId = null) => {
   try {
     const res = await api.get('/api/OrderTypeMaster');
     if (Array.isArray(res.data) && res.data.length > 0) {
-      return res.data.filter((t) => t.isActive !== false);
+      return filterActiveAndNonDelivery(res.data);
     }
   } catch (error) {
     console.warn('Platform OrderTypeMaster unavailable, trying fallback:', error?.message);
@@ -583,7 +597,7 @@ export const getOrderTypes = async (restaurantId = null) => {
   try {
     const fallbackRes = await api.get('/api/Order/Types');
     if (fallbackRes.data && Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
-      return fallbackRes.data.filter((t) => t.isActive !== false);
+      return filterActiveAndNonDelivery(fallbackRes.data);
     }
   } catch {
     console.log('OrderType API unavailable, using fallback.');
@@ -599,11 +613,6 @@ export const getOrderTypes = async (restaurantId = null) => {
       id: 2,
       typeName: 'Self Pickup',
       description: 'Self Pickup / Takeaway',
-    },
-    {
-      id: 3,
-      typeName: 'Delivery',
-      description: 'Delivery order type',
     },
     {
       id: 4,
