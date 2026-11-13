@@ -316,9 +316,12 @@ export default function CustomerView({
       0
     );
 
-  const cgstRate = Number(catalog?.cgstPercentage ?? 2.5);
-  const sgstRate = Number(catalog?.sgstPercentage ?? 2.5);
-  const hasGst = cgstRate > 0 || sgstRate > 0 || Boolean(catalog?.gstNumber);
+  const rawGst = catalog?.gstNumber || null;
+  const cleanGstNumber = typeof rawGst === 'string' && rawGst.trim().length > 0 ? rawGst.trim() : null;
+  const hasGst = Boolean(cleanGstNumber);
+
+  const cgstRate = hasGst ? Number(catalog?.cgstPercentage ?? 2.5) : 0;
+  const sgstRate = hasGst ? Number(catalog?.sgstPercentage ?? 2.5) : 0;
 
   const totalCartTax = hasGst
     ? Math.round(totalCartSubTotal * ((cgstRate + sgstRate) / 100) * 100) / 100
@@ -1115,20 +1118,6 @@ export default function CustomerView({
                             dietLabel
                           }
                         </Text>
-
-                        <View
-                          style={
-                            styles.ratingPill
-                          }
-                        >
-                          <Text
-                            style={
-                              styles.ratingText
-                            }
-                          >
-                            ★ 4.9
-                          </Text>
-                        </View>
                       </View>
 
                       <View
@@ -1856,20 +1845,6 @@ const styles = StyleSheet.create({
   nonVegLabel: {
     color:
       COLORS.red,
-  },
-  ratingPill: {
-    backgroundColor:
-      COLORS.orangeSoft,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    flexShrink: 0,
-  },
-  ratingText: {
-    color:
-      COLORS.orangeDark,
-    fontSize: 9,
-    fontWeight: '700',
   },
   cardBody: {
     flex: 1,

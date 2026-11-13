@@ -316,9 +316,23 @@ export default function CartModal({
 
   const [guestName, setGuestName] = useState<string>('');
   const [mobileNumber, setMobileNumber] = useState<string>('');
+  const [mobileError, setMobileError] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
   const [orderTypeId, setOrderTypeId] = useState<number>(() => (isTableOrder || isDynamicQr || activeTable) ? 1 : 2);
   const [paymentMethod, setPaymentMethod] = useState<string>('payatcounter');
+
+  const handleMobileNumberChange = (val: string) => {
+    const clean = api.sanitizeIndianMobile(val);
+    setMobileNumber(clean);
+    if (errorMsg) setErrorMsg('');
+    if (clean.length > 0 && !/^[6-9]/.test(clean)) {
+      setMobileError('Indian mobile number must start with 6, 7, 8, or 9');
+    } else if (clean.length > 0 && clean.length < 10) {
+      setMobileError('Mobile number must be exactly 10 digits');
+    } else {
+      setMobileError('');
+    }
+  };
 
   useEffect(() => {
     setPaymentMethod('payatcounter');
@@ -368,7 +382,7 @@ export default function CartModal({
     if (!visible) return;
     const saved = api.getSavedCustomer();
     if (saved && (saved.mobile || saved.token)) {
-      if (saved.mobile) setMobileNumber(saved.mobile);
+      if (saved.mobile) setMobileNumber(api.sanitizeIndianMobile(saved.mobile));
       if (saved.name && (!guestName || guestName.startsWith('Guest '))) {
         setGuestName(saved.name);
       }
@@ -386,17 +400,17 @@ export default function CartModal({
     return () => clearInterval(timer);
   }, [otpCountdown]);
 
-
-
   const handleSendOtp = async () => {
-    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
-    if (cleanMobile.length < 10) {
-      setErrorMsg('Please enter a valid 10-digit mobile number.');
+    const cleanMobile = api.sanitizeIndianMobile(mobileNumber);
+    if (!api.isValidIndianMobile(cleanMobile)) {
+      setErrorMsg('Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.');
+      setMobileError('Must be a valid 10-digit Indian mobile number (starts with 6-9)');
       return;
     }
 
     try {
       setErrorMsg('');
+      setMobileError('');
       setOtpSuccessMsg('');
       setIsSendingOtp(true);
 
@@ -433,11 +447,12 @@ export default function CartModal({
   };
 
   const handleVerifyOtp = async () => {
-    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
+    const cleanMobile = api.sanitizeIndianMobile(mobileNumber);
     const cleanOtp = otpCode.trim();
 
-    if (cleanMobile.length < 10) {
-      setErrorMsg('Please enter a valid 10-digit mobile number.');
+    if (!api.isValidIndianMobile(cleanMobile)) {
+      setErrorMsg('Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.');
+      setMobileError('Must be a valid 10-digit Indian mobile number');
       return;
     }
 
@@ -642,37 +657,38 @@ export default function CartModal({
   );
   const taxableAmount = Math.max(0, subTotal - discountAmount);
 
-  // GST percentage resolution: Check cart first, then catalog, default to 2.5% if restaurant has GST
-  const cgstPercentage = Number(
-    cart?.cgstPercentage ??
-    catalog?.cgstPercentage ??
-    2.5
-  );
-  const sgstPercentage = Number(
-    cart?.sgstPercentage ??
-    catalog?.sgstPercentage ??
-    2.5
-  );
-  const gstNumber = cart?.gstNumber || catalog?.gstNumber || null;
+  // GST calculation rule: If gstNumber is not present, no GST is calculated (0 tax).
+  // If gstNumber is present, calculate GST as per restaurant configuration.
+  const rawGst = cart?.gstNumber || catalog?.gstNumber || null;
+  const cleanGstNumber = typeof rawGst === 'string' && rawGst.trim().length > 0 ? rawGst.trim() : null;
+  const hasGst = Boolean(cleanGstNumber);
 
-  // Determine if GST is present
-  const hasGst = cgstPercentage > 0 || sgstPercentage > 0 || Boolean(gstNumber);
+  const cgstPercentage = hasGst
+    ? Number(cart?.cgstPercentage ?? catalog?.cgstPercentage ?? 2.5)
+    : 0;
+  const sgstPercentage = hasGst
+    ? Number(cart?.sgstPercentage ?? catalog?.sgstPercentage ?? 2.5)
+    : 0;
 
-  // CGST and SGST calculation: use cart if > 0, otherwise compute from taxableAmount
-  const cgst = Number(cart?.cgstAmount ?? 0) > 0
-    ? Number(cart.cgstAmount)
-    : (hasGst ? Math.round(taxableAmount * (cgstPercentage / 100) * 100) / 100 : 0);
+  // CGST and SGST calculation: use cart if > 0 and hasGst, otherwise compute from taxableAmount
+  const cgst = hasGst
+    ? (Number(cart?.cgstAmount ?? 0) > 0
+        ? Number(cart.cgstAmount)
+        : Math.round(taxableAmount * (cgstPercentage / 100) * 100) / 100)
+    : 0;
 
-  const sgst = Number(cart?.sgstAmount ?? 0) > 0
-    ? Number(cart.sgstAmount)
-    : (hasGst ? Math.round(taxableAmount * (sgstPercentage / 100) * 100) / 100 : 0);
+  const sgst = hasGst
+    ? (Number(cart?.sgstAmount ?? 0) > 0
+        ? Number(cart.sgstAmount)
+        : Math.round(taxableAmount * (sgstPercentage / 100) * 100) / 100)
+    : 0;
 
-  const taxAmount = Math.round((cgst + sgst) * 100) / 100;
+  const taxAmount = hasGst ? Math.round((cgst + sgst) * 100) / 100 : 0;
   const platformFee = Number(
     cart?.platformFee ?? 0
   );
 
-  // Grand Total MUST strictly sum GST amount in the total and display on screen!
+  // Grand Total: strictly sum GST amount in the total if GST is present
   const grandTotal = Math.round(
     (taxableAmount + taxAmount + platformFee) * 100
   ) / 100;
@@ -801,28 +817,34 @@ export default function CartModal({
       return;
     }
 
-    const cleanMobile = mobileNumber.trim();
+    const cleanMobile = api.sanitizeIndianMobile(mobileNumber);
 
     if (!cleanMobile) {
-      setErrorMsg(
-        'Please enter your 10-digit mobile number.'
-      );
+      setErrorMsg('Please enter your 10-digit mobile number.');
+      setMobileError('Mobile number is required.');
       return;
     }
 
-    const phoneDigits = cleanMobile.replace(
-      /\D/g,
-      ''
-    );
-
-    if (phoneDigits.length < 10) {
-      setErrorMsg(
-        'Please enter a valid 10-digit mobile number.'
-      );
+    if (cleanMobile.length !== 10) {
+      setErrorMsg('Indian mobile number must be exactly 10 digits.');
+      setMobileError('Must be exactly 10 digits.');
       return;
     }
 
-    const cleanPhone = phoneDigits.slice(-10);
+    if (!/^[6-9]/.test(cleanMobile)) {
+      setErrorMsg('Indian mobile number must start with 6, 7, 8, or 9.');
+      setMobileError('Must start with 6, 7, 8, or 9.');
+      return;
+    }
+
+    if (!api.isValidIndianMobile(cleanMobile)) {
+      setErrorMsg('Please enter a valid 10-digit Indian mobile number.');
+      setMobileError('Invalid Indian mobile number.');
+      return;
+    }
+
+    setMobileError('');
+    const cleanPhone = cleanMobile;
 
     // Direct checkout: mobile OTP verification removed
     if (activeTable?.isCleaning) {
@@ -961,14 +983,16 @@ export default function CartModal({
       isOnline: false,
       isSettled: false,
       requiresCashierConfirmation: true,
+      deviceId: api.getDeviceId(),
+      hardwareFingerprint: api.getHardwareFingerprint(),
       source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
-      gstNumber: gstNumber || null,
-      cgstPercentage,
-      sgstPercentage,
+      gstNumber: cleanGstNumber,
+      cgstPercentage: hasGst ? cgstPercentage : 0,
+      sgstPercentage: hasGst ? sgstPercentage : 0,
       subTotal,
-      cgstAmount: cgst,
-      sgstAmount: sgst,
-      taxAmount,
+      cgstAmount: hasGst ? cgst : 0,
+      sgstAmount: hasGst ? sgst : 0,
+      taxAmount: hasGst ? taxAmount : 0,
       totalAmount: grandTotal,
     };
 
@@ -1150,10 +1174,15 @@ export default function CartModal({
           subTotal: subTotal,
           itemTotal: subTotal,
           orderAmount: subTotal,
-          cgstAmount: cgst,
-          sgstAmount: sgst,
-          taxAmount: cgst + sgst,
+          gstNumber: cleanGstNumber,
+          cgstPercentage: hasGst ? cgstPercentage : 0,
+          sgstPercentage: hasGst ? sgstPercentage : 0,
+          cgstAmount: hasGst ? cgst : 0,
+          sgstAmount: hasGst ? sgst : 0,
+          taxAmount: hasGst ? (cgst + sgst) : 0,
           totalAmount: grandTotal,
+          deviceId: api.getDeviceId(),
+          hardwareFingerprint: api.getHardwareFingerprint(),
           items: orderItems,
           createdAt: new Date().toISOString(),
         };
@@ -2083,19 +2112,49 @@ export default function CartModal({
 
                   {/* Customer Mobile Number */}
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>
-                      Mobile Number *
-                    </Text>
+                    <View style={styles.labelRow}>
+                      <Text style={styles.inputLabel}>
+                        Mobile Number *
+                      </Text>
+                      {mobileNumber.length === 10 && /^[6-9]\d{9}$/.test(mobileNumber) ? (
+                        <View style={styles.validBadge}>
+                          <CheckCircle2 size={13} color="#16a34a" />
+                          <Text style={styles.validBadgeText}>Valid Indian Mobile</Text>
+                        </View>
+                      ) : null}
+                    </View>
 
-                    <TextInput
-                      style={styles.textInput as any}
-                      placeholder="Enter 10-digit mobile number *"
-                      placeholderTextColor="#64748b"
-                      keyboardType="phone-pad"
-                      maxLength={15}
-                      value={mobileNumber}
-                      onChangeText={setMobileNumber}
-                    />
+                    <View
+                      style={[
+                        styles.phoneInputContainer,
+                        Boolean(mobileError) && styles.phoneInputContainerError,
+                      ]}
+                    >
+                      <View style={styles.phoneCountryPrefix}>
+                        <Text style={styles.phoneCountryFlag}>🇮🇳</Text>
+                        <Text style={styles.phoneCountryCode}>+91</Text>
+                      </View>
+
+                      <TextInput
+                        style={styles.phoneTextInput as any}
+                        placeholder="9876543210"
+                        placeholderTextColor="#94a3b8"
+                        keyboardType="phone-pad"
+                        maxLength={10}
+                        value={mobileNumber}
+                        onChangeText={handleMobileNumberChange}
+                      />
+                    </View>
+
+                    {mobileError ? (
+                      <Text style={styles.inputErrorText}>
+                        {mobileError}
+                      </Text>
+                    ) : (
+                      <Text style={styles.inputHintText}>
+                        Accepts only 10-digit Indian mobile number starting with 6, 7, 8, or 9
+                      </Text>
+                    )}
                   </View>
 
                   <View
@@ -2356,7 +2415,7 @@ export default function CartModal({
                     </>
                   ) : null}
 
-                  {gstNumber ? (
+                  {hasGst && cleanGstNumber ? (
                     <View
                       style={
                         styles.summaryRow
@@ -2367,7 +2426,7 @@ export default function CartModal({
                           styles.gstNumberLabel
                         }
                       >
-                        GSTIN: {gstNumber}
+                        GSTIN: {cleanGstNumber}
                       </Text>
                     </View>
                   ) : null}
@@ -2934,6 +2993,86 @@ const styles = StyleSheet.create({
     color: '#1B1C1C',
     fontSize: 12,
     fontWeight: '600',
+  },
+
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  validBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  validBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#16A34A',
+  },
+
+  phoneInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0DDD8',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+
+  phoneInputContainerError: {
+    borderColor: '#EF4444',
+    backgroundColor: '#FEF2F2',
+  },
+
+  phoneCountryPrefix: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 10,
+    paddingRight: 10,
+    backgroundColor: '#F8FAFC',
+    alignSelf: 'stretch',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+    justifyContent: 'center',
+  },
+
+  phoneCountryFlag: {
+    fontSize: 14,
+  },
+
+  phoneCountryCode: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+  },
+
+  phoneTextInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    color: '#1B1C1C',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    outlineStyle: 'none',
+  },
+
+  inputErrorText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+
+  inputHintText: {
+    color: '#64748B',
+    fontSize: 11,
+    marginTop: 2,
   },
 
   textInput: {

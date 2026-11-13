@@ -31,7 +31,7 @@ import {
   Store,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { encryptRestaurantId } from '../services/api';
+import { encryptRestaurantId, getDeviceId, getHardwareFingerprint } from '../services/api';
 import { downloadQrCodeImage, downloadQrCodeSvg } from './RestaurantQrModal';
 import { Catalog, MenuItem, Order, Restaurant, StaffUser, Table } from '../types';
 
@@ -113,12 +113,28 @@ export default function StaffView({
 
   // Handle OTP request
   const handleRequestOtp = async () => {
-    if (!mobile.trim()) return;
+    const clean = mobile.replace(/\D/g, '');
+    if (!clean) {
+      setLoginError('Please enter your 10-digit mobile number.');
+      return;
+    }
+    if (clean.length !== 10) {
+      setLoginError('Indian mobile number must be exactly 10 digits.');
+      return;
+    }
+    if (!/^[6-9]/.test(clean)) {
+      setLoginError('Indian mobile number must start with 6, 7, 8, or 9.');
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(clean)) {
+      setLoginError('Please enter a valid 10-digit Indian mobile number.');
+      return;
+    }
     if (otpCountdown > 0) return;
     setLoginLoading(true);
     setLoginError('');
     try {
-      const res: any = await onGenerateOtp(mobile);
+      const res: any = await onGenerateOtp(clean);
       setOtpSent(true);
       setOtpCountdown(30);
       if (res && res.otpCode) {
@@ -141,11 +157,16 @@ export default function StaffView({
 
   // Handle Login submission
   const handleLoginSubmit = async () => {
-    if (!mobile.trim() || !otpCode.trim()) return;
+    const clean = mobile.replace(/\D/g, '');
+    if (!clean || !/^[6-9]\d{9}$/.test(clean)) {
+      setLoginError('Please enter a valid 10-digit Indian mobile number.');
+      return;
+    }
+    if (!otpCode.trim()) return;
     setLoginLoading(true);
     setLoginError('');
     try {
-      await onLogin(mobile, otpCode);
+      await onLogin(clean, otpCode.trim());
     } catch (err: any) {
       if (err?.isRateLimited) {
         setLoginError(err.message);
@@ -178,22 +199,65 @@ export default function StaffView({
   };
 
   const handleStaffPlaceOrder = async () => {
-    if (!staffGuestName.trim() || !staffGuestMobile.trim() || selectedStaffItems.length === 0) return;
+    if (!staffGuestName.trim()) {
+      alert('Please enter guest name.');
+      return;
+    }
+    const cleanGuestMobile = staffGuestMobile.replace(/\D/g, '');
+    if (!cleanGuestMobile) {
+      alert('Please enter guest mobile number.');
+      return;
+    }
+    if (cleanGuestMobile.length !== 10) {
+      alert('Indian mobile number must be exactly 10 digits.');
+      return;
+    }
+    if (!/^[6-9]/.test(cleanGuestMobile)) {
+      alert('Indian mobile number must start with 6, 7, 8, or 9.');
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(cleanGuestMobile)) {
+      alert('Please enter a valid 10-digit Indian mobile number.');
+      return;
+    }
+    if (selectedStaffItems.length === 0) {
+      alert('Please select at least one item.');
+      return;
+    }
     // Prepare order payload
     const itemsTotal = selectedStaffItems.reduce((acc, i) => acc + i.price * i.quantity, 0);
-    const cgst = itemsTotal * 0.025;
-    const sgst = itemsTotal * 0.025;
+
+    const rawGst = selectedRestaurant?.gstNumber || selectedRestaurant?.GstNumber || catalog?.gstNumber || null;
+    const cleanGstNumber = typeof rawGst === 'string' && rawGst.trim().length > 0 ? rawGst.trim() : null;
+    const hasGst = Boolean(cleanGstNumber);
+
+    const cgstRate = hasGst ? Number(selectedRestaurant?.cgstPercentage ?? catalog?.cgstPercentage ?? 2.5) : 0;
+    const sgstRate = hasGst ? Number(selectedRestaurant?.sgstPercentage ?? catalog?.sgstPercentage ?? 2.5) : 0;
+
+    const cgst = hasGst ? Math.round(itemsTotal * (cgstRate / 100) * 100) / 100 : 0;
+    const sgst = hasGst ? Math.round(itemsTotal * (sgstRate / 100) * 100) / 100 : 0;
+    const taxAmount = hasGst ? Math.round((cgst + sgst) * 100) / 100 : 0;
+    const totalAmount = Math.round((itemsTotal + taxAmount) * 100) / 100;
 
     await onAddItemToOrder({
       name: staffGuestName,
-      mobileNumber: staffGuestMobile,
+      mobileNumber: cleanGuestMobile,
+      deviceId: getDeviceId(),
+      hardwareFingerprint: getHardwareFingerprint(),
       tableId: createOrderTable ? createOrderTable.id : null,
       orderTypeId: staffOrderTypeId,
       items: selectedStaffItems,
       orderAmount: itemsTotal,
+      subTotal: itemsTotal,
+      gstNumber: cleanGstNumber,
+      cgstPercentage: hasGst ? cgstRate : 0,
+      sgstPercentage: hasGst ? sgstRate : 0,
       cgst,
       sgst,
-      totalAmount: itemsTotal + cgst + sgst,
+      cgstAmount: cgst,
+      sgstAmount: sgst,
+      taxAmount,
+      totalAmount,
     });
 
     setCreateOrderTable(null);
@@ -219,13 +283,21 @@ export default function StaffView({
               <Text style={styles.loginLabel}>Mobile Number</Text>
               <View style={styles.loginInputWrapper}>
                 <Phone size={18} color="#64748b" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginLeft: 6 }}>🇮🇳 +91</Text>
                 <TextInput
-                  style={styles.loginInput as any}
+                  style={[styles.loginInput, { paddingLeft: 8 }] as any}
                   placeholder="Enter 10-digit mobile"
                   placeholderTextColor="#64748b"
                   keyboardType="phone-pad"
+                  maxLength={10}
                   value={mobile}
-                  onChangeText={setMobile}
+                  onChangeText={(val) => {
+                    let clean = val.replace(/\D/g, '');
+                    if (clean.startsWith('91') && clean.length > 10) clean = clean.slice(2);
+                    else if (clean.startsWith('0') && clean.length > 10) clean = clean.slice(1);
+                    setMobile(clean.slice(0, 10));
+                    if (loginError) setLoginError('');
+                  }}
                 />
               </View>
             </View>
@@ -884,14 +956,23 @@ export default function StaffView({
                   value={staffGuestName}
                   onChangeText={setStaffGuestName}
                 />
-                <TextInput
-                  style={styles.posInput as any}
-                  placeholder="Guest Mobile *"
-                  placeholderTextColor="#64748b"
-                  keyboardType="phone-pad"
-                  value={staffGuestMobile}
-                  onChangeText={setStaffGuestMobile}
-                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, paddingHorizontal: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginRight: 4 }}>🇮🇳 +91</Text>
+                  <TextInput
+                    style={[styles.posInput, { borderWidth: 0, flex: 1, paddingHorizontal: 4 }] as any}
+                    placeholder="Guest Mobile (10-digit) *"
+                    placeholderTextColor="#64748b"
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    value={staffGuestMobile}
+                    onChangeText={(val) => {
+                      let clean = val.replace(/\D/g, '');
+                      if (clean.startsWith('91') && clean.length > 10) clean = clean.slice(2);
+                      else if (clean.startsWith('0') && clean.length > 10) clean = clean.slice(1);
+                      setStaffGuestMobile(clean.slice(0, 10));
+                    }}
+                  />
+                </View>
               </View>
 
               <View style={styles.staffOrderTypeSection}>

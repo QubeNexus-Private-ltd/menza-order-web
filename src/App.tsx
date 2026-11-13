@@ -37,8 +37,8 @@ function getTrackOrderIdFromUrl(): string | null {
   const path = window.location.pathname;
   const searchParams = new URLSearchParams(window.location.search);
 
-  // 1. Path match: /track/123 or /order/track/123
-  const match = path.match(/\/(?:order\/)?track\/([^/?#]+)/i);
+  // 1. Path match: /track/123 or /order/track/123 or /bill/123 or /invoice/123
+  const match = path.match(/\/(?:order\/)?(?:track|bill|invoice)\/([^/?#]+)/i);
   if (match && match[1]) {
     const val = decodeURIComponent(match[1]).trim();
     if (val && !['undefined', 'null'].includes(val.toLowerCase())) {
@@ -827,7 +827,15 @@ export default function App() {
             // Fallback from cart if pendingPayload was somehow empty
             if (!pendingPayload && cartItems && cartItems.length > 0) {
               const subTotalVal = cartItems.reduce((acc, it) => acc + (Number(it.unitPrice || it.price || 0) * (Number(it.quantity) || 1)), 0);
-              const taxVal = Math.round(subTotalVal * 0.05 * 100) / 100;
+              const rawGst = catalog?.gstNumber || null;
+              const cleanGst = typeof rawGst === 'string' && rawGst.trim().length > 0 ? rawGst.trim() : null;
+              const hasGst = Boolean(cleanGst);
+
+              const cgstRate = hasGst ? Number(catalog?.cgstPercentage ?? 2.5) : 0;
+              const sgstRate = hasGst ? Number(catalog?.sgstPercentage ?? 2.5) : 0;
+              const cgstVal = hasGst ? Math.round(subTotalVal * (cgstRate / 100) * 100) / 100 : 0;
+              const sgstVal = hasGst ? Math.round(subTotalVal * (sgstRate / 100) * 100) / 100 : 0;
+              const taxVal = hasGst ? Math.round((cgstVal + sgstVal) * 100) / 100 : 0;
               const grandVal = Math.round((subTotalVal + taxVal) * 100) / 100;
               const isFallbackTableOrder = Boolean(targetTableNum);
               pendingPayload = {
@@ -844,8 +852,11 @@ export default function App() {
                 subTotal: subTotalVal,
                 itemTotal: subTotalVal,
                 orderAmount: subTotalVal,
-                cgstAmount: Math.round(subTotalVal * 0.025 * 100) / 100,
-                sgstAmount: Math.round(subTotalVal * 0.025 * 100) / 100,
+                gstNumber: cleanGst,
+                cgstPercentage: hasGst ? cgstRate : 0,
+                sgstPercentage: hasGst ? sgstRate : 0,
+                cgstAmount: cgstVal,
+                sgstAmount: sgstVal,
                 taxAmount: taxVal,
                 totalAmount: grandVal,
                 paymentMode: 'CASHFREE',
@@ -968,6 +979,14 @@ export default function App() {
                 0
               );
 
+              const rawFinalGst = finalPlacedOrder.gstNumber || pendingPayload?.gstNumber || catalog?.gstNumber || null;
+              const hasFinalGst = Boolean(typeof rawFinalGst === 'string' && rawFinalGst.trim().length > 0);
+              const cgstPercent = hasFinalGst ? Number(finalPlacedOrder.cgstPercentage ?? pendingPayload?.cgstPercentage ?? catalog?.cgstPercentage ?? 2.5) : 0;
+              const sgstPercent = hasFinalGst ? Number(finalPlacedOrder.sgstPercentage ?? pendingPayload?.sgstPercentage ?? catalog?.sgstPercentage ?? 2.5) : 0;
+              const fallbackCgst = hasFinalGst ? Math.round(subTotalVal * (cgstPercent / 100) * 100) / 100 : 0;
+              const fallbackSgst = hasFinalGst ? Math.round(subTotalVal * (sgstPercent / 100) * 100) / 100 : 0;
+              const fallbackTax = hasFinalGst ? Math.round((fallbackCgst + fallbackSgst) * 100) / 100 : 0;
+
               const finalOrder = {
                 ...finalPlacedOrder,
                 id: Number(finalPlacedOrder.id || finalPlacedOrder.orderId || 0) || Date.now() % 1000000,
@@ -976,9 +995,12 @@ export default function App() {
                 subTotal: subTotalVal,
                 itemTotal: subTotalVal,
                 orderAmount: subTotalVal,
-                cgstAmount: Number(finalPlacedOrder.cgstAmount ?? finalPlacedOrder.cgst ?? pendingPayload?.cgstAmount ?? (subTotalVal * 0.025)),
-                sgstAmount: Number(finalPlacedOrder.sgstAmount ?? finalPlacedOrder.sgst ?? pendingPayload?.sgstAmount ?? (subTotalVal * 0.025)),
-                taxAmount: Number(finalPlacedOrder.taxAmount ?? pendingPayload?.taxAmount ?? (subTotalVal * 0.05)),
+                gstNumber: hasFinalGst ? (rawFinalGst ? String(rawFinalGst).trim() : null) : null,
+                cgstPercentage: hasFinalGst ? cgstPercent : 0,
+                sgstPercentage: hasFinalGst ? sgstPercent : 0,
+                cgstAmount: hasFinalGst ? Number(finalPlacedOrder.cgstAmount ?? finalPlacedOrder.cgst ?? pendingPayload?.cgstAmount ?? fallbackCgst) : 0,
+                sgstAmount: hasFinalGst ? Number(finalPlacedOrder.sgstAmount ?? finalPlacedOrder.sgst ?? pendingPayload?.sgstAmount ?? fallbackSgst) : 0,
+                taxAmount: hasFinalGst ? Number(finalPlacedOrder.taxAmount ?? pendingPayload?.taxAmount ?? fallbackTax) : 0,
                 totalAmount: totalVal,
                 paymentStatus: 'Paid',
                 orderStatus: 'Confirmed',
@@ -1768,6 +1790,10 @@ export default function App() {
           deviceId:
             orderPayload.deviceId ||
             api.getDeviceId(),
+
+          hardwareFingerprint:
+            orderPayload.hardwareFingerprint ||
+            api.getHardwareFingerprint(),
 
           items:
             Array.isArray(

@@ -35,9 +35,13 @@ import {
   Receipt,
   AlertTriangle,
   Sparkles,
+  Download,
+  Share2,
+  MessageCircle,
 } from 'lucide-react';
 import * as api from '../services/api';
 import * as signalrService from '../services/signalr';
+import { OrderWhatsAppService } from '../services/whatsAppService';
 import { Order, Catalog, Table, StoreOperatingStatus } from '../types';
 
 const STATUSES = [
@@ -454,6 +458,34 @@ export default function OrderTrackerModal({
     }
   }, [visible, order, targetOrder]);
 
+  const handleShareWhatsAppBill = () => {
+    const target = selectedOrder || targetOrder || order || api.getSavedActiveOrder();
+    if (!target) return;
+    const phone = target.customerPhone || target.phone || target.customerMobile || target.MobileNumber || '';
+    const cleanOrderId = String(target.orderId || target.id || target.OrderId || target.Id || '').replace(/[^0-9]/g, '') || String(target.orderId || target.id);
+    const orderItems = getOrderItems(target);
+    OrderWhatsAppService.shareWhatsAppReceipt(phone, {
+      restaurantName: catalog?.restaurantName || activeTable?.restaurantName || 'Menza Restaurant',
+      orderId: cleanOrderId,
+      customerName: target.customerName || target.Name || target.name,
+      tableName: activeTable?.tableName || target.tableName,
+      orderType: activeTable ? 'Dine-In' : 'Takeaway',
+      items: (orderItems || []).map((it: any) => ({
+        itemName: it.itemName || it.name || it.ItemName,
+        quantity: Number(it.quantity || it.Quantity || 1),
+        price: Number(it.amount ?? it.unitPrice ?? it.price ?? it.Price ?? 0),
+      })),
+      subTotal: Number(target.subTotal || target.subtotal || target.itemTotal || target.orderAmount || 0),
+      cgst: Number(target.cgstAmount || target.cgst || 0),
+      sgst: Number(target.sgstAmount || target.sgst || 0),
+      taxAmount: Number(target.taxAmount || ((target.cgstAmount || 0) + (target.sgstAmount || 0))),
+      discountAmount: Number(target.discountAmount || 0),
+      grandTotal: Number(target.totalAmount || target.orderAmount || 0),
+      paymentMode: target.paymentMode || target.PaymentMode || 'CASH',
+      paymentStatus: target.paymentStatus || 'Pending',
+    }, target);
+  };
+
   useEffect(() => {
     if (!visible) return;
     loadOrders();
@@ -853,23 +885,30 @@ export default function OrderTrackerModal({
           (itemsSum > 0 ? itemsSum : 0)
       ) || 0;
 
-    const cgst =
-      Number(
-        (curOrder.cgstAmount > 0 ? curOrder.cgstAmount : null) ??
-          (curOrder.cgst > 0 ? curOrder.cgst : null) ??
-          Math.round(
-            subtotal * 0.025 * 100
-          ) / 100
-      ) || 0;
+    const rawOrderGst = curOrder.gstNumber || catalog?.gstNumber || null;
+    const cleanOrderGst = typeof rawOrderGst === 'string' && rawOrderGst.trim().length > 0 ? rawOrderGst.trim() : null;
+    const hasGst = Boolean(cleanOrderGst);
 
-    const sgst =
-      Number(
-        (curOrder.sgstAmount > 0 ? curOrder.sgstAmount : null) ??
-          (curOrder.sgst > 0 ? curOrder.sgst : null) ??
-          Math.round(
-            subtotal * 0.025 * 100
-          ) / 100
-      ) || 0;
+    const cgstRate = hasGst ? Number(curOrder.cgstPercentage ?? catalog?.cgstPercentage ?? 2.5) : 0;
+    const sgstRate = hasGst ? Number(curOrder.sgstPercentage ?? catalog?.sgstPercentage ?? 2.5) : 0;
+
+    const cgst = hasGst
+      ? Number(
+          (curOrder.cgstAmount !== undefined && curOrder.cgstAmount !== null && Number(curOrder.cgstAmount) >= 0 ? curOrder.cgstAmount : null) ??
+          (curOrder.cgst !== undefined && curOrder.cgst !== null && Number(curOrder.cgst) >= 0 ? curOrder.cgst : null) ??
+          Math.round(subtotal * (cgstRate / 100) * 100) / 100
+        ) || 0
+      : 0;
+
+    const sgst = hasGst
+      ? Number(
+          (curOrder.sgstAmount !== undefined && curOrder.sgstAmount !== null && Number(curOrder.sgstAmount) >= 0 ? curOrder.sgstAmount : null) ??
+          (curOrder.sgst !== undefined && curOrder.sgst !== null && Number(curOrder.sgst) >= 0 ? curOrder.sgst : null) ??
+          Math.round(subtotal * (sgstRate / 100) * 100) / 100
+        ) || 0
+      : 0;
+
+    const hasGstBifurcation = Boolean(hasGst && cleanOrderGst && cgst > 0 && sgst > 0);
 
     const grandTotal =
       Number(
@@ -1780,37 +1819,69 @@ export default function OrderTrackerModal({
               </Text>
             </View>
 
-            <View
-              style={styles.billRow}
-            >
-              <Text
-                style={styles.billLabel}
-              >
-                CGST (2.5%)
-              </Text>
+            {hasGstBifurcation ? (
+              <>
+                <View
+                  style={styles.billRow}
+                >
+                  <Text
+                    style={styles.billLabel}
+                  >
+                    CGST {cgstRate > 0 ? `(${cgstRate}%)` : ''}
+                  </Text>
 
-              <Text
-                style={styles.billValue}
-              >
-                ₹{cgst.toFixed(2)}
-              </Text>
-            </View>
+                  <Text
+                    style={styles.billValue}
+                  >
+                    ₹{cgst.toFixed(2)}
+                  </Text>
+                </View>
 
-            <View
-              style={styles.billRow}
-            >
-              <Text
-                style={styles.billLabel}
-              >
-                SGST (2.5%)
-              </Text>
+                <View
+                  style={styles.billRow}
+                >
+                  <Text
+                    style={styles.billLabel}
+                  >
+                    SGST {sgstRate > 0 ? `(${sgstRate}%)` : ''}
+                  </Text>
 
-              <Text
-                style={styles.billValue}
-              >
-                ₹{sgst.toFixed(2)}
-              </Text>
-            </View>
+                  <Text
+                    style={styles.billValue}
+                  >
+                    ₹{sgst.toFixed(2)}
+                  </Text>
+                </View>
+
+                {cleanOrderGst && (
+                  <View
+                    style={styles.billRow}
+                  >
+                    <Text
+                      style={styles.billLabel}
+                    >
+                      GSTIN
+                    </Text>
+
+                    <Text
+                      style={styles.billValue}
+                    >
+                      {cleanOrderGst}
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={styles.billRow}>
+                <Text style={styles.billLabel}>
+                  Taxes & Levies
+                </Text>
+
+                <Text style={[styles.billValue, { color: '#059669', fontWeight: '700', fontSize: 11 }]}>
+                  Net total is inclusive of all taxes
+                </Text>
+              </View>
+            )}
 
             <View
               style={
@@ -1837,8 +1908,7 @@ export default function OrderTrackerModal({
                     styles.grandTotalTaxesNote
                   }
                 >
-                  (Inclusive of all
-                  applicable taxes)
+                  (Net total is inclusive of all taxes)
                 </Text>
               </View>
 
@@ -1849,6 +1919,58 @@ export default function OrderTrackerModal({
               >
                 ₹{grandTotal.toFixed(2)}
               </Text>
+            </View>
+
+            {/* Executive Action Bar for WhatsApp Bill and Save/Print PDF */}
+            <View style={{ marginTop: 16, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                onPress={handleShareWhatsAppBill}
+                style={{
+                  flex: 1,
+                  minWidth: 160,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: '#059669',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  shadowColor: '#059669',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: 3,
+                }}
+              >
+                <MessageCircle size={16} color="#FFFFFF" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>Share on WhatsApp</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  if (typeof window !== 'undefined') window.print();
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 140,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: '#1E293B',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  shadowColor: '#000000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.1,
+                  shadowRadius: 4,
+                  elevation: 2,
+                }}
+              >
+                <Download size={16} color="#F59E0B" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>Download / Print PDF</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>

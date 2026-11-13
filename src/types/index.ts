@@ -59,6 +59,10 @@ export interface Order {
   cgst?: number;
   sgstAmount?: number;
   sgst?: number;
+  cgstPercentage?: number;
+  sgstPercentage?: number;
+  gstNumber?: string;
+  taxAmount?: number;
   totalAmount?: number;
   paymentStatus?: string;
   paymentMode?: string;
@@ -85,6 +89,8 @@ export interface Order {
   isOnline?: boolean;
   isSettled?: boolean;
   requiresCashierConfirmation?: boolean;
+  deviceId?: string;
+  hardwareFingerprint?: string;
   logoUrl?: string;
   restaurantName?: string;
   address?: string;
@@ -131,6 +137,10 @@ export interface Catalog {
   state?: string;
   contactNumber?: string;
   contactPhone?: string;
+  gstNumber?: string;
+  cgstPercentage?: number;
+  sgstPercentage?: number;
+  hasGst?: boolean;
   logoUrl?: string;
   imageUrl?: string;
   isKitchenActive?: boolean;
@@ -169,5 +179,8 @@ export interface Restaurant {
   address?: string;
   city?: string;
   phone?: string;
+  gstNumber?: string;
+  cgstPercentage?: number;
+  sgstPercentage?: number;
   [key: string]: any;
 }
