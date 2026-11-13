@@ -358,6 +358,13 @@ export default function CartModal({
     }
   }, [isTableOrder, isDynamicQr, activeTable, visible]);
 
+  // Guard: Delivery option is disabled; reset to Dine-In (1) or Self Pickup (2)
+  useEffect(() => {
+    if (orderTypeId === 3) {
+      setOrderTypeId((isTableOrder || isDynamicQr || activeTable) ? 1 : 2);
+    }
+  }, [orderTypeId, isTableOrder, isDynamicQr, activeTable]);
+
   /* Customer OTP Verification State */
   const [isVerified, setIsVerified] = useState<boolean>(false);
   const [isOtpSent, setIsOtpSent] = useState<boolean>(false);
@@ -603,10 +610,16 @@ export default function CartModal({
       rawList = [
         { id: 1, typeName: 'Dine-In', description: 'Dine-In order type' },
         { id: 2, typeName: 'Self Pickup', description: 'Self Pickup / Takeaway' },
-        { id: 3, typeName: 'Delivery', description: 'Delivery order type' },
         { id: 4, typeName: 'Counter POS Ordering', description: 'Express counter POS order processing' },
       ];
     }
+
+    // Explicitly filter out Delivery option (User requirement: Disable delivery option)
+    rawList = rawList.filter((t: any) => {
+      const typeName = String(t.typeName || t.name || t.code || '').toLowerCase();
+      const desc = String(t.description || '').toLowerCase();
+      return Number(t.id) !== 3 && !typeName.includes('delivery') && !desc.includes('delivery');
+    });
 
     if (isTableOrder || isDynamicQr || activeTable) {
       const hasDineIn = rawList.some((t: any) => t.id === 1 || String(t.typeName || t.name).toLowerCase().includes('dine'));
@@ -2050,6 +2063,14 @@ export default function CartModal({
                           );
 
                         const isLockedForTable = Boolean((isTableOrder || isDynamicQr || activeTable) && type.id !== 1);
+                        const isDelivery = Boolean(
+                          Number(type.id) === 3 ||
+                          String(type.typeName || type.name || type.code || '').toLowerCase().includes('delivery')
+                        );
+
+                        if (isDelivery) {
+                          return null;
+                        }
 
                         return (
                           <TouchableOpacity
