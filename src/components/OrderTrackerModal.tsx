@@ -33,10 +33,15 @@ import {
   Bell,
   Droplets,
   Receipt,
+  AlertTriangle,
   Sparkles,
+  Download,
+  Share2,
+  MessageCircle,
 } from 'lucide-react';
 import * as api from '../services/api';
 import * as signalrService from '../services/signalr';
+import { OrderWhatsAppService } from '../services/whatsAppService';
 import { Order, Catalog, Table, StoreOperatingStatus } from '../types';
 
 const STATUSES = [
@@ -149,24 +154,24 @@ const getOrderStatusInfo = (ord, isKitchenActiveOverride = null, catalog = null,
       rawStatus = 'Cancelled';
     }
 
-    // Business Rule: For Cash QR orders, status will only be Confirmed AFTER Payment to cashier settlement.
-    if (!isOnline && !isPaid) {
-      if (rawStatus === 'Confirmed' || rawStatus === 'Preparing') {
-        rawStatus = 'Pending';
-      }
-    }
+    // Cash QR orders can be Confirmed and Preparing once approved by POS cashier
 
     const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
 
-    const kitchenBadgeByStatus = {
-      Confirmed: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
-      Preparing: { badgeColor: '#ea580c', badgeBg: '#ffedd5', label: 'In Kitchen' },
-      Ready: { badgeColor: '#7c3aed', badgeBg: '#ede9fe', label: 'Ready to Serve' },
-      Served: {
-        badgeColor: '#15803d',
-        badgeBg: '#dcfce7',
-        label: isDineInOrder(ord) ? 'Served to Table' : 'Picked Up',
-      },
+    const greenBadge = (lbl: string) => ({
+      badgeColor: '#15803d',
+      badgeBg: '#dcfce7',
+      label: lbl,
+    });
+
+    const kitchenBadgeByStatus: Record<string, { badgeColor: string; badgeBg: string; label: string }> = {
+      Confirmed: greenBadge('Confirmed'),
+      Preparing: greenBadge('In Kitchen'),
+      Ready: greenBadge('Ready to Serve'),
+      Served: greenBadge(isDineInOrder(ord) ? 'Served to Table' : 'Picked Up'),
+      Delivered: greenBadge(isDineInOrder(ord) ? 'Served to Table' : 'Delivered'),
+      Completed: greenBadge('Completed'),
+      Settled: greenBadge('Completed'),
       Cancelled: { badgeColor: '#dc2626', badgeBg: '#fee2e2', label: 'Cancelled' },
     };
 
@@ -202,29 +207,24 @@ const getOrderStatusInfo = (ord, isKitchenActiveOverride = null, catalog = null,
         ? orderStatusCandidates[0]
         : 'Pending';
 
-    // Business Rule: For Cash QR orders, status will only be Confirmed AFTER Payment to cashier settlement.
-    if (!isOnline && !isPaid) {
-      if (rawStatus === 'Confirmed') {
-        rawStatus = 'Pending';
-      }
-    }
+    // Cash QR orders can be Confirmed once approved by POS cashier
 
     const normalizedStatus = isAwaitingPayment ? 'Pending' : rawStatus;
 
-    const orderBadgeByStatus = {
-      Confirmed: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
-      Preparing: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
-      Ready: { badgeColor: '#0d9488', badgeBg: '#ccfbf1', label: 'Confirmed' },
-      Served: {
-        badgeColor: '#15803d',
-        badgeBg: '#dcfce7',
-        label: isDineInOrder(ord) ? 'Completed' : 'Picked Up',
-      },
-      Delivered: {
-        badgeColor: '#15803d',
-        badgeBg: '#dcfce7',
-        label: 'Completed',
-      },
+    const greenOrderBadge = (lbl: string) => ({
+      badgeColor: '#15803d',
+      badgeBg: '#dcfce7',
+      label: lbl,
+    });
+
+    const orderBadgeByStatus: Record<string, { badgeColor: string; badgeBg: string; label: string }> = {
+      Confirmed: greenOrderBadge('Confirmed'),
+      Preparing: greenOrderBadge('Confirmed'),
+      Ready: greenOrderBadge('Confirmed'),
+      Served: greenOrderBadge(isDineInOrder(ord) ? 'Completed' : 'Picked Up'),
+      Delivered: greenOrderBadge('Completed'),
+      Completed: greenOrderBadge('Completed'),
+      Settled: greenOrderBadge('Completed'),
       Cancelled: { badgeColor: '#dc2626', badgeBg: '#fee2e2', label: 'Cancelled' },
     };
 
@@ -283,11 +283,6 @@ const normalizeDeliveryType = (value) =>
     .replace(/[_\s]+/g, '-')
     .replace(/-+/g, '-');
 
-const isDineInOrder = (ord) =>
-  ['dine-in', 'dine-in-order', 'dinein'].includes(
-    normalizeDeliveryType(ord?.deliveryType || ord?.DeliveryType)
-  );
-
 const hasOrderTableId = (ord) => {
   if (!ord) return false;
   const tid = ord.tableId ?? ord.TableId ?? ord.tableNumber ?? ord.TableNumber;
@@ -298,6 +293,14 @@ const hasOrderTableId = (ord) => {
   }
   return String(tid).trim().length > 0;
 };
+
+const isDineInOrder = (ord) =>
+  hasOrderTableId(ord) ||
+  ['dine-in', 'dine-in-order', 'dinein'].includes(
+    normalizeDeliveryType(ord?.deliveryType || ord?.DeliveryType || ord?.orderTypeName || ord?.OrderTypeName)
+  ) ||
+  ord?.orderTypeId === 1 ||
+  ord?.OrderTypeId === 1;
 
 const getOrderDiningType = (ord) =>
   isDineInOrder(ord) ? 'Dine-In' : 'Self Pickup';
@@ -454,6 +457,34 @@ export default function OrderTrackerModal({
       setViewMode('list');
     }
   }, [visible, order, targetOrder]);
+
+  const handleShareWhatsAppBill = () => {
+    const target = selectedOrder || targetOrder || order || api.getSavedActiveOrder();
+    if (!target) return;
+    const phone = target.customerPhone || target.phone || target.customerMobile || target.MobileNumber || '';
+    const cleanOrderId = String(target.orderId || target.id || target.OrderId || target.Id || '').replace(/[^0-9]/g, '') || String(target.orderId || target.id);
+    const orderItems = getOrderItems(target);
+    OrderWhatsAppService.shareWhatsAppReceipt(phone, {
+      restaurantName: catalog?.restaurantName || activeTable?.restaurantName || 'Menza Restaurant',
+      orderId: cleanOrderId,
+      customerName: target.customerName || target.Name || target.name,
+      tableName: activeTable?.tableName || target.tableName,
+      orderType: activeTable ? 'Dine-In' : 'Takeaway',
+      items: (orderItems || []).map((it: any) => ({
+        itemName: it.itemName || it.name || it.ItemName,
+        quantity: Number(it.quantity || it.Quantity || 1),
+        price: Number(it.amount ?? it.unitPrice ?? it.price ?? it.Price ?? 0),
+      })),
+      subTotal: Number(target.subTotal || target.subtotal || target.itemTotal || target.orderAmount || 0),
+      cgst: Number(target.cgstAmount || target.cgst || 0),
+      sgst: Number(target.sgstAmount || target.sgst || 0),
+      taxAmount: Number(target.taxAmount || ((target.cgstAmount || 0) + (target.sgstAmount || 0))),
+      discountAmount: Number(target.discountAmount || 0),
+      grandTotal: Number(target.totalAmount || target.orderAmount || 0),
+      paymentMode: target.paymentMode || target.PaymentMode || 'CASH',
+      paymentStatus: target.paymentStatus || 'Pending',
+    }, target);
+  };
 
   useEffect(() => {
     if (!visible) return;
@@ -666,9 +697,7 @@ export default function OrderTrackerModal({
       cancelled = true;
       if (interval) clearInterval(interval);
       unsubscribeSignalR();
-      if (activeOrderId) {
-        signalrService.leaveOrderGroup(activeOrderId);
-      }
+      // Keep active order subscribed so customer receives live alerts even when modal is minimized
     };
   }, [
     visible,
@@ -797,6 +826,12 @@ export default function OrderTrackerModal({
         storeOperatingStatus
       );
 
+      const isAwaitingCounterPayment =
+        !isPaid &&
+        !isOnline &&
+        String(curOrder?.paymentStatus || '').toLowerCase() !== 'paid' &&
+        !['Served', 'Completed', 'Cancelled', 'Delivered'].includes(normalizedStatus);
+
       let prepCountdown = {
         formatted: 'Order confirmed',
         shortFormatted: 'Confirmed',
@@ -850,23 +885,30 @@ export default function OrderTrackerModal({
           (itemsSum > 0 ? itemsSum : 0)
       ) || 0;
 
-    const cgst =
-      Number(
-        (curOrder.cgstAmount > 0 ? curOrder.cgstAmount : null) ??
-          (curOrder.cgst > 0 ? curOrder.cgst : null) ??
-          Math.round(
-            subtotal * 0.025 * 100
-          ) / 100
-      ) || 0;
+    const rawOrderGst = curOrder.gstNumber || catalog?.gstNumber || null;
+    const cleanOrderGst = typeof rawOrderGst === 'string' && rawOrderGst.trim().length > 0 ? rawOrderGst.trim() : null;
+    const hasGst = Boolean(cleanOrderGst);
 
-    const sgst =
-      Number(
-        (curOrder.sgstAmount > 0 ? curOrder.sgstAmount : null) ??
-          (curOrder.sgst > 0 ? curOrder.sgst : null) ??
-          Math.round(
-            subtotal * 0.025 * 100
-          ) / 100
-      ) || 0;
+    const cgstRate = hasGst ? Number(curOrder.cgstPercentage ?? catalog?.cgstPercentage ?? 2.5) : 0;
+    const sgstRate = hasGst ? Number(curOrder.sgstPercentage ?? catalog?.sgstPercentage ?? 2.5) : 0;
+
+    const cgst = hasGst
+      ? Number(
+          (curOrder.cgstAmount !== undefined && curOrder.cgstAmount !== null && Number(curOrder.cgstAmount) >= 0 ? curOrder.cgstAmount : null) ??
+          (curOrder.cgst !== undefined && curOrder.cgst !== null && Number(curOrder.cgst) >= 0 ? curOrder.cgst : null) ??
+          Math.round(subtotal * (cgstRate / 100) * 100) / 100
+        ) || 0
+      : 0;
+
+    const sgst = hasGst
+      ? Number(
+          (curOrder.sgstAmount !== undefined && curOrder.sgstAmount !== null && Number(curOrder.sgstAmount) >= 0 ? curOrder.sgstAmount : null) ??
+          (curOrder.sgst !== undefined && curOrder.sgst !== null && Number(curOrder.sgst) >= 0 ? curOrder.sgst : null) ??
+          Math.round(subtotal * (sgstRate / 100) * 100) / 100
+        ) || 0
+      : 0;
+
+    const hasGstBifurcation = Boolean(hasGst && cleanOrderGst && cgst > 0 && sgst > 0);
 
     const grandTotal =
       Number(
@@ -1053,6 +1095,57 @@ export default function OrderTrackerModal({
           </View>
         </View>
 
+        {/* ACTION REQUIRED BANNER FOR PREPAID UNPAID ORDERS */}
+        {isAwaitingCounterPayment && (
+          <View style={{
+            marginHorizontal: 16,
+            marginTop: 12,
+            padding: 14,
+            borderRadius: 14,
+            backgroundColor: '#FFFBEB',
+            borderWidth: 1.5,
+            borderColor: '#FDE68A',
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: 12,
+          }}>
+            <View style={{
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              backgroundColor: '#FEF3C7',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <AlertTriangle size={20} color="#D97706" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: '#92400E' }}>
+                  Action Required to Start Preparation
+                </Text>
+                <View style={{
+                  backgroundColor: '#FDE68A',
+                  paddingHorizontal: 6,
+                  paddingVertical: 1,
+                  borderRadius: 4,
+                }}>
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: '#B45309' }}>
+                    UNPAID
+                  </Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 12, color: '#B45309', marginTop: 3, lineHeight: 17, fontWeight: '600' }}>
+                Please pay ₹{grandTotal} at the counter first to get your order sent to the kitchen.
+              </Text>
+              <Text style={{ fontSize: 11, color: '#92400E', marginTop: 4, fontWeight: '700' }}>
+                Quote Order #{curOrder.id || curOrder.orderId} at the POS billing counter.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* TABLE SERVICE & CALL WAITER ACTIONS */}
         {isTableOrder && (
           <View style={styles.waiterCard}>
@@ -1198,7 +1291,7 @@ export default function OrderTrackerModal({
             </View>
 
             <View style={styles.statusMessageCallout}>
-              <Utensils size={18} color="#0d9488" />
+              <Utensils size={18} color="#15803d" />
               <View style={styles.statusMessageTextWrap}>
                 <Text style={styles.statusMessageTitle}>
                   {normalizedStatus === 'Served' || normalizedStatus === 'Delivered'
@@ -1221,7 +1314,7 @@ export default function OrderTrackerModal({
           <View style={styles.card}>
             <View style={[styles.sectionHeader, { justifyContent: 'space-between', alignItems: 'center' }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <ChefHat size={16} color="#D33401" />
+                <ChefHat size={16} color="#15803d" />
                 <Text style={styles.cardTitle}>Live Kitchen Progress</Text>
               </View>
               {!prepCountdown.isFinished && (
@@ -1726,37 +1819,69 @@ export default function OrderTrackerModal({
               </Text>
             </View>
 
-            <View
-              style={styles.billRow}
-            >
-              <Text
-                style={styles.billLabel}
-              >
-                CGST (2.5%)
-              </Text>
+            {hasGstBifurcation ? (
+              <>
+                <View
+                  style={styles.billRow}
+                >
+                  <Text
+                    style={styles.billLabel}
+                  >
+                    CGST {cgstRate > 0 ? `(${cgstRate}%)` : ''}
+                  </Text>
 
-              <Text
-                style={styles.billValue}
-              >
-                ₹{cgst.toFixed(2)}
-              </Text>
-            </View>
+                  <Text
+                    style={styles.billValue}
+                  >
+                    ₹{cgst.toFixed(2)}
+                  </Text>
+                </View>
 
-            <View
-              style={styles.billRow}
-            >
-              <Text
-                style={styles.billLabel}
-              >
-                SGST (2.5%)
-              </Text>
+                <View
+                  style={styles.billRow}
+                >
+                  <Text
+                    style={styles.billLabel}
+                  >
+                    SGST {sgstRate > 0 ? `(${sgstRate}%)` : ''}
+                  </Text>
 
-              <Text
-                style={styles.billValue}
-              >
-                ₹{sgst.toFixed(2)}
-              </Text>
-            </View>
+                  <Text
+                    style={styles.billValue}
+                  >
+                    ₹{sgst.toFixed(2)}
+                  </Text>
+                </View>
+
+                {cleanOrderGst && (
+                  <View
+                    style={styles.billRow}
+                  >
+                    <Text
+                      style={styles.billLabel}
+                    >
+                      GSTIN
+                    </Text>
+
+                    <Text
+                      style={styles.billValue}
+                    >
+                      {cleanOrderGst}
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={styles.billRow}>
+                <Text style={styles.billLabel}>
+                  Taxes & Levies
+                </Text>
+
+                <Text style={[styles.billValue, { color: '#059669', fontWeight: '700', fontSize: 11 }]}>
+                  Net total is inclusive of all taxes
+                </Text>
+              </View>
+            )}
 
             <View
               style={
@@ -1783,8 +1908,7 @@ export default function OrderTrackerModal({
                     styles.grandTotalTaxesNote
                   }
                 >
-                  (Inclusive of all
-                  applicable taxes)
+                  (Net total is inclusive of all taxes)
                 </Text>
               </View>
 
@@ -1795,6 +1919,58 @@ export default function OrderTrackerModal({
               >
                 ₹{grandTotal.toFixed(2)}
               </Text>
+            </View>
+
+            {/* Executive Action Bar for WhatsApp Bill and Save/Print PDF */}
+            <View style={{ marginTop: 16, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                onPress={handleShareWhatsAppBill}
+                style={{
+                  flex: 1,
+                  minWidth: 160,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: '#059669',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  shadowColor: '#059669',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: 3,
+                }}
+              >
+                <MessageCircle size={16} color="#FFFFFF" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>Share on WhatsApp</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  if (typeof window !== 'undefined') window.print();
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 140,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  backgroundColor: '#1E293B',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  shadowColor: '#000000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.1,
+                  shadowRadius: 4,
+                  elevation: 2,
+                }}
+              >
+                <Download size={16} color="#F59E0B" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>Download / Print PDF</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -1869,7 +2045,7 @@ export default function OrderTrackerModal({
               <Text style={{ fontSize: 11, color: (isPaid || isOnline) ? '#166534' : '#92400e', fontWeight: '500', lineHeight: 15 }}>
                 {(isPaid || isOnline)
                   ? '✓ This online order is settled and confirmed directly to kitchen for preparation.'
-                  : '⏳ This cash order requires manual acceptance & confirmation by the cashier or restaurant owner before kitchen prep.'}
+                  : '⏳ Please pay at the counter first to get the orders.'}
               </Text>
             </View>
 
@@ -3158,8 +3334,13 @@ const styles = StyleSheet.create({
   },
 
   stepCircleCurrent: {
-    backgroundColor: '#D33401',
-    borderColor: '#D33401',
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 3,
   },
 
   stepNumText: {
@@ -3182,7 +3363,7 @@ const styles = StyleSheet.create({
   },
 
   stepLabelTextCurrent: {
-    color: '#D33401',
+    color: '#15803d',
     fontWeight: '800',
   },
 

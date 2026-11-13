@@ -26,13 +26,42 @@ import QrScannerModal from './components/QrScannerModal';
 import RestaurantQrModal from './components/RestaurantQrModal';
 import CallWaiterModal from './components/CallWaiterModal';
 import LandingPage from './components/LandingPage';
+import OrderTrackingPage from './components/OrderTrackingPage';
 
 import * as api from './services/api';
 import * as signalrService from './services/signalr';
 import { logger } from './services/logger';
 
+function getTrackOrderIdFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const path = window.location.pathname;
+  const searchParams = new URLSearchParams(window.location.search);
+
+  // 1. Path match: /track/123 or /order/track/123 or /bill/123 or /invoice/123
+  const match = path.match(/\/(?:order\/)?(?:track|bill|invoice)\/([^/?#]+)/i);
+  if (match && match[1]) {
+    const val = decodeURIComponent(match[1]).trim();
+    if (val && !['undefined', 'null'].includes(val.toLowerCase())) {
+      return val;
+    }
+  }
+
+  // 2. Query param: ?trackOrderId=123, ?track=123, ?orderId=123 (if not returning from gateway checkout)
+  const isPaymentGatewayReturn = searchParams.has('order_token') || searchParams.has('cf_id');
+  if (!isPaymentGatewayReturn) {
+    const qId = searchParams.get('trackOrderId') || searchParams.get('track') || searchParams.get('orderId');
+    if (qId && qId.trim() && !['undefined', 'null'].includes(qId.trim().toLowerCase())) {
+      return qId.trim();
+    }
+  }
+
+  return null;
+}
+
 export default function App() {
-  const [mode, setMode] = useState<'customer' | 'staff' | 'landing'>(() => {
+  const [trackedOrderId, setTrackedOrderId] = useState<string | null>(() => getTrackOrderIdFromUrl());
+
+  const [mode, setMode] = useState<'customer' | 'staff' | 'landing' | 'track'>(() => {
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
       const path = window.location.pathname.toLowerCase();
@@ -40,6 +69,12 @@ export default function App() {
       // Explicit staff route
       if (path === '/staff' || searchParams.get('staff') === 'true' || searchParams.get('view') === 'staff') {
         return 'staff';
+      }
+
+      // Check if user came via track link: /track/:orderId or ?trackOrderId= or ?orderId=
+      const initialTrackId = getTrackOrderIdFromUrl();
+      if (initialTrackId) {
+        return 'track';
       }
 
       // Check if user came via a QR code link that provides a restaurant context candidate
@@ -79,6 +114,9 @@ export default function App() {
     useState([]);
 
   const [orders, setOrders] =
+    useState([]);
+
+  const [orderTypes, setOrderTypes] =
     useState([]);
 
   const [cart, setCart] = useState({
@@ -289,7 +327,8 @@ export default function App() {
       // 1. Update activeOrder if it's the active one or if it matches current table
       setActiveOrderState((prev) => {
         if (!prev) {
-          if (activeTable && data.tableId && Number(data.tableId) === Number(activeTable)) {
+          const activeTid = Number(activeTable?.id ?? activeTable?.tableId ?? activeTable);
+          if (activeTid && data.tableId && Number(data.tableId) === activeTid) {
             api.getOrder(changedOrderId).then((fresh) => {
               if (fresh) setActiveOrder(fresh);
             });
@@ -370,6 +409,17 @@ export default function App() {
       } else if ((st.includes('prep') || st.includes('cook')) && isKitchenActive) {
         showToast(`Chef started preparing Order ${displayId} in the kitchen (~15m).`, 'cooking', changedOrderId);
       } else if (st.includes('confirm')) {
+        setActiveTable((prevTable: any) => {
+          if (!prevTable) return prevTable;
+          return {
+            ...prevTable,
+            isDiningActive: true,
+            isSessionExpired: false,
+            sessionRemainingSeconds: null,
+            activeOrderId: changedOrderId || prevTable.activeOrderId,
+            activeOrderStatus: 'Confirmed',
+          };
+        });
         showToast(
           isKitchenActive
             ? `Order ${displayId} confirmed and sent to kitchen KOT.`
@@ -579,6 +629,14 @@ export default function App() {
       async () => {
         // If no restaurant parameter exists in URL (TYPE C: e.g. /, /random, ?foo=bar, ?tableId=T12)
         if (!encRestId && !urlRestId) {
+          const trackId = getTrackOrderIdFromUrl();
+          if (mode === 'track' || trackId) {
+            setTrackedOrderId(trackId);
+            setMode('track');
+            setLoading(false);
+            return;
+          }
+
           logger.info('NAVIGATION', 'LANDING_PAGE_ACCESSED', 'Customer opened home page without restaurant QR', {
             path: window.location.pathname,
             search: window.location.search,
@@ -769,13 +827,24 @@ export default function App() {
             // Fallback from cart if pendingPayload was somehow empty
             if (!pendingPayload && cartItems && cartItems.length > 0) {
               const subTotalVal = cartItems.reduce((acc, it) => acc + (Number(it.unitPrice || it.price || 0) * (Number(it.quantity) || 1)), 0);
-              const taxVal = Math.round(subTotalVal * 0.05 * 100) / 100;
+              const rawGst = catalog?.gstNumber || null;
+              const cleanGst = typeof rawGst === 'string' && rawGst.trim().length > 0 ? rawGst.trim() : null;
+              const hasGst = Boolean(cleanGst);
+
+              const cgstRate = hasGst ? Number(catalog?.cgstPercentage ?? 2.5) : 0;
+              const sgstRate = hasGst ? Number(catalog?.sgstPercentage ?? 2.5) : 0;
+              const cgstVal = hasGst ? Math.round(subTotalVal * (cgstRate / 100) * 100) / 100 : 0;
+              const sgstVal = hasGst ? Math.round(subTotalVal * (sgstRate / 100) * 100) / 100 : 0;
+              const taxVal = hasGst ? Math.round((cgstVal + sgstVal) * 100) / 100 : 0;
               const grandVal = Math.round((subTotalVal + taxVal) * 100) / 100;
+              const isFallbackTableOrder = Boolean(targetTableNum);
               pendingPayload = {
                 restaurantId: Number(urlRestId) || catalog?.restaurantId || 1,
                 encryptedRestaurantId: targetEncryptedId || catalog?.encryptedRestaurantId || '',
                 tableId: targetTableNum || null,
                 tableNumber: targetTableNum ? String(targetTableNum) : null,
+                orderTypeId: isFallbackTableOrder ? 1 : 2,
+                deliveryType: isFallbackTableOrder ? 'Dine-In' : 'Takeaway / Counter',
                 customerName: 'Guest Diner',
                 customerPhone: '9999999999',
                 mobileNumber: '9999999999',
@@ -783,8 +852,11 @@ export default function App() {
                 subTotal: subTotalVal,
                 itemTotal: subTotalVal,
                 orderAmount: subTotalVal,
-                cgstAmount: Math.round(subTotalVal * 0.025 * 100) / 100,
-                sgstAmount: Math.round(subTotalVal * 0.025 * 100) / 100,
+                gstNumber: cleanGst,
+                cgstPercentage: hasGst ? cgstRate : 0,
+                sgstPercentage: hasGst ? sgstRate : 0,
+                cgstAmount: cgstVal,
+                sgstAmount: sgstVal,
                 taxAmount: taxVal,
                 totalAmount: grandVal,
                 paymentMode: 'CASHFREE',
@@ -806,10 +878,13 @@ export default function App() {
                 const effectivePhone = String(pendingPayload.customerPhone || pendingPayload.mobileNumber || '').trim();
                 const validPhone = effectivePhone.length >= 10 ? effectivePhone : '9999999999';
 
+                const isTableOrder = Boolean(targetTableNum || pendingPayload.tableId);
                 const placeRes = await api.placeOrder({
                   ...pendingPayload,
                   restaurantId: effectiveRestId,
                   encryptedRestaurantId: effectiveEncRestId,
+                  orderTypeId: isTableOrder ? 1 : (pendingPayload.orderTypeId || 2),
+                  deliveryType: isTableOrder ? 'Dine-In' : (pendingPayload.deliveryType || 'Takeaway / Counter'),
                   customerName: pendingPayload.name || pendingPayload.customerName || 'Guest Diner',
                   name: pendingPayload.name || pendingPayload.customerName || 'Guest Diner',
                   customerPhone: validPhone,
@@ -904,6 +979,14 @@ export default function App() {
                 0
               );
 
+              const rawFinalGst = finalPlacedOrder.gstNumber || pendingPayload?.gstNumber || catalog?.gstNumber || null;
+              const hasFinalGst = Boolean(typeof rawFinalGst === 'string' && rawFinalGst.trim().length > 0);
+              const cgstPercent = hasFinalGst ? Number(finalPlacedOrder.cgstPercentage ?? pendingPayload?.cgstPercentage ?? catalog?.cgstPercentage ?? 2.5) : 0;
+              const sgstPercent = hasFinalGst ? Number(finalPlacedOrder.sgstPercentage ?? pendingPayload?.sgstPercentage ?? catalog?.sgstPercentage ?? 2.5) : 0;
+              const fallbackCgst = hasFinalGst ? Math.round(subTotalVal * (cgstPercent / 100) * 100) / 100 : 0;
+              const fallbackSgst = hasFinalGst ? Math.round(subTotalVal * (sgstPercent / 100) * 100) / 100 : 0;
+              const fallbackTax = hasFinalGst ? Math.round((fallbackCgst + fallbackSgst) * 100) / 100 : 0;
+
               const finalOrder = {
                 ...finalPlacedOrder,
                 id: Number(finalPlacedOrder.id || finalPlacedOrder.orderId || 0) || Date.now() % 1000000,
@@ -912,9 +995,12 @@ export default function App() {
                 subTotal: subTotalVal,
                 itemTotal: subTotalVal,
                 orderAmount: subTotalVal,
-                cgstAmount: Number(finalPlacedOrder.cgstAmount ?? finalPlacedOrder.cgst ?? pendingPayload?.cgstAmount ?? (subTotalVal * 0.025)),
-                sgstAmount: Number(finalPlacedOrder.sgstAmount ?? finalPlacedOrder.sgst ?? pendingPayload?.sgstAmount ?? (subTotalVal * 0.025)),
-                taxAmount: Number(finalPlacedOrder.taxAmount ?? pendingPayload?.taxAmount ?? (subTotalVal * 0.05)),
+                gstNumber: hasFinalGst ? (rawFinalGst ? String(rawFinalGst).trim() : null) : null,
+                cgstPercentage: hasFinalGst ? cgstPercent : 0,
+                sgstPercentage: hasFinalGst ? sgstPercent : 0,
+                cgstAmount: hasFinalGst ? Number(finalPlacedOrder.cgstAmount ?? finalPlacedOrder.cgst ?? pendingPayload?.cgstAmount ?? fallbackCgst) : 0,
+                sgstAmount: hasFinalGst ? Number(finalPlacedOrder.sgstAmount ?? finalPlacedOrder.sgst ?? pendingPayload?.sgstAmount ?? fallbackSgst) : 0,
+                taxAmount: hasFinalGst ? Number(finalPlacedOrder.taxAmount ?? pendingPayload?.taxAmount ?? fallbackTax) : 0,
                 totalAmount: totalVal,
                 paymentStatus: 'Paid',
                 orderStatus: 'Confirmed',
@@ -1074,7 +1160,7 @@ export default function App() {
           ) || 1;
 
         const restName = resolvedCatalog?.restaurantName || `Restaurant #${numericRestId}`;
-        logger.setRestaurant(numericRestId, restName);
+        logger.setRestaurantId(numericRestId, restName);
         logger.info('MENU', 'CATALOG_LOADED', `Menu loaded for ${restName} (${(resolvedCatalog.items || []).length} items)`, {
           restaurantId: numericRestId,
           restaurantName: restName,
@@ -1103,6 +1189,11 @@ export default function App() {
 
         // 2. Secondary metadata in background (parallel, non-blocking)
         Promise.allSettled([
+          api.getOrderTypes(numericRestId).then((types) => {
+            if (Array.isArray(types) && types.length > 0) {
+              setOrderTypes(types);
+            }
+          }),
           api.getStoreOperatingStatus(numericRestId).then((statusData) => {
             if (statusData) {
               setStoreOperatingStatus(statusData);
@@ -1214,9 +1305,16 @@ export default function App() {
                 occupiedByOther: false,
                 activeOrderId: storeProfile?.activeOrderId || savedOrder?.id || null,
                 activeOrderPhoneLast4: storeProfile?.activeOrderPhoneLast4 || null,
+                isDiningActive: Boolean(storeProfile?.isDiningActive),
+                activeOrderStatus: storeProfile?.activeOrderStatus || null,
+                tableSessionToken: storeProfile?.tableSessionToken || targetTableId,
+                sessionRemainingSeconds: storeProfile?.sessionRemainingSeconds ?? null,
+                isSessionExpired: Boolean(storeProfile?.isSessionExpired),
+                qrType: storeProfile?.qrType || null,
+                dineInPaymentMode: storeProfile?.dineInPaymentMode || 'PREPAID',
               };
 
-              logger.setTable(resolvedTable.id, resolvedTable.tableName);
+              logger.setTableId(resolvedTable.id, resolvedTable.tableName);
               logger.info('SESSION', 'TABLE_RESOLVED', `Customer seated at ${resolvedTable.tableName || `Table ${resolvedTable.id}`}`, {
                 tableId: resolvedTable.id,
                 tableName: resolvedTable.tableName,
@@ -1226,12 +1324,19 @@ export default function App() {
                 isReserved: resolvedTable.isReserved,
               });
               setActiveTable(resolvedTable);
+              if (resolvedTable.isSessionExpired && !resolvedTable.isDiningActive) {
+                await api.clearCart();
+                syncCart(null);
+                setCartModalOpen(false);
+              } else {
+                await refreshCart();
+              }
             } else {
-              logger.setTable(undefined, undefined);
+              logger.setTableId(undefined, undefined);
               setActiveTable(null);
+              await refreshCart();
             }
           }),
-          refreshCart(),
           api.getAllOrders().then((allOrd) => {
             if (Array.isArray(allOrd)) setOrders(allOrd);
           }),
@@ -1264,28 +1369,31 @@ export default function App() {
       }
     };
 
-  const handleEnterRestaurantCode = useCallback(
-    async (code: string) => {
-      if (!code) return;
-      let targetCode = code.trim();
-      let tableParam: any = null;
+  const handleExploreMenuFromTracking = useCallback(
+    async (restaurantId: number, tableId: number | null = null) => {
+      if (!restaurantId || restaurantId <= 0) return;
       try {
-        if (targetCode.includes('http://') || targetCode.includes('https://') || targetCode.includes('?')) {
-          const urlStr = targetCode.startsWith('http') ? targetCode : `https://dummy.com/${targetCode}`;
-          const u = new URL(urlStr);
-          targetCode = u.searchParams.get('r') || u.searchParams.get('encRestId') || targetCode;
-          tableParam = u.searchParams.get('tableId') || u.searchParams.get('table') || null;
+        setLoading(true);
+        const encRest = api.encryptRestaurantId(restaurantId);
+        const encTable = tableId && tableId > 0 ? String(tableId) : null;
+        if (typeof window !== 'undefined') {
+          if (encTable) {
+            window.history.pushState({}, '', `/dinein/${encodeURIComponent(encRest)}/${encodeURIComponent(encTable)}`);
+          } else {
+            window.history.pushState({}, '', `/?r=${encodeURIComponent(encRest)}`);
+          }
         }
-      } catch {}
-
-      if (tableParam && typeof localStorage !== 'undefined') {
-        localStorage.setItem('menza_last_table_id', String(tableParam));
+        await loadMenuViaEncryptedEndpoint(encRest, encTable);
+        setMode('customer');
+      } catch (e) {
+        console.warn('Failed to explore menu from tracking:', e);
+      } finally {
+        setLoading(false);
       }
-
-      await loadMenuViaEncryptedEndpoint(targetCode, tableParam);
     },
-    []
+    [loadMenuViaEncryptedEndpoint]
   );
+
 
   /* =========================
      QR
@@ -1393,6 +1501,13 @@ export default function App() {
         );
         return;
       }
+      if (activeTable?.isSessionExpired && !activeTable?.isDiningActive) {
+        showToast(
+          'Your table ordering session has expired. Please re-scan your table QR code to order.',
+          'warn'
+        );
+        return;
+      }
 
       const restId =
         catalog
@@ -1496,6 +1611,13 @@ export default function App() {
         );
         return;
       }
+      if (activeTable?.isSessionExpired && !activeTable?.isDiningActive) {
+        showToast(
+          'Your table ordering session has expired. Please re-scan your table QR code to order.',
+          'warn'
+        );
+        return;
+      }
 
       const targetQty = Number(quantity);
 
@@ -1560,6 +1682,58 @@ export default function App() {
       );
     };
 
+  // Ticking countdown effect for time-bound 15-minute table session
+  useEffect(() => {
+    if (!activeTable || activeTable.isDiningActive || !activeTable.sessionRemainingSeconds || activeTable.sessionRemainingSeconds <= 0) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setActiveTable((prev: any) => {
+        if (!prev || prev.isDiningActive || !prev.sessionRemainingSeconds) {
+          return prev;
+        }
+        const rem = prev.sessionRemainingSeconds - 1;
+        if (rem <= 0) {
+          return {
+            ...prev,
+            sessionRemainingSeconds: 0,
+            isSessionExpired: true,
+          };
+        }
+        return {
+          ...prev,
+          sessionRemainingSeconds: rem,
+        };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [activeTable?.isDiningActive, activeTable?.sessionRemainingSeconds]);
+
+  const sessionExpiredRef = React.useRef(false);
+
+  // When table ordering session expires, immediately clear cart from DB and local state
+  useEffect(() => {
+    if (activeTable?.isSessionExpired && !activeTable?.isDiningActive) {
+      if (!sessionExpiredRef.current) {
+        sessionExpiredRef.current = true;
+        api.clearCart()
+          .then(() => {
+            syncCart(null);
+          })
+          .catch((err) => {
+            console.error('Failed to clear cart on session expiry:', err);
+            syncCart(null);
+          });
+        setCartModalOpen(false);
+        showToast('Your table ordering session has expired. Cart items cleared.', 'info');
+      }
+    } else {
+      sessionExpiredRef.current = false;
+    }
+  }, [activeTable?.isSessionExpired, activeTable?.isDiningActive]);
+
   /* =========================
      ORDER
   ========================= */
@@ -1616,6 +1790,10 @@ export default function App() {
           deviceId:
             orderPayload.deviceId ||
             api.getDeviceId(),
+
+          hardwareFingerprint:
+            orderPayload.hardwareFingerprint ||
+            api.getHardwareFingerprint(),
 
           items:
             Array.isArray(
@@ -1791,6 +1969,7 @@ export default function App() {
 
         setActiveOrder(completePlacedOrder);
         setTrackerTargetOrder(completePlacedOrder);
+        signalrService.joinOrderGroup(result.orderId);
         logger.setOrderId(result.orderId);
         logger.order('ORDER_PLACED', `Order #${result.orderId} placed successfully (₹${completePlacedOrder.totalAmount}, Mode: ${payload.paymentMode})`, {
           orderId: result.orderId,
@@ -1824,8 +2003,12 @@ export default function App() {
         setCartModalOpen(false);
         setOrderTrackerOpen(true);
 
+        const grandTotalAmt = completePlacedOrder.totalAmount || payload.totalAmount || 0;
+        const isPrepaidOrder = String(activeTable?.dineInPaymentMode || '').toUpperCase() === 'PREPAID' && (payload.paymentMode === 'CASH' || payload.paymentType === 'COUNTER_CASH');
         showToast(
-          `Order #${result.orderId} created successfully!`
+          isPrepaidOrder
+            ? `Order #${result.orderId} placed! Please pay ₹${grandTotalAmt} at the counter to start preparation.`
+            : `Order #${result.orderId} created successfully!`
         );
 
         return result;
@@ -1835,10 +2018,16 @@ export default function App() {
           err
         );
         logger.error('ORDER', 'ORDER_PLACEMENT_FAILED', err, {
-          tableId: payload?.tableId,
-          totalAmount: payload?.totalAmount,
-          paymentMode: payload?.paymentMode,
+          tableId: orderPayload?.tableId,
+          totalAmount: orderPayload?.totalAmount,
+          paymentMode: orderPayload?.paymentMode,
         });
+
+        if (String(err?.response?.data?.message || err?.message || '').toLowerCase().includes('expired')) {
+          await api.clearCart();
+          syncCart(null);
+          setCartModalOpen(false);
+        }
 
         if (err?.isRateLimited) {
           showToast(
@@ -2304,6 +2493,12 @@ export default function App() {
           onOpenScanner={() => setScannerOpen(true)}
           isInvalidRestaurant={isInvalidRestaurant}
         />
+      ) : mode === 'track' && trackedOrderId ? (
+        <OrderTrackingPage
+          orderId={trackedOrderId}
+          onExploreMenu={handleExploreMenuFromTracking}
+          onScanQr={() => setScannerOpen(true)}
+        />
       ) : (
         <>
           <Header
@@ -2343,9 +2538,6 @@ export default function App() {
             loading={loading}
             storeOperatingStatus={storeOperatingStatus}
             activeTable={effectiveTable}
-            openQrModal={() =>
-              setQrModalOpen(true)
-            }
             openCallWaiter={() =>
               handleOpenCallWaiter('CALL_WAITER')
             }
@@ -2367,9 +2559,6 @@ export default function App() {
               openOrderTracker={handleOpenOrderTracker}
               openScanner={() =>
                 setScannerOpen(true)
-              }
-              openQrModal={() =>
-                setQrModalOpen(true)
               }
               openCallWaiter={
                 handleOpenCallWaiter
@@ -2475,6 +2664,7 @@ export default function App() {
         }
         activeTable={effectiveTable}
         catalog={catalog}
+        orderTypes={orderTypes}
         loading={loading}
         storeOperatingStatus={storeOperatingStatus}
       />
@@ -2565,13 +2755,13 @@ const styles = StyleSheet.create({
   },
 
   toastReady: {
-    backgroundColor: '#7c3aed',
-    shadowColor: '#7c3aed',
+    backgroundColor: '#15803d',
+    shadowColor: '#15803d',
   },
 
   toastCooking: {
-    backgroundColor: '#ea580c',
-    shadowColor: '#ea580c',
+    backgroundColor: '#15803d',
+    shadowColor: '#15803d',
   },
 
   toastServed: {

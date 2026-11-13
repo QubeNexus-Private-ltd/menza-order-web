@@ -2,6 +2,11 @@ import axios from 'axios';
 import { ENV } from '../config/env';
 import { logger } from './logger';
 import {
+  getHardwareFingerprint,
+  getHardwareCanvasDeviceId,
+  getHardwareFingerprintMetadata,
+} from './fingerprint';
+import {
   consumeRateLimit,
   checkRateLimit,
   getCooldownSeconds,
@@ -12,6 +17,9 @@ import {
 } from './rateLimiter';
 
 export {
+  getHardwareFingerprint,
+  getHardwareCanvasDeviceId,
+  getHardwareFingerprintMetadata,
   consumeRateLimit,
   checkRateLimit,
   getCooldownSeconds,
@@ -174,6 +182,17 @@ export const getDeviceId = () => {
     return 'dev_server_test';
   }
 
+  // Use persistent Hardware Canvas Device ID (persists across Incognito & cache wipes)
+  try {
+    const hwDeviceId = getHardwareCanvasDeviceId();
+    if (hwDeviceId) {
+      localStorage.setItem('menza_device_id', hwDeviceId);
+      return hwDeviceId;
+    }
+  } catch (err) {
+    console.warn('Hardware canvas fingerprint fallback:', err);
+  }
+
   let devId = localStorage.getItem('menza_device_id');
 
   if (!devId) {
@@ -282,6 +301,27 @@ export const decryptIdentifier = (token) => {
     }
   }
   return token;
+};
+
+/* =========================================================
+   INDIAN MOBILE HELPERS & VALIDATION
+========================================================= */
+
+export const sanitizeIndianMobile = (input) => {
+  if (!input) return '';
+  let digits = String(input).replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length > 10) {
+    digits = digits.slice(2);
+  } else if (digits.startsWith('0') && digits.length > 10) {
+    digits = digits.slice(1);
+  }
+  return digits.slice(0, 10);
+};
+
+export const isValidIndianMobile = (phone) => {
+  if (!phone) return false;
+  const clean = sanitizeIndianMobile(phone);
+  return /^[6-9]\d{9}$/.test(clean);
 };
 
 /* =========================================================
@@ -517,37 +557,36 @@ export const switchRestaurant = async (
 ========================================================= */
 
 export const getOrderTypes = async (restaurantId = null) => {
+  // 1. Try restaurant-specific active order types if restaurantId is provided
+  if (restaurantId && Number(restaurantId) > 0) {
+    try {
+      const res = await api.get(`/api/OrderTypeMaster/restaurant/${restaurantId}/active`);
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.filter((t) => t.isActive !== false);
+      }
+    } catch (err) {
+      console.warn('Restaurant-specific order types unavailable, trying platform master:', err?.message);
+    }
+  }
+
+  // 2. Fetch platform master order types from OrderTypeMaster
   try {
-    const url =
-      restaurantId && Number(restaurantId) > 0
-        ? `/api/OrderTypeMaster/restaurant/${restaurantId}/active`
-        : '/api/OrderTypeMaster';
-
-    const res = await api.get(url);
-
-    if (
-      Array.isArray(res.data) &&
-      res.data.length > 0
-    ) {
-      return res.data.filter(
-        (t) => t.isActive !== false
-      );
+    const res = await api.get('/api/OrderTypeMaster');
+    if (Array.isArray(res.data) && res.data.length > 0) {
+      return res.data.filter((t) => t.isActive !== false);
     }
   } catch (error) {
-    try {
-      const fallbackRes = await api.get('/api/Order/Types');
-      if (
-        fallbackRes.data &&
-        Array.isArray(fallbackRes.data) &&
-        fallbackRes.data.length > 0
-      ) {
-        return fallbackRes.data.filter((t) => t.isActive !== false);
-      }
-    } catch {
-      console.log(
-        'OrderType API unavailable, using fallback.'
-      );
+    console.warn('Platform OrderTypeMaster unavailable, trying fallback:', error?.message);
+  }
+
+  // 3. Fallback to /api/Order/Types
+  try {
+    const fallbackRes = await api.get('/api/Order/Types');
+    if (fallbackRes.data && Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
+      return fallbackRes.data.filter((t) => t.isActive !== false);
     }
+  } catch {
+    console.log('OrderType API unavailable, using fallback.');
   }
 
   return [
@@ -927,6 +966,29 @@ const normalizeCatalogData = (
           }))
         : [],
 
+    gstNumber:
+      typeof (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo) === 'string' &&
+      (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo).trim().length > 0
+        ? (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo).trim()
+        : null,
+
+    hasGst: Boolean(
+      typeof (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo) === 'string' &&
+      (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo).trim().length > 0
+    ),
+
+    cgstPercentage:
+      (typeof (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo) === 'string' &&
+      (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo).trim().length > 0)
+        ? Number(data.cgstPercentage ?? data.CgstPercentage ?? data.cgstRate ?? 2.5)
+        : 0,
+
+    sgstPercentage:
+      (typeof (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo) === 'string' &&
+      (data.gstNumber || data.GstNumber || data.gstin || data.Gstin || data.gstNo || data.GstNo).trim().length > 0)
+        ? Number(data.sgstPercentage ?? data.SgstPercentage ?? data.sgstRate ?? 2.5)
+        : 0,
+
     items: normalizedItems,
   };
 };
@@ -1058,6 +1120,8 @@ export const getStoreProfile = async (
       params.set('encryptedTableId', String(encryptedTableId));
     }
     if (tableId) params.set('tableId', String(tableId));
+    const devId = getDeviceId();
+    if (devId) params.set('deviceId', devId);
 
     const res = await api.get(`/api/public/store/profile?${params.toString()}`);
     if (res?.data) {
@@ -1249,23 +1313,32 @@ const recalculateCart = (cart) => {
   const discountAmount = Number(cart.discountAmount || 0);
   const taxableAmount = Math.max(0, roundedSubTotal - discountAmount);
 
-  const cgstPercentage =
-    cart.cgstPercentage !== undefined ? Number(cart.cgstPercentage) : 2.5;
-  const sgstPercentage =
-    cart.sgstPercentage !== undefined ? Number(cart.sgstPercentage) : 2.5;
+  const rawCartGst = cart.gstNumber || cart.GstNumber || null;
+  const cleanCartGst = typeof rawCartGst === 'string' && rawCartGst.trim().length > 0 ? rawCartGst.trim() : null;
+  const hasGst = Boolean(cleanCartGst);
 
-  const cgstAmount =
-    Math.round(taxableAmount * (cgstPercentage / 100) * 100) / 100;
+  const cgstPercentage = hasGst
+    ? Number(cart.cgstPercentage !== undefined && cart.cgstPercentage !== null ? cart.cgstPercentage : 2.5)
+    : 0;
+  const sgstPercentage = hasGst
+    ? Number(cart.sgstPercentage !== undefined && cart.sgstPercentage !== null ? cart.sgstPercentage : 2.5)
+    : 0;
 
-  const sgstAmount =
-    Math.round(taxableAmount * (sgstPercentage / 100) * 100) / 100;
+  const cgstAmount = hasGst
+    ? Math.round(taxableAmount * (cgstPercentage / 100) * 100) / 100
+    : 0;
 
-  const taxAmount =
-    Math.round(
-      (cgstAmount +
-        sgstAmount) *
-        100
-    ) / 100;
+  const sgstAmount = hasGst
+    ? Math.round(taxableAmount * (sgstPercentage / 100) * 100) / 100
+    : 0;
+
+  const taxAmount = hasGst
+    ? Math.round(
+        (cgstAmount +
+          sgstAmount) *
+          100
+      ) / 100
+    : 0;
 
   const platformFee = Number(cart.platformFee || 0);
 
@@ -1284,9 +1357,10 @@ const recalculateCart = (cart) => {
     subTotal: roundedSubTotal,
     discountAmount,
     taxableAmount,
+    hasGst,
     cgstPercentage,
     sgstPercentage,
-    gstNumber: cart.gstNumber || null,
+    gstNumber: cleanCartGst,
     cgstAmount,
     sgstAmount,
     taxAmount,
@@ -1423,16 +1497,20 @@ export const getCart = async () => {
           ? res.data.availableOrderTypes
           : localCart.availableOrderTypes || [];
 
+      const rawServerGst = res.data.gstNumber ?? localCart.gstNumber ?? null;
+      const cleanServerGst = typeof rawServerGst === 'string' && rawServerGst.trim().length > 0 ? rawServerGst.trim() : null;
+      const hasServerGst = Boolean(cleanServerGst);
+
       const updated =
         recalculateCart({
           ...localCart,
           ...res.data,
           items: serverItems,
-          gstNumber: res.data.gstNumber ?? localCart.gstNumber ?? null,
-          cgstPercentage: res.data.cgstPercentage ?? localCart.cgstPercentage ?? 2.5,
-          sgstPercentage: res.data.sgstPercentage ?? localCart.sgstPercentage ?? 2.5,
-          cgstAmount: res.data.cgstAmount,
-          sgstAmount: res.data.sgstAmount,
+          gstNumber: cleanServerGst,
+          cgstPercentage: hasServerGst ? Number(res.data.cgstPercentage ?? localCart.cgstPercentage ?? 2.5) : 0,
+          sgstPercentage: hasServerGst ? Number(res.data.sgstPercentage ?? localCart.sgstPercentage ?? 2.5) : 0,
+          cgstAmount: hasServerGst ? res.data.cgstAmount : 0,
+          sgstAmount: hasServerGst ? res.data.sgstAmount : 0,
           availableOrderTypes,
         });
 
@@ -2127,27 +2205,36 @@ export const normalizeOrder = (
       calculatedSubtotal
     ) || 0;
 
-  const cgst =
-    Number(
-      order.cgstAmount ??
-      order.cgst ??
-      Math.round(
-        effectiveSubtotal *
-          0.025 *
-          100
-      ) / 100
-    );
+  const rawOrderGst = order.gstNumber || order.GstNumber || null;
+  const cleanOrderGst = typeof rawOrderGst === 'string' && rawOrderGst.trim().length > 0 ? rawOrderGst.trim() : null;
+  const hasOrderGst = Boolean(cleanOrderGst);
 
-  const sgst =
-    Number(
-      order.sgstAmount ??
-      order.sgst ??
-      Math.round(
-        effectiveSubtotal *
-          0.025 *
-          100
-      ) / 100
-    );
+  const orderCgstRate = hasOrderGst ? Number(order.cgstPercentage ?? order.CgstPercentage ?? 2.5) : 0;
+  const orderSgstRate = hasOrderGst ? Number(order.sgstPercentage ?? order.SgstPercentage ?? 2.5) : 0;
+
+  const cgst = hasOrderGst
+    ? Number(
+        order.cgstAmount ??
+        order.cgst ??
+        Math.round(
+          effectiveSubtotal *
+            (orderCgstRate / 100) *
+            100
+        ) / 100
+      )
+    : 0;
+
+  const sgst = hasOrderGst
+    ? Number(
+        order.sgstAmount ??
+        order.sgst ??
+        Math.round(
+          effectiveSubtotal *
+            (orderSgstRate / 100) *
+            100
+        ) / 100
+      )
+    : 0;
 
   const calculatedTotal =
     Number(
@@ -2160,17 +2247,18 @@ export const normalizeOrder = (
       ) / 100
     );
 
-  const rawPaymentMode = (order.paymentMode || order.paymentMethod || 'CASH').toString().toUpperCase();
-  const isOnline = rawPaymentMode.includes('ONLINE') || rawPaymentMode.includes('CASHFREE') || rawPaymentMode.includes('UPI') || order.isOnline === true;
-  const paymentStatus = order.paymentStatus || (isOnline ? 'Paid' : 'Pending');
+  const rawPaymentMode = (order.paymentMode || order.PaymentMode || order.paymentMethod || order.PaymentMethod || order.paymentType || order.PaymentType || '').toString();
+  const isOnline = rawPaymentMode.toUpperCase().includes('ONLINE') || rawPaymentMode.toUpperCase().includes('CASHFREE') || rawPaymentMode.toUpperCase().includes('UPI') || order.isOnline === true;
+  const paymentStatus = order.paymentStatus || order.PaymentStatus || (isOnline ? 'Paid' : 'Pending');
   const isSettled = isOnline || String(paymentStatus).toLowerCase() === 'paid' || order.isSettled === true || Boolean(order.settledDateUtc);
-  const paymentType = order.paymentType || (isOnline ? 'Cashfree Online' : 'Counter Cash');
+  const paymentType = order.paymentType || order.PaymentType || (isOnline ? 'Cashfree Online' : 'Counter Cash');
+  const paymentMode = order.paymentMode || order.PaymentMode || order.paymentMethod || order.PaymentMethod || (isOnline ? 'ONLINE' : 'CASH');
   const deliveryType = order.deliveryType || (order.tableId ? 'Dine-In' : 'Takeaway / Counter');
   let orderStatus = order.orderStatus || order.status || (isOnline ? 'Confirmed' : 'Placed');
 
-  // Business Rule: For Cash QR orders, order status will only be Confirmed AFTER Payment to cashier settlement.
-  if (!isOnline && !isSettled && (orderStatus === 'Confirmed' || !orderStatus)) {
-    orderStatus = 'Placed';
+  // If order status is missing, default based on payment
+  if (!orderStatus) {
+    orderStatus = isOnline ? 'Confirmed' : 'Placed';
   }
 
   const requiresCashierConfirmation = !isOnline && !isSettled && (orderStatus === 'Placed' || orderStatus === 'Pending');
@@ -2189,10 +2277,7 @@ export const normalizeOrder = (
     orderStatus,
 
     kitchenStatus: (() => {
-      // For unsettled/unpaid cash orders, kitchen cannot be Confirmed before cashier settlement
-      if (!isOnline && !isSettled) {
-        return 'Pending';
-      }
+      // Kitchen status resolves to server status or order status
 
       const rawKitchen =
         order.kitchenStatus ||
@@ -2243,8 +2328,7 @@ export const normalizeOrder = (
 
     paymentStatus,
 
-    paymentMode:
-      isOnline ? 'ONLINE' : 'CASH',
+    paymentMode,
 
     paymentType,
 
@@ -2288,27 +2372,27 @@ export const normalizeOrder = (
       sgst,
 
     taxAmount:
-      Number(
-        order.taxAmount ??
-          (cgst + sgst)
-      ),
+      hasOrderGst
+        ? Number(
+            order.taxAmount ??
+              (cgst + sgst)
+          )
+        : 0,
 
     totalAmount:
       calculatedTotal,
 
     gstNumber:
-      order.gstNumber ||
-      null,
+      cleanOrderGst,
+
+    hasGst:
+      hasOrderGst,
 
     cgstPercentage:
-      order.cgstPercentage !== undefined
-        ? Number(order.cgstPercentage)
-        : 2.5,
+      hasOrderGst ? orderCgstRate : 0,
 
     sgstPercentage:
-      order.sgstPercentage !== undefined
-        ? Number(order.sgstPercentage)
-        : 2.5,
+      hasOrderGst ? orderSgstRate : 0,
 
     paymentOrderId:
       order.paymentOrderId ||
@@ -2453,19 +2537,28 @@ export const placeOrder =
         0
       );
 
-    const cgst =
-      Math.round(
-        itemsTotal *
-          0.025 *
-          100
-      ) / 100;
+    const rawDirectGst = orderPayload.gstNumber || null;
+    const cleanDirectGst = typeof rawDirectGst === 'string' && rawDirectGst.trim().length > 0 ? rawDirectGst.trim() : null;
+    const hasDirectGst = Boolean(cleanDirectGst);
 
-    const sgst =
-      Math.round(
-        itemsTotal *
-          0.025 *
-          100
-      ) / 100;
+    const directCgstRate = hasDirectGst ? Number(orderPayload.cgstPercentage !== undefined ? orderPayload.cgstPercentage : 2.5) : 0;
+    const directSgstRate = hasDirectGst ? Number(orderPayload.sgstPercentage !== undefined ? orderPayload.sgstPercentage : 2.5) : 0;
+
+    const cgst = hasDirectGst
+      ? Math.round(
+          itemsTotal *
+            (directCgstRate / 100) *
+            100
+        ) / 100
+      : 0;
+
+    const sgst = hasDirectGst
+      ? Math.round(
+          itemsTotal *
+            (directSgstRate / 100) *
+            100
+        ) / 100
+      : 0;
 
     const grandTotal =
       Math.round(
@@ -2503,7 +2596,7 @@ export const placeOrder =
 
     const isNumericTable = orderPayload.tableId && !isNaN(Number(orderPayload.tableId)) && Number(orderPayload.tableId) > 0;
     const rawTableIdStr = orderPayload.tableId ? String(orderPayload.tableId) : null;
-    const effectiveEncTable = !isNumericTable && rawTableIdStr ? rawTableIdStr : (orderPayload.encryptedTableId || null);
+    const effectiveEncTable = !isNumericTable && rawTableIdStr ? rawTableIdStr : (orderPayload.encryptedTableId || orderPayload.tableSessionToken || null);
 
     const resolvedRestId = Number(orderPayload.restaurantId) || 1;
     const resolvedEncRestId =
@@ -2511,8 +2604,8 @@ export const placeOrder =
       encryptRestaurantId(resolvedRestId);
 
     const rawPhone = String(orderPayload.customerPhone || orderPayload.mobileNumber || '').trim();
-    const cleanPhone = rawPhone.replace(/\D/g, '');
-    const validPhone = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : '9999999999';
+    const cleanPhone = sanitizeIndianMobile(rawPhone);
+    const validPhone = isValidIndianMobile(cleanPhone) ? cleanPhone : (cleanPhone.length >= 10 ? cleanPhone.slice(-10) : '9999999999');
 
     const customerName =
       orderPayload.customerName ||
@@ -2525,6 +2618,7 @@ export const placeOrder =
       tableId: isNumericTable ? Number(orderPayload.tableId) : null,
       encryptedTableId: effectiveEncTable,
       tableToken: effectiveEncTable,
+      tableSessionToken: orderPayload.tableSessionToken || effectiveEncTable,
       tableNumber: orderPayload.tableNumber
         ? String(orderPayload.tableNumber)
         : isNumericTable
@@ -2534,6 +2628,8 @@ export const placeOrder =
       customerPhone: validPhone,
       otpCode: orderPayload.otpCode || null,
       customerUserId: orderPayload.customerUserId || null,
+      deviceId: orderPayload.deviceId || getDeviceId(),
+      hardwareFingerprint: getHardwareFingerprint(),
       orderTypeId: Number(orderPayload.orderTypeId || 1),
       deliveryType:
         orderPayload.deliveryType ||
@@ -2542,6 +2638,7 @@ export const placeOrder =
         (orderPayload.paymentStatus === 'Paid' || orderPayload.cashfreeOrderId || orderPayload.paymentOrderId)
           ? 'CASHFREE'
           : (orderPayload.paymentMode || (orderPayload.paymentMethod === 'cashfree' ? 'CASHFREE' : 'CASH')),
+      requiresCashierConfirmation: orderPayload.requiresCashierConfirmation !== undefined ? Boolean(orderPayload.requiresCashierConfirmation) : true,
       paymentType:
         orderPayload.paymentType ||
         ((orderPayload.paymentMode === 'ONLINE' || orderPayload.paymentMode === 'CASHFREE' || orderPayload.paymentMethod === 'cashfree')
@@ -2563,15 +2660,15 @@ export const placeOrder =
         orderPayload.cashfreeOrderId ||
         orderPayload.paymentOrderId ||
         null,
-      gstNumber: orderPayload.gstNumber || null,
-      cgstPercentage: orderPayload.cgstPercentage !== undefined ? Number(orderPayload.cgstPercentage) : 2.5,
-      sgstPercentage: orderPayload.sgstPercentage !== undefined ? Number(orderPayload.sgstPercentage) : 2.5,
+      gstNumber: cleanDirectGst,
+      cgstPercentage: hasDirectGst ? directCgstRate : 0,
+      sgstPercentage: hasDirectGst ? directSgstRate : 0,
       orderAmount: orderPayload.orderAmount !== undefined ? Number(orderPayload.orderAmount) : itemsTotal,
       subTotal: orderPayload.subTotal !== undefined ? Number(orderPayload.subTotal) : itemsTotal,
       itemTotal: orderPayload.itemTotal !== undefined ? Number(orderPayload.itemTotal) : itemsTotal,
-      cgstAmount: orderPayload.cgstAmount !== undefined ? Number(orderPayload.cgstAmount) : cgst,
-      sgstAmount: orderPayload.sgstAmount !== undefined ? Number(orderPayload.sgstAmount) : sgst,
-      taxAmount: orderPayload.taxAmount !== undefined ? Number(orderPayload.taxAmount) : (cgst + sgst),
+      cgstAmount: hasDirectGst ? (orderPayload.cgstAmount !== undefined ? Number(orderPayload.cgstAmount) : cgst) : 0,
+      sgstAmount: hasDirectGst ? (orderPayload.sgstAmount !== undefined ? Number(orderPayload.sgstAmount) : sgst) : 0,
+      taxAmount: hasDirectGst ? (orderPayload.taxAmount !== undefined ? Number(orderPayload.taxAmount) : (cgst + sgst)) : 0,
       totalAmount: orderPayload.totalAmount !== undefined ? Number(orderPayload.totalAmount) : grandTotal,
       returnUrl,
       items: backendItems,
@@ -2700,13 +2797,13 @@ export const placeOrder =
           itemsTotal,
 
         cgstAmount:
-          cgst,
+          hasDirectGst ? cgst : 0,
 
         sgstAmount:
-          sgst,
+          hasDirectGst ? sgst : 0,
 
         taxAmount:
-          cgst + sgst,
+          hasDirectGst ? (cgst + sgst) : 0,
 
         totalAmount:
           Number(
@@ -2715,18 +2812,13 @@ export const placeOrder =
           ),
 
         gstNumber:
-          orderPayload.gstNumber ||
-          null,
+          cleanDirectGst,
 
         cgstPercentage:
-          orderPayload.cgstPercentage !== undefined
-            ? Number(orderPayload.cgstPercentage)
-            : 2.5,
+          hasDirectGst ? directCgstRate : 0,
 
         sgstPercentage:
-          orderPayload.sgstPercentage !== undefined
-            ? Number(orderPayload.sgstPercentage)
-            : 2.5,
+          hasDirectGst ? directSgstRate : 0,
 
         cashfreeOrderId:
           orderPayload.cashfreeOrderId ||

@@ -29,6 +29,8 @@ import {
   RefreshCw,
   Send,
   Check,
+  Utensils,
+  Clock,
 } from 'lucide-react';
 import * as api from '../services/api';
 import { joinOrderGroup } from '../services/signalr';
@@ -275,18 +277,86 @@ export default function CartModal({
   loading,
   storeOperatingStatus,
 }: CartModalProps) {
+  // Comprehensive table & dynamic QR detection
+  const isDynamicQrFromUrl = typeof window !== 'undefined' && (
+    window.location.pathname.includes('/mzt_') ||
+    window.location.search.includes('mzt_') ||
+    window.location.href.includes('mzt_') ||
+    window.location.pathname.toLowerCase().includes('/dinein')
+  );
+
+  const isDynamicQr = Boolean(
+    isDynamicQrFromUrl ||
+    (activeTable && (
+      activeTable.qrType === 'TABLE_INSTORE' ||
+      activeTable.isTimeBound ||
+      (typeof activeTable.tableSessionToken === 'string' && activeTable.tableSessionToken.startsWith('mzt_')) ||
+      (typeof activeTable.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds >= 0)
+    ))
+  );
+
+  const isTableOrder = Boolean(
+    isDynamicQr ||
+    Boolean(activeTable && (activeTable.id || activeTable.tableName || activeTable.tableNumber)) ||
+    (typeof window !== 'undefined' && (
+      window.location.pathname.toLowerCase().includes('/dinein') ||
+      new URLSearchParams(window.location.search).has('tableId') ||
+      new URLSearchParams(window.location.search).has('t') ||
+      new URLSearchParams(window.location.search).has('table') ||
+      new URLSearchParams(window.location.search).has('tablenum')
+    )) ||
+    (typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('menza_last_table_id')))
+  );
+
+  const isPostpaidTable = Boolean(activeTable && String(activeTable.dineInPaymentMode || '').toUpperCase() === 'POSTPAID');
+  const isPrepaidTable = !isPostpaidTable && Boolean(isTableOrder || isDynamicQr);
+  // Store profile ordering is locked to Pay at Counter with Cashier confirmation required
+  const isPayAtCounterOnly = true;
+  const isOnlinePaymentVisible = false;
+
   const [guestName, setGuestName] = useState<string>('');
   const [mobileNumber, setMobileNumber] = useState<string>('');
+  const [mobileError, setMobileError] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
-  const [orderTypeId, setOrderTypeId] = useState<number>(1);
-  const [paymentMethod, setPaymentMethod] = useState<string>('cashfree');
+  const [orderTypeId, setOrderTypeId] = useState<number>(() => (isTableOrder || isDynamicQr || activeTable) ? 1 : 2);
+  const [paymentMethod, setPaymentMethod] = useState<string>('payatcounter');
+
+  const handleMobileNumberChange = (val: string) => {
+    const clean = api.sanitizeIndianMobile(val);
+    setMobileNumber(clean);
+    if (errorMsg) setErrorMsg('');
+    if (clean.length > 0 && !/^[6-9]/.test(clean)) {
+      setMobileError('Indian mobile number must start with 6, 7, 8, or 9');
+    } else if (clean.length > 0 && clean.length < 10) {
+      setMobileError('Mobile number must be exactly 10 digits');
+    } else {
+      setMobileError('');
+    }
+  };
+
+  useEffect(() => {
+    setPaymentMethod('payatcounter');
+    if (isTableOrder || isDynamicQr || activeTable) {
+      setOrderTypeId(1);
+    }
+  }, [isTableOrder, isDynamicQr, activeTable, visible]);
+
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [processingPayment, setProcessingPayment] = useState<boolean>(false);
+  const [submittingOrder, setSubmittingOrder] = useState<boolean>(false);
   const [fetchingCart, setFetchingCart] = useState<boolean>(false);
   const [updatingItemId, setUpdatingItemId] = useState<any>(null);
   const [removingItemId, setRemovingItemId] = useState<any>(null);
   const [clearingCart, setClearingCart] = useState<boolean>(false);
   const [liveOrderTypes, setLiveOrderTypes] = useState<any[]>([]);
+  const [orderTypesLoading, setOrderTypesLoading] = useState<boolean>(false);
+
+  // Table orders and Dynamic QRs must strictly default and lock to Dine-In (OrderTypeId: 1)
+  useEffect(() => {
+    if (isTableOrder || isDynamicQr || activeTable) {
+      setOrderTypeId(1);
+    }
+  }, [isTableOrder, isDynamicQr, activeTable, visible]);
 
   /* Customer OTP Verification State */
   const [isVerified, setIsVerified] = useState<boolean>(false);
@@ -298,12 +368,21 @@ export default function CartModal({
   const [otpSuccessMsg, setOtpSuccessMsg] = useState<string>('');
   const [verifiedCustomer, setVerifiedCustomer] = useState<any>(null);
 
+  // Reset modal overlay states on close
+  useEffect(() => {
+    if (!visible) {
+      setProcessingPayment(false);
+      setSubmittingOrder(false);
+      setErrorMsg('');
+    }
+  }, [visible]);
+
   // Check saved customer login on mount or modal open
   useEffect(() => {
     if (!visible) return;
     const saved = api.getSavedCustomer();
     if (saved && (saved.mobile || saved.token)) {
-      if (saved.mobile) setMobileNumber(saved.mobile);
+      if (saved.mobile) setMobileNumber(api.sanitizeIndianMobile(saved.mobile));
       if (saved.name && (!guestName || guestName.startsWith('Guest '))) {
         setGuestName(saved.name);
       }
@@ -322,14 +401,16 @@ export default function CartModal({
   }, [otpCountdown]);
 
   const handleSendOtp = async () => {
-    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
-    if (cleanMobile.length < 10) {
-      setErrorMsg('Please enter a valid 10-digit mobile number.');
+    const cleanMobile = api.sanitizeIndianMobile(mobileNumber);
+    if (!api.isValidIndianMobile(cleanMobile)) {
+      setErrorMsg('Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.');
+      setMobileError('Must be a valid 10-digit Indian mobile number (starts with 6-9)');
       return;
     }
 
     try {
       setErrorMsg('');
+      setMobileError('');
       setOtpSuccessMsg('');
       setIsSendingOtp(true);
 
@@ -366,11 +447,12 @@ export default function CartModal({
   };
 
   const handleVerifyOtp = async () => {
-    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
+    const cleanMobile = api.sanitizeIndianMobile(mobileNumber);
     const cleanOtp = otpCode.trim();
 
-    if (cleanMobile.length < 10) {
-      setErrorMsg('Please enter a valid 10-digit mobile number.');
+    if (!api.isValidIndianMobile(cleanMobile)) {
+      setErrorMsg('Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.');
+      setMobileError('Must be a valid 10-digit Indian mobile number');
       return;
     }
 
@@ -445,45 +527,56 @@ export default function CartModal({
     setOtpSuccessMsg('');
   };
 
-  // Refresh server cart and fetch live OrderTypeMaster whenever the modal opens.
+  // Fetch live OrderTypeMaster from API whenever the modal opens or restaurant changes
   useEffect(() => {
-    if (!visible) return;
-
     let mounted = true;
 
-    const fetchCartAndOrderTypes = async () => {
-      setFetchingCart(true);
-
+    const fetchOrderTypes = async () => {
       try {
-        if (onRefreshCart) {
-          await onRefreshCart();
-        }
-
+        setOrderTypesLoading(true);
         const restId =
           cart?.restaurantId ||
           catalog?.restaurantId ||
-          null;
+          (typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).get('restaurantId') ||
+              localStorage.getItem('menza_last_rest_id')
+            : null);
 
-        const types = await api.getOrderTypes(restId);
+        const types = await api.getOrderTypes(restId ? Number(restId) : null);
 
-        if (
-          mounted &&
-          Array.isArray(types) &&
-          types.length > 0
-        ) {
+        if (mounted && Array.isArray(types) && types.length > 0) {
           setLiveOrderTypes(types);
         }
       } catch (error) {
-        console.error(
-          'Cart and OrderTypeMaster refresh error:',
-          error
-        );
-
+        console.warn('Failed to fetch live OrderTypeMaster in CartModal:', error);
+      } finally {
         if (mounted) {
-          setErrorMsg(
-            'Unable to refresh cart. Please try again.'
-          );
+          setOrderTypesLoading(false);
         }
+      }
+    };
+
+    if (visible) {
+      fetchOrderTypes();
+    }
+
+    return () => {
+      mounted = false;
+    };
+  }, [visible, cart?.restaurantId, catalog?.restaurantId]);
+
+  // Refresh server cart items whenever the modal opens
+  useEffect(() => {
+    if (!visible || !onRefreshCart) return;
+
+    let mounted = true;
+
+    const refresh = async () => {
+      setFetchingCart(true);
+      try {
+        await onRefreshCart();
+      } catch (error) {
+        console.warn('Cart refresh warning:', error);
       } finally {
         if (mounted) {
           setFetchingCart(false);
@@ -491,51 +584,58 @@ export default function CartModal({
       }
     };
 
-    fetchCartAndOrderTypes();
+    refresh();
 
     return () => {
       mounted = false;
     };
   }, [visible]);
 
-  const effectiveOrderTypes =
-    Array.isArray(liveOrderTypes) &&
-    liveOrderTypes.length > 0
-      ? liveOrderTypes
-      : Array.isArray(cart?.availableOrderTypes) &&
-        cart.availableOrderTypes.length > 0
-      ? cart.availableOrderTypes
-      : Array.isArray(orderTypes) &&
-        orderTypes.length > 0
-      ? orderTypes
-      : [
-          {
-            id: 1,
-            typeName: 'Dine-In',
-            description: 'Dine-In order type',
-          },
-          {
-            id: 2,
-            typeName: 'Self Pickup',
-            description: 'Self Pickup / Takeaway',
-          },
-          {
-            id: 3,
-            typeName: 'Delivery',
-            description: 'Delivery order type',
-          },
-          {
-            id: 4,
-            typeName: 'Counter POS Ordering',
-            description:
-              'Express counter POS order processing',
-          },
+  const effectiveOrderTypes = React.useMemo(() => {
+    let rawList: any[] = [];
+    if (Array.isArray(liveOrderTypes) && liveOrderTypes.length > 0) {
+      rawList = liveOrderTypes;
+    } else if (Array.isArray(orderTypes) && orderTypes.length > 0) {
+      rawList = orderTypes;
+    } else if (Array.isArray(cart?.availableOrderTypes) && cart.availableOrderTypes.length > 0) {
+      rawList = cart.availableOrderTypes;
+    } else {
+      rawList = [
+        { id: 1, typeName: 'Dine-In', description: 'Dine-In order type' },
+        { id: 2, typeName: 'Self Pickup', description: 'Self Pickup / Takeaway' },
+        { id: 3, typeName: 'Delivery', description: 'Delivery order type' },
+        { id: 4, typeName: 'Counter POS Ordering', description: 'Express counter POS order processing' },
+      ];
+    }
+
+    if (isTableOrder || isDynamicQr || activeTable) {
+      const hasDineIn = rawList.some((t: any) => t.id === 1 || String(t.typeName || t.name).toLowerCase().includes('dine'));
+      if (!hasDineIn) {
+        return [
+          { id: 1, typeName: 'Dine-In', description: 'Dine-In table ordering' },
+          ...rawList,
         ];
+      }
+      const dineInItem = rawList.find((t: any) => t.id === 1 || String(t.typeName || t.name).toLowerCase().includes('dine'));
+      const otherItems = rawList.filter((t: any) => t !== dineInItem);
+      return [dineInItem, ...otherItems];
+    }
+    return rawList;
+  }, [liveOrderTypes, orderTypes, cart?.availableOrderTypes, isTableOrder, isDynamicQr, activeTable]);
 
   const activeCartItems =
     cart && Array.isArray(cart.items)
       ? cart.items
       : cartItems;
+
+  // Auto-clear cart if table session expires while viewing or using cart
+  useEffect(() => {
+    if (activeTable && Boolean(activeTable.isSessionExpired) && !Boolean(activeTable.isDiningActive)) {
+      if (activeCartItems.length > 0 && onClearCart) {
+        onClearCart();
+      }
+    }
+  }, [activeTable?.isSessionExpired, activeTable?.isDiningActive, activeCartItems.length, onClearCart]);
 
   // Items Subtotal calculated from active items
   const itemsSubTotal = (activeCartItems || []).reduce(
@@ -557,37 +657,38 @@ export default function CartModal({
   );
   const taxableAmount = Math.max(0, subTotal - discountAmount);
 
-  // GST percentage resolution: Check cart first, then catalog, default to 2.5% if restaurant has GST
-  const cgstPercentage = Number(
-    cart?.cgstPercentage ??
-    catalog?.cgstPercentage ??
-    2.5
-  );
-  const sgstPercentage = Number(
-    cart?.sgstPercentage ??
-    catalog?.sgstPercentage ??
-    2.5
-  );
-  const gstNumber = cart?.gstNumber || catalog?.gstNumber || null;
+  // GST calculation rule: If gstNumber is not present, no GST is calculated (0 tax).
+  // If gstNumber is present, calculate GST as per restaurant configuration.
+  const rawGst = cart?.gstNumber || catalog?.gstNumber || null;
+  const cleanGstNumber = typeof rawGst === 'string' && rawGst.trim().length > 0 ? rawGst.trim() : null;
+  const hasGst = Boolean(cleanGstNumber);
 
-  // Determine if GST is present
-  const hasGst = cgstPercentage > 0 || sgstPercentage > 0 || Boolean(gstNumber);
+  const cgstPercentage = hasGst
+    ? Number(cart?.cgstPercentage ?? catalog?.cgstPercentage ?? 2.5)
+    : 0;
+  const sgstPercentage = hasGst
+    ? Number(cart?.sgstPercentage ?? catalog?.sgstPercentage ?? 2.5)
+    : 0;
 
-  // CGST and SGST calculation: use cart if > 0, otherwise compute from taxableAmount
-  const cgst = Number(cart?.cgstAmount ?? 0) > 0
-    ? Number(cart.cgstAmount)
-    : (hasGst ? Math.round(taxableAmount * (cgstPercentage / 100) * 100) / 100 : 0);
+  // CGST and SGST calculation: use cart if > 0 and hasGst, otherwise compute from taxableAmount
+  const cgst = hasGst
+    ? (Number(cart?.cgstAmount ?? 0) > 0
+        ? Number(cart.cgstAmount)
+        : Math.round(taxableAmount * (cgstPercentage / 100) * 100) / 100)
+    : 0;
 
-  const sgst = Number(cart?.sgstAmount ?? 0) > 0
-    ? Number(cart.sgstAmount)
-    : (hasGst ? Math.round(taxableAmount * (sgstPercentage / 100) * 100) / 100 : 0);
+  const sgst = hasGst
+    ? (Number(cart?.sgstAmount ?? 0) > 0
+        ? Number(cart.sgstAmount)
+        : Math.round(taxableAmount * (sgstPercentage / 100) * 100) / 100)
+    : 0;
 
-  const taxAmount = Math.round((cgst + sgst) * 100) / 100;
+  const taxAmount = hasGst ? Math.round((cgst + sgst) * 100) / 100 : 0;
   const platformFee = Number(
     cart?.platformFee ?? 0
   );
 
-  // Grand Total MUST strictly sum GST amount in the total and display on screen!
+  // Grand Total: strictly sum GST amount in the total if GST is present
   const grandTotal = Math.round(
     (taxableAmount + taxAmount + platformFee) * 100
   ) / 100;
@@ -716,48 +817,36 @@ export default function CartModal({
       return;
     }
 
-    const cleanMobile = mobileNumber.trim();
+    const cleanMobile = api.sanitizeIndianMobile(mobileNumber);
 
     if (!cleanMobile) {
-      setErrorMsg(
-        'Please enter your 10-digit mobile number.'
-      );
+      setErrorMsg('Please enter your 10-digit mobile number.');
+      setMobileError('Mobile number is required.');
       return;
     }
 
-    const phoneDigits = cleanMobile.replace(
-      /\D/g,
-      ''
-    );
-
-    if (phoneDigits.length < 10) {
-      setErrorMsg(
-        'Please enter a valid 10-digit mobile number.'
-      );
+    if (cleanMobile.length !== 10) {
+      setErrorMsg('Indian mobile number must be exactly 10 digits.');
+      setMobileError('Must be exactly 10 digits.');
       return;
     }
 
-    const cleanPhone = phoneDigits.slice(-10);
-
-    // Verify Customer Mobile & OTP before proceeding
-    if (!isVerified) {
-      if (isOtpSent && otpCode.trim().length >= 4) {
-        try {
-          await handleVerifyOtp();
-        } catch (e) {
-          return;
-        }
-      } else {
-        setErrorMsg(
-          'Mobile verification required. Please click "Get OTP" to verify your number before placing the order.'
-        );
-        if (!isOtpSent) {
-          handleSendOtp();
-        }
-        return;
-      }
+    if (!/^[6-9]/.test(cleanMobile)) {
+      setErrorMsg('Indian mobile number must start with 6, 7, 8, or 9.');
+      setMobileError('Must start with 6, 7, 8, or 9.');
+      return;
     }
 
+    if (!api.isValidIndianMobile(cleanMobile)) {
+      setErrorMsg('Please enter a valid 10-digit Indian mobile number.');
+      setMobileError('Invalid Indian mobile number.');
+      return;
+    }
+
+    setMobileError('');
+    const cleanPhone = cleanMobile;
+
+    // Direct checkout: mobile OTP verification removed
     if (activeTable?.isCleaning) {
       logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_CLEANING', `Checkout blocked: Table ${activeTable.tableName || activeTable.id} is cleaning`);
       setErrorMsg(
@@ -798,6 +887,15 @@ export default function CartModal({
           ? `Kitchen is temporarily paused (${storeOperatingStatus.remainingPauseMinutes || 0}m left). Reopening soon.`
           : 'Kitchen is currently closed for ordering.')
       );
+      return;
+    }
+
+    if (activeTable && Boolean(activeTable.isSessionExpired) && !Boolean(activeTable.isDiningActive)) {
+      logger.warn('CHECKOUT', 'CHECKOUT_BLOCKED_SESSION_EXPIRED', `Checkout blocked: Table ${activeTable.tableName || activeTable.id} ordering session expired`);
+      setErrorMsg('Your in-store table ordering session has expired (15-minute limit). Please re-scan your table QR code to place an order.');
+      if (onClearCart) {
+        onClearCart();
+      }
       return;
     }
 
@@ -844,6 +942,24 @@ export default function CartModal({
       }
     );
 
+    const effectiveTableId = activeTable?.id ||
+      (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tableId') : null) ||
+      (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('table') : null) ||
+      (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('t') : null) ||
+      null;
+
+    const effectiveTableName = activeTable?.tableName ||
+      (activeTable?.id ? `Table ${activeTable.id}` : (effectiveTableId ? `Table ${effectiveTableId}` : 'Dine-In Table'));
+
+    const effectiveTableToken =
+      activeTable?.tableSessionToken ||
+      activeTable?.encryptedTableId ||
+      (typeof window !== 'undefined' ? window.location.pathname.split('/').find(p => p.startsWith('mzt_')) : null) ||
+      (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('t') : null) ||
+      null;
+
+    const isThisTableOrder = Boolean(isTableOrder || isDynamicQr || effectiveTableId || effectiveTableToken);
+
     const orderPayload = {
       restaurantId: restId,
       name: guestName.trim(),
@@ -852,48 +968,102 @@ export default function CartModal({
       customerUserId: verifiedCustomer?.userId || null,
       remarks: remarks.trim(),
       isHomeDelivery: false,
-      orderTypeId,
-      tableId: activeTable
-        ? activeTable.id
-        : null,
-      tableNumber: activeTable
-        ? String(activeTable.id)
-        : '1',
+      orderTypeId: isThisTableOrder ? 1 : orderTypeId,
+      tableId: isThisTableOrder ? effectiveTableId : null,
+      tableNumber: isThisTableOrder ? effectiveTableName : null,
+      encryptedTableId: isThisTableOrder ? (activeTable?.encryptedTableId || effectiveTableToken || null) : null,
+      tableSessionToken: isThisTableOrder ? effectiveTableToken : null,
       items: orderItems,
-      deliveryType: activeTable ? 'Dine-In' : 'Takeaway / Counter',
-      paymentMode:
-        paymentMethod === 'cashfree'
-          ? 'ONLINE'
-          : 'CASH',
-      paymentType:
-        paymentMethod === 'cashfree'
-          ? 'ONLINE_CASHFREE'
-          : 'COUNTER_CASH',
-      paymentMethod:
-        paymentMethod === 'cashfree'
-          ? 'CASHFREE_SPLIT'
-          : 'COUNTER_CASH',
-      paymentStatus:
-        paymentMethod === 'cashfree'
-          ? 'Paid'
-          : 'Pending',
-      orderStatus:
-        paymentMethod === 'cashfree'
-          ? 'Confirmed'
-          : 'Placed',
-      isOnline: paymentMethod === 'cashfree',
-      isSettled: paymentMethod === 'cashfree',
-      requiresCashierConfirmation: paymentMethod !== 'cashfree',
-      source: 'QR_DINEIN',
-      gstNumber: gstNumber || null,
-      cgstPercentage,
-      sgstPercentage,
+      deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
+      paymentMode: 'CASH',
+      paymentType: 'COUNTER_CASH',
+      paymentMethod: 'COUNTER_CASH',
+      paymentStatus: 'Pending',
+      orderStatus: 'Placed',
+      isOnline: false,
+      isSettled: false,
+      requiresCashierConfirmation: true,
+      deviceId: api.getDeviceId(),
+      hardwareFingerprint: api.getHardwareFingerprint(),
+      source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
+      gstNumber: cleanGstNumber,
+      cgstPercentage: hasGst ? cgstPercentage : 0,
+      sgstPercentage: hasGst ? sgstPercentage : 0,
       subTotal,
-      cgstAmount: cgst,
-      sgstAmount: sgst,
-      taxAmount,
+      cgstAmount: hasGst ? cgst : 0,
+      sgstAmount: hasGst ? sgst : 0,
+      taxAmount: hasGst ? taxAmount : 0,
       totalAmount: grandTotal,
     };
+
+    const isDirectPlaceOrder = true;
+
+    if (isDirectPlaceOrder) {
+      // Store Profile & Dine-In orders: Locked to Pay at Counter with Cashier Confirmation Required
+      // NEVER REDIRECT TO CASHFREE PAYMENT GATEWAY!
+      setSubmittingOrder(true);
+      setProcessingPayment(false);
+      try {
+        const directCounterOrderPayload = {
+          ...orderPayload,
+          tableId: isThisTableOrder ? effectiveTableId : null,
+          tableNumber: isThisTableOrder ? effectiveTableName : null,
+          encryptedTableId: isThisTableOrder ? (activeTable?.encryptedTableId || effectiveTableToken || null) : null,
+          tableSessionToken: isThisTableOrder ? effectiveTableToken : null,
+          paymentMode: 'CASH',
+          paymentType: 'COUNTER_CASH',
+          paymentMethod: 'COUNTER_CASH',
+          paymentStatus: 'Pending',
+          orderStatus: 'Placed',
+          isOnline: false,
+          isSettled: false,
+          requiresCashierConfirmation: true,
+          source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
+          deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
+          orderTypeId: isThisTableOrder ? 1 : orderTypeId,
+        };
+
+        logger.checkout('CHECKOUT_COUNTER_SUBMIT', `Customer placed counter order for ${isThisTableOrder ? effectiveTableName : 'Storefront Counter'}: ₹${grandTotal}`, {
+          tableId: isThisTableOrder ? effectiveTableId : null,
+          tableName: isThisTableOrder ? effectiveTableName : null,
+          grandTotal,
+          itemsCount: orderItems.length,
+          paymentMode: 'COUNTER_CASH',
+          requiresCashierConfirmation: true,
+        });
+
+        if (typeof onPlaceOrder === 'function') {
+          await onPlaceOrder(directCounterOrderPayload);
+        } else {
+          await api.placeOrder(directCounterOrderPayload);
+        }
+
+        setSubmittingOrder(false);
+        setProcessingPayment(false);
+        onClose();
+        if (typeof onClearCart === 'function') {
+          await onClearCart();
+        }
+        return; // ABSOLUTE RETURN - PREVENTS CASHFREE
+      } catch (placeErr: any) {
+        console.error('Counter place order error:', placeErr);
+        logger.error('CHECKOUT', 'CHECKOUT_COUNTER_FAILED', placeErr, {
+          tableId: isThisTableOrder ? effectiveTableId : null,
+          amount: grandTotal,
+        });
+        setErrorMsg(placeErr?.response?.data?.message || placeErr?.message || 'Unable to place order. Please alert restaurant staff.');
+        setSubmittingOrder(false);
+        setProcessingPayment(false);
+        return; // ABSOLUTE RETURN - PREVENTS CASHFREE EVEN ON ERROR
+      }
+    }
+
+    // Double-guard: Dynamic QR and Table Orders MUST NEVER proceed to Cashfree
+    if (isThisTableOrder || isDynamicQr) {
+      setErrorMsg('Dynamic QR and Table orders must be placed directly at counter.');
+      setProcessingPayment(false);
+      return;
+    }
 
     if (paymentMethod === 'cashfree') {
       setProcessingPayment(true);
@@ -993,7 +1163,8 @@ export default function CartModal({
               ? activeTable.id
               : null,
           tableNumber: effectiveTable,
-          deliveryType: activeTable ? 'Dine-In' : 'Takeaway / Counter',
+          orderTypeId: activeTable ? 1 : orderTypeId,
+          deliveryType: activeTable ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
           paymentMode: 'CASHFREE',
           paymentType: 'ONLINE_CASHFREE',
           paymentStatus: 'Paid',
@@ -1003,10 +1174,15 @@ export default function CartModal({
           subTotal: subTotal,
           itemTotal: subTotal,
           orderAmount: subTotal,
-          cgstAmount: cgst,
-          sgstAmount: sgst,
-          taxAmount: cgst + sgst,
+          gstNumber: cleanGstNumber,
+          cgstPercentage: hasGst ? cgstPercentage : 0,
+          sgstPercentage: hasGst ? sgstPercentage : 0,
+          cgstAmount: hasGst ? cgst : 0,
+          sgstAmount: hasGst ? sgst : 0,
+          taxAmount: hasGst ? (cgst + sgst) : 0,
           totalAmount: grandTotal,
+          deviceId: api.getDeviceId(),
+          hardwareFingerprint: api.getHardwareFingerprint(),
           items: orderItems,
           createdAt: new Date().toISOString(),
         };
@@ -1136,7 +1312,7 @@ export default function CartModal({
   if (!visible) return null;
 
   const isLoadingState =
-    loading || processingPayment;
+    loading || submittingOrder || processingPayment;
 
   const selectedItemsCount = activeCartItems.length;
 
@@ -1149,7 +1325,36 @@ export default function CartModal({
     >
       <View style={styles.overlay} className="responsive-modal-overlay">
         <View style={styles.sheetContainer} className="responsive-modal-sheet">
-          {processingPayment && (
+          {submittingOrder && (
+            <View
+              style={
+                styles.paymentProcessingOverlay
+              }
+            >
+              <ActivityIndicator
+                size="large"
+                color="#10b981"
+              />
+
+              <Text
+                style={
+                  styles.paymentProcessingTitle
+                }
+              >
+                Placing Your Table Order...
+              </Text>
+
+              <Text
+                style={
+                  styles.paymentProcessingSubtitle
+                }
+              >
+                Sending your order directly to the restaurant kitchen. Please wait a moment.
+              </Text>
+            </View>
+          )}
+
+          {processingPayment && !isTableOrder && !isDynamicQr && !isPayAtCounterOnly && (
             <View
               style={
                 styles.paymentProcessingOverlay
@@ -1217,6 +1422,70 @@ export default function CartModal({
             </TouchableOpacity>
           </View>
 
+          {/* Prominent Table Session Countdown Banner */}
+          {Boolean(isTableOrder || isDynamicQr) && (
+            <View style={[
+              styles.cartTopSessionBar,
+              activeTable?.isSessionExpired
+                ? styles.cartTopSessionBarExpired
+                : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                ? styles.cartTopSessionBarUrgent
+                : styles.cartTopSessionBarActive
+            ]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={[
+                  styles.cartTopSessionIconBox,
+                  activeTable?.isSessionExpired
+                    ? { backgroundColor: '#fee2e2' }
+                    : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                    ? { backgroundColor: '#fef3c7' }
+                    : { backgroundColor: '#dcfce7' }
+                ]}>
+                  <Clock
+                    size={18}
+                    color={
+                      activeTable?.isSessionExpired
+                        ? '#dc2626'
+                        : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                        ? '#d97706'
+                        : '#15803d'
+                    }
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[
+                    styles.cartTopSessionTitle,
+                    activeTable?.isSessionExpired
+                      ? { color: '#b91c1c' }
+                      : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                      ? { color: '#b45309' }
+                      : { color: '#166534' }
+                  ]}>
+                    {activeTable?.isSessionExpired
+                      ? '⚠️ Table Ordering Session Expired'
+                      : typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0
+                      ? `⏱️ Table Session: ${Math.floor(activeTable.sessionRemainingSeconds / 60)}m ${String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s remaining`
+                      : `Table ${activeTable?.tableName || activeTable?.id || 'Dine-In'} Session Active`}
+                  </Text>
+                  <Text style={[
+                    styles.cartTopSessionSub,
+                    activeTable?.isSessionExpired
+                      ? { color: '#991b1b' }
+                      : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                      ? { color: '#92400e' }
+                      : { color: '#15803d' }
+                  ]}>
+                    {activeTable?.isSessionExpired
+                      ? 'The 15-minute table session limit was reached. Please re-scan your table QR code to place an order.'
+                      : typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180
+                      ? 'Session expiring soon! Please tap Place Order below before your table session finishes.'
+                      : 'Please place your order before the dynamic 15-minute table session ends.'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
           <ScrollView
             style={styles.bodyScroll}
             contentContainerStyle={
@@ -1257,15 +1526,18 @@ export default function CartModal({
               >
                 <ShoppingBag
                   size={48}
-                  color="#334155"
+                  color={Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive) ? "#dc2626" : "#334155"}
                 />
 
                 <Text
-                  style={
-                    styles.emptyCartTitle
-                  }
+                  style={[
+                    styles.emptyCartTitle,
+                    Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive) && { color: '#dc2626' }
+                  ]}
                 >
-                  Your Basket is Empty
+                  {Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
+                    ? 'Table Session Expired'
+                    : 'Your Basket is Empty'}
                 </Text>
 
                 <Text
@@ -1273,7 +1545,9 @@ export default function CartModal({
                     styles.emptyCartSub
                   }
                 >
-                  Browse our menu catalog and add delicious dishes.
+                  {Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
+                    ? 'The 15-minute table session limit was reached and your cart has been cleared. Please re-scan your table QR code to place a new order.'
+                    : 'Browse our menu catalog and add delicious dishes.'}
                 </Text>
               </View>
             ) : (
@@ -1692,11 +1966,72 @@ export default function CartModal({
                 <View
                   style={styles.formSection}
                 >
-                  <Text
-                    style={styles.sectionTitle}
-                  >
-                    Order Details
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text
+                      style={styles.sectionTitle}
+                    >
+                      Order Type
+                    </Text>
+                    {(isTableOrder || isDynamicQr || activeTable) ? (
+                      <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        backgroundColor: '#ecfdf5',
+                        borderWidth: 1,
+                        borderColor: '#a7f3d0',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 12,
+                      }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }}>
+                          Table {activeTable?.tableName || activeTable?.id || 'Dine-In'} (Dine-In)
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {Boolean(isTableOrder || isDynamicQr) && (
+                      typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0 && !activeTable?.isSessionExpired ? (
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: activeTable.sessionRemainingSeconds <= 180 ? '#fff7ed' : '#ecfdf5',
+                          borderWidth: 1,
+                          borderColor: activeTable.sessionRemainingSeconds <= 180 ? '#fed7aa' : '#a7f3d0',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 12,
+                        }}>
+                          <Clock size={11} color={activeTable.sessionRemainingSeconds <= 180 ? '#c2410c' : '#047857'} />
+                          <Text style={{
+                            fontSize: 11,
+                            fontWeight: '700',
+                            color: activeTable.sessionRemainingSeconds <= 180 ? '#c2410c' : '#047857'
+                          }}>
+                            {Math.floor(activeTable.sessionRemainingSeconds / 60)}m {String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s left
+                          </Text>
+                        </View>
+                      ) : activeTable?.isSessionExpired ? (
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: '#fef2f2',
+                          borderWidth: 1,
+                          borderColor: '#fecaca',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 12,
+                        }}>
+                          <AlertCircle size={11} color="#dc2626" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#b91c1c' }}>
+                            Session Expired
+                          </Text>
+                        </View>
+                      ) : null
+                    )}
+                  </View>
 
                   <View
                     style={
@@ -1711,8 +2046,10 @@ export default function CartModal({
 
                         const icon =
                           getOrderTypeIcon(
-                            type.typeName
+                            type.typeName || type.code || type.name
                           );
+
+                        const isLockedForTable = Boolean((isTableOrder || isDynamicQr || activeTable) && type.id !== 1);
 
                         return (
                           <TouchableOpacity
@@ -1721,13 +2058,19 @@ export default function CartModal({
                               styles.orderTypeTab,
                               isSelected &&
                                 styles.orderTypeTabActive,
+                              isLockedForTable && {
+                                opacity: 0.45,
+                              },
                             ]}
-                            onPress={() =>
-                              setOrderTypeId(
-                                type.id
-                              )
-                            }
-                            activeOpacity={0.8}
+                            onPress={() => {
+                              if (isLockedForTable) {
+                                setErrorMsg(`You are seated at Table ${activeTable.tableName || activeTable.id}. Table orders must be Dine-In.`);
+                                return;
+                              }
+                              setErrorMsg('');
+                              setOrderTypeId(type.id);
+                            }}
+                            activeOpacity={isLockedForTable ? 1 : 0.8}
                           >
                             <Text
                               style={[
@@ -1737,9 +2080,7 @@ export default function CartModal({
                               ]}
                             >
                               {icon}{' '}
-                              {type.id === 1
-                              ? 'Dine-in'
-                              : type.typeName}
+                              {type.typeName || type.name || 'Dine-In'}
                             </Text>
                           </TouchableOpacity>
                         );
@@ -1769,167 +2110,52 @@ export default function CartModal({
                     />
                   </View>
 
-                  {/* Customer Mobile & OTP Verification Flow */}
-                  {isVerified ? (
-                    <View style={styles.verifiedCard}>
-                      <View style={styles.verifiedCardLeft}>
-                        <View style={styles.verifiedIconWrap}>
-                          <ShieldCheck size={20} color="#15803d" />
-                        </View>
-                        <View>
-                          <View style={styles.verifiedBadgeRow}>
-                            <Text style={styles.verifiedBadgeText}>
-                              ✓ Mobile Verified
-                            </Text>
-                          </View>
-                          <Text style={styles.verifiedMobileText}>
-                            +91 {mobileNumber} {guestName ? `(${guestName})` : ''}
-                          </Text>
-                        </View>
-                      </View>
-                      <TouchableOpacity
-                        onPress={handleResetVerification}
-                        style={styles.changePhoneBtn}
-                      >
-                        <Text style={styles.changePhoneBtnText}>Change</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={styles.inputGroup}>
-                      <View style={styles.inputLabelRow}>
-                        <Text style={styles.inputLabel}>
-                          Mobile Number *
-                        </Text>
-                        <Text style={styles.inputHelperText}>
-                          (Verification required)
-                        </Text>
-                      </View>
-
-                      <View style={styles.phoneInputRow}>
-                        <TextInput
-                          style={[
-                            styles.textInput,
-                            styles.phoneInputFlex,
-                          ] as any}
-                          placeholder="Enter 10-digit mobile number *"
-                          placeholderTextColor="#64748b"
-                          keyboardType="phone-pad"
-                          maxLength={15}
-                          value={mobileNumber}
-                          onChangeText={(val) => {
-                            setMobileNumber(val);
-                            if (isOtpSent) {
-                              setIsOtpSent(false);
-                              setOtpCode('');
-                            }
-                          }}
-                        />
-
-                        <TouchableOpacity
-                          style={[
-                            styles.sendOtpBtn,
-                            (isSendingOtp || mobileNumber.replace(/\D/g, '').length < 10) &&
-                              styles.sendOtpBtnDisabled,
-                          ]}
-                          disabled={isSendingOtp || mobileNumber.replace(/\D/g, '').length < 10}
-                          onPress={handleSendOtp}
-                          activeOpacity={0.8}
-                        >
-                          {isSendingOtp ? (
-                            <ActivityIndicator size="small" color="#ffffff" />
-                          ) : (
-                            <View style={styles.sendOtpBtnContent}>
-                              <Smartphone size={14} color="#ffffff" />
-                              <Text style={styles.sendOtpBtnText}>
-                                {isOtpSent ? 'Resend' : 'Get OTP'}
-                              </Text>
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Success / Info message banner */}
-                      {otpSuccessMsg ? (
-                        <View style={styles.otpSuccessBanner}>
-                          <CheckCircle2 size={14} color="#15803d" />
-                          <Text style={styles.otpSuccessBannerText}>
-                            {otpSuccessMsg}
-                          </Text>
+                  {/* Customer Mobile Number */}
+                  <View style={styles.inputGroup}>
+                    <View style={styles.labelRow}>
+                      <Text style={styles.inputLabel}>
+                        Mobile Number *
+                      </Text>
+                      {mobileNumber.length === 10 && /^[6-9]\d{9}$/.test(mobileNumber) ? (
+                        <View style={styles.validBadge}>
+                          <CheckCircle2 size={13} color="#16a34a" />
+                          <Text style={styles.validBadgeText}>Valid Indian Mobile</Text>
                         </View>
                       ) : null}
-
-                      {/* OTP Input & Verification Card */}
-                      {isOtpSent && (
-                        <View style={styles.otpCard}>
-                          <View style={styles.otpCardHeader}>
-                            <View style={styles.otpCardHeaderLeft}>
-                              <KeyRound size={16} color="#D33401" />
-                              <Text style={styles.otpCardTitle}>
-                                Enter 6-Digit OTP
-                              </Text>
-                            </View>
-                            <Text style={styles.otpCardSubtitle}>
-                              Sent to +91 {mobileNumber.replace(/\D/g, '').slice(-10)}
-                            </Text>
-                          </View>
-
-                          <View style={styles.otpInputRow}>
-                            <TextInput
-                              style={styles.otpInput as any}
-                              placeholder="• • • • • •"
-                              placeholderTextColor="#94a3b8"
-                              keyboardType="number-pad"
-                              maxLength={6}
-                              value={otpCode}
-                              onChangeText={setOtpCode}
-                              autoFocus
-                            />
-
-                            <TouchableOpacity
-                              style={[
-                                styles.verifyOtpBtn,
-                                (isVerifyingOtp || otpCode.trim().length < 4) &&
-                                  styles.verifyOtpBtnDisabled,
-                              ]}
-                              disabled={isVerifyingOtp || otpCode.trim().length < 4}
-                              onPress={handleVerifyOtp}
-                              activeOpacity={0.8}
-                            >
-                              {isVerifyingOtp ? (
-                                <ActivityIndicator size="small" color="#ffffff" />
-                              ) : (
-                                <View style={styles.verifyOtpBtnContent}>
-                                  <Check size={14} color="#ffffff" />
-                                  <Text style={styles.verifyOtpBtnText}>
-                                    Verify OTP
-                                  </Text>
-                                </View>
-                              )}
-                            </TouchableOpacity>
-                          </View>
-
-                          <View style={styles.otpFooterRow}>
-                            {otpCountdown > 0 ? (
-                              <Text style={styles.countdownText}>
-                                Resend available in {otpCountdown}s
-                              </Text>
-                            ) : (
-                              <TouchableOpacity
-                                onPress={handleSendOtp}
-                                disabled={isSendingOtp}
-                                style={styles.resendBtn}
-                              >
-                                <RefreshCw size={12} color="#D33401" />
-                                <Text style={styles.resendBtnText}>
-                                  Resend OTP
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        </View>
-                      )}
                     </View>
-                  )}
+
+                    <View
+                      style={[
+                        styles.phoneInputContainer,
+                        Boolean(mobileError) && styles.phoneInputContainerError,
+                      ]}
+                    >
+                      <View style={styles.phoneCountryPrefix}>
+                        <Text style={styles.phoneCountryFlag}>🇮🇳</Text>
+                        <Text style={styles.phoneCountryCode}>+91</Text>
+                      </View>
+
+                      <TextInput
+                        style={styles.phoneTextInput as any}
+                        placeholder="9876543210"
+                        placeholderTextColor="#94a3b8"
+                        keyboardType="phone-pad"
+                        maxLength={10}
+                        value={mobileNumber}
+                        onChangeText={handleMobileNumberChange}
+                      />
+                    </View>
+
+                    {mobileError ? (
+                      <Text style={styles.inputErrorText}>
+                        {mobileError}
+                      </Text>
+                    ) : (
+                      <Text style={styles.inputHintText}>
+                        Accepts only 10-digit Indian mobile number starting with 6, 7, 8, or 9
+                      </Text>
+                    )}
+                  </View>
 
                   <View
                     style={styles.inputGroup}
@@ -1957,80 +2183,95 @@ export default function CartModal({
                   </View>
                 </View>
 
-                <View
-                  style={styles.formSection}
-                >
-                  <Text
-                    style={styles.sectionTitle}
-                  >
-                    Payment Method
-                  </Text>
-
-                  <View
-                    style={
-                      styles.paymentMethodRow
-                    }
-                  >
-                    <View
-                      style={[
-                        styles.paymentCard,
-                        styles.paymentCardActive,
-                        { flex: 1 }
-                      ]}
-                    >
-                      <CreditCard
-                        size={22}
-                        color="#10b981"
-                      />
-
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[
-                            styles.paymentCardTitle,
-                            styles.paymentCardTitleActive,
-                          ]}
-                        >
-                          Online Direct Pay
+                {(isTableOrder || isDynamicQr || activeTable) ? (
+                  <View style={{
+                    marginTop: 14,
+                    padding: 14,
+                    borderRadius: 14,
+                    backgroundColor: '#f0fdf4',
+                    borderWidth: 1,
+                    borderColor: '#bbf7d0',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}>
+                    <View style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 19,
+                      backgroundColor: '#dcfce7',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      <Utensils size={18} color="#15803d" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#166534' }}>
+                        Dine-In • Table {activeTable?.tableName || activeTable?.tableNumber || activeTable?.id || 'Table'}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#15803d', marginTop: 3, lineHeight: 16 }}>
+                        Pay at Counter • Cashier Confirmation Required. Dishes will be prepared upon confirmation.
+                      </Text>
+                      {typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0 && (
+                        <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 3 }}>
+                          ⏱ Table Session: {Math.floor(activeTable.sessionRemainingSeconds / 60)}m {String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s remaining
                         </Text>
+                      )}
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.formSection}>
+                    <Text style={styles.sectionTitle}>
+                      Payment Method
+                    </Text>
 
-                        <Text
-                          style={
-                            styles.paymentCardSub
-                          }
-                        >
-                          UPI (GPay / PhonePe / Paytm) • Cards • NetBanking
-                        </Text>
-                        <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '700', marginTop: 4 }}>
-                          ⚡ Instant Auto-Confirmed & Kitchen Dispatched
-                        </Text>
+                    {/* Online payment option is disabled / invisible (visible: false) */}
+                    {isOnlinePaymentVisible && (
+                      <View style={styles.paymentMethodRow}>
+                        <View style={[styles.paymentCard, styles.paymentCardActive, { flex: 1 }]}>
+                          <CreditCard size={22} color="#10b981" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.paymentCardTitle, styles.paymentCardTitleActive]}>
+                              Online Direct Pay
+                            </Text>
+                            <Text style={styles.paymentCardSub}>
+                              UPI (GPay / PhonePe / Paytm) • Cards • NetBanking
+                            </Text>
+                            <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '700', marginTop: 4 }}>
+                              ⚡ Instant Auto-Confirmed & Kitchen Dispatched
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Pay at Counter option (Active & Only payment option) */}
+                    <View style={styles.paymentMethodRow}>
+                      <View
+                        style={[
+                          styles.paymentCard,
+                          styles.paymentCardActive,
+                          { flex: 1, borderColor: '#10b981', backgroundColor: '#f0fdf4' }
+                        ]}
+                      >
+                        <IndianRupee size={22} color="#15803d" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.paymentCardTitle, { color: '#166534' }]}>
+                            Pay at Counter
+                          </Text>
+                          <Text style={[styles.paymentCardSub, { color: '#15803d' }]}>
+                            Cash / UPI at Counter • Cashier Confirmation Required
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 4 }}>
+                            ⏳ Confirmation Required: Dishes prepared once cashier accepts order
+                          </Text>
+                        </View>
+                        <CheckCircle2 size={18} color="#15803d" />
                       </View>
                     </View>
                   </View>
-
-                  {/* Prefer to Pay with Cash Banner */}
-                  <View style={{
-                    marginTop: 12,
-                    padding: 12,
-                    borderRadius: 10,
-                    backgroundColor: '#fffbeb',
-                    borderWidth: 1,
-                    borderColor: '#fde68a',
-                    flexDirection: 'row',
-                    alignItems: 'flex-start',
-                    gap: 10,
-                  }}>
-                    <AlertCircle size={18} color="#b45309" style={{ marginTop: 2, flexShrink: 0 }} />
-                    <Text style={{
-                      flex: 1,
-                      fontSize: 12,
-                      color: '#92400e',
-                      lineHeight: 18,
-                      fontWeight: '600'
-                    }}>
-                      Prefer to pay with Cash? Your waiter can take your order directly at your table/Give order at POS Counter.
-                    </Text>
-                  </View>
-                </View>
+                )}
 
                 <View
                   style={styles.summarySection}
@@ -2174,7 +2415,7 @@ export default function CartModal({
                     </>
                   ) : null}
 
-                  {gstNumber ? (
+                  {hasGst && cleanGstNumber ? (
                     <View
                       style={
                         styles.summaryRow
@@ -2185,7 +2426,7 @@ export default function CartModal({
                           styles.gstNumberLabel
                         }
                       >
-                        GSTIN: {gstNumber}
+                        GSTIN: {cleanGstNumber}
                       </Text>
                     </View>
                   ) : null}
@@ -2267,6 +2508,42 @@ export default function CartModal({
             <View
               style={styles.footerContainer}
             >
+              {Boolean(isTableOrder || isDynamicQr) && (
+                <View style={[
+                  styles.sessionFooterBadge,
+                  activeTable?.isSessionExpired
+                    ? styles.sessionFooterBadgeExpired
+                    : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                    ? styles.sessionFooterBadgeUrgent
+                    : styles.sessionFooterBadgeActive
+                ]}>
+                  <Clock
+                    size={14}
+                    color={
+                      activeTable?.isSessionExpired
+                        ? '#dc2626'
+                        : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                        ? '#c2410c'
+                        : '#15803d'
+                    }
+                  />
+                  <Text style={[
+                    styles.sessionFooterBadgeText,
+                    activeTable?.isSessionExpired
+                      ? { color: '#b91c1c' }
+                      : (typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds <= 180)
+                      ? { color: '#9a3412' }
+                      : { color: '#166534' }
+                  ]}>
+                    {activeTable?.isSessionExpired
+                      ? '⚠️ Table session expired (15-min limit). Please re-scan table QR to order.'
+                      : typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0
+                      ? `⏱️ Table Session: ${Math.floor(activeTable.sessionRemainingSeconds / 60)}m ${String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s remaining to place order`
+                      : `Table ${activeTable?.tableName || activeTable?.id || 'Dine-In'} ordering window active`}
+                  </Text>
+                </View>
+              )}
+
               <TouchableOpacity
                 style={[
                   styles.checkoutBtn,
@@ -2284,7 +2561,7 @@ export default function CartModal({
                   isLoadingState ||
                   hasUnavailableItems ||
                   Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) ||
-                  Boolean(activeTable?.isLocked || activeTable?.occupiedByOther)
+                  Boolean(activeTable?.isLocked || activeTable?.occupiedByOther) || Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
                 }
                 activeOpacity={0.85}
               >
@@ -2310,9 +2587,9 @@ export default function CartModal({
                         ? (storeOperatingStatus.status === 'PAUSED'
                             ? `KITCHEN PAUSED (${storeOperatingStatus.remainingPauseMinutes || 0}M LEFT)`
                             : 'KITCHEN CLOSED FOR ORDERING')
-                        : (activeTable?.isOccupied
-                            ? 'PAY ONLINE & ADD TO TABLE TAB'
-                            : 'PAY ONLINE & PLACE ORDER (UPI / CARDS)') + ` • ₹${money(grandTotal)}`}
+                        : Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
+                        ? 'SESSION EXPIRED • RE-SCAN TABLE QR'
+                        : ((isTableOrder || isDynamicQr || isPayAtCounterOnly) ? `PLACE ORDER • ₹${money(grandTotal)}` : `PAY ONLINE & PLACE ORDER • ₹${money(grandTotal)}`)}
                     </Text>
 
                     <ArrowRight
@@ -2716,6 +2993,86 @@ const styles = StyleSheet.create({
     color: '#1B1C1C',
     fontSize: 12,
     fontWeight: '600',
+  },
+
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  validBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  validBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#16A34A',
+  },
+
+  phoneInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0DDD8',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+
+  phoneInputContainerError: {
+    borderColor: '#EF4444',
+    backgroundColor: '#FEF2F2',
+  },
+
+  phoneCountryPrefix: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 10,
+    paddingRight: 10,
+    backgroundColor: '#F8FAFC',
+    alignSelf: 'stretch',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+    justifyContent: 'center',
+  },
+
+  phoneCountryFlag: {
+    fontSize: 14,
+  },
+
+  phoneCountryCode: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+  },
+
+  phoneTextInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    color: '#1B1C1C',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    outlineStyle: 'none',
+  },
+
+  inputErrorText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+
+  inputHintText: {
+    color: '#64748B',
+    fontSize: 11,
+    marginTop: 2,
   },
 
   textInput: {
@@ -3158,5 +3515,68 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     lineHeight: 18,
+  },
+  cartTopSessionBar: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  cartTopSessionBarActive: {
+    backgroundColor: '#f0fdf4',
+    borderBottomColor: '#bbf7d0',
+  },
+  cartTopSessionBarUrgent: {
+    backgroundColor: '#fffbeb',
+    borderBottomColor: '#fde68a',
+  },
+  cartTopSessionBarExpired: {
+    backgroundColor: '#fef2f2',
+    borderBottomColor: '#fecaca',
+  },
+  cartTopSessionIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  cartTopSessionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  cartTopSessionSub: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  sessionFooterBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  sessionFooterBadgeActive: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0',
+  },
+  sessionFooterBadgeUrgent: {
+    backgroundColor: '#fff7ed',
+    borderColor: '#fed7aa',
+  },
+  sessionFooterBadgeExpired: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+  },
+  sessionFooterBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

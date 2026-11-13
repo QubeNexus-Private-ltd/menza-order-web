@@ -224,7 +224,6 @@ export interface CustomerViewProps {
   activeOrder?: Order | null;
   openOrderTracker?: (order?: Order | any) => void;
   openScanner?: () => void;
-  openQrModal?: () => void;
   cartItems?: OrderItem[];
   openCart?: () => void;
   onAddToCart?: (itemId: number | string, quantity: number, item?: MenuItem) => void | Promise<any>;
@@ -244,7 +243,6 @@ export default function CustomerView({
   activeOrder,
   openOrderTracker,
   openScanner,
-  openQrModal,
   cartItems = [],
   openCart,
   onAddToCart,
@@ -318,9 +316,12 @@ export default function CustomerView({
       0
     );
 
-  const cgstRate = Number(catalog?.cgstPercentage ?? 2.5);
-  const sgstRate = Number(catalog?.sgstPercentage ?? 2.5);
-  const hasGst = cgstRate > 0 || sgstRate > 0 || Boolean(catalog?.gstNumber);
+  const rawGst = catalog?.gstNumber || null;
+  const cleanGstNumber = typeof rawGst === 'string' && rawGst.trim().length > 0 ? rawGst.trim() : null;
+  const hasGst = Boolean(cleanGstNumber);
+
+  const cgstRate = hasGst ? Number(catalog?.cgstPercentage ?? 2.5) : 0;
+  const sgstRate = hasGst ? Number(catalog?.sgstPercentage ?? 2.5) : 0;
 
   const totalCartTax = hasGst
     ? Math.round(totalCartSubTotal * ((cgstRate + sgstRate) / 100) * 100) / 100
@@ -763,6 +764,25 @@ export default function CustomerView({
             );
           }
 
+          if (currentTable.isSessionExpired && !currentTable.isDiningActive) {
+            return (
+              <View style={styles.tableOccupiedBannerCard}>
+                <View style={styles.tableOccupiedBannerTop}>
+                  <View style={[styles.tableOccupiedBadge, { backgroundColor: '#ea580c' }]}>
+                    <Clock size={12} color="#ffffff" strokeWidth={2.5} />
+                    <Text style={styles.tableOccupiedBadgeText}>SESSION EXPIRED</Text>
+                  </View>
+                  <Text style={[styles.tableOccupiedTableName, { color: '#c2410c' }]}>
+                    {currentTable.tableName || currentTable.name || `Table #${currentTable.id}`}
+                  </Text>
+                </View>
+                <Text style={[styles.tableOccupiedNoticeText, { color: '#9a3412' }]}>
+                  Your 15-minute table ordering window has expired. Please re-scan the live dynamic QR code at your table to place an order.
+                </Text>
+              </View>
+            );
+          }
+
           return (
             <View style={styles.tableBannerCard}>
               <View style={styles.tableBannerLeft}>
@@ -773,7 +793,13 @@ export default function CustomerView({
                   </Text>
                 </View>
                 <Text style={styles.tableBannerSub}>
-                  {currentTable.isOccupied ? 'Active Table Session • Add Items to Bill' : 'Dine-In Table'}
+                  {currentTable.isDiningActive
+                    ? '🍽️ Dining Active • Multi-Round Ordering Open'
+                    : currentTable.sessionRemainingSeconds
+                    ? `⏱️ Window: ${Math.floor(currentTable.sessionRemainingSeconds / 60)}m ${String(currentTable.sessionRemainingSeconds % 60).padStart(2, '0')}s remaining`
+                    : currentTable.isOccupied
+                    ? 'Active Table Session • Add Items to Bill'
+                    : 'Dine-In Table (15m window)'}
                 </Text>
               </View>
 
@@ -1023,9 +1049,9 @@ export default function CustomerView({
                         styles.cardTouchable,
                         (activeTable?.occupiedByOther || activeTable?.isLocked) && styles.cardTouchableOccupied,
                       ]}
-                      activeOpacity={(activeTable?.occupiedByOther || activeTable?.isLocked) ? 1 : 0.75}
+                      activeOpacity={(activeTable?.occupiedByOther || activeTable?.isLocked || (activeTable?.isSessionExpired && !activeTable?.isDiningActive)) ? 1 : 0.75}
                       onPress={() => {
-                        if (activeTable?.occupiedByOther || activeTable?.isLocked) return;
+                        if (activeTable?.occupiedByOther || activeTable?.isLocked || (activeTable?.isSessionExpired && !activeTable?.isDiningActive)) return;
                         if (
                           item.isAvailable &&
                           qty === 0 &&
@@ -1092,20 +1118,6 @@ export default function CustomerView({
                             dietLabel
                           }
                         </Text>
-
-                        <View
-                          style={
-                            styles.ratingPill
-                          }
-                        >
-                          <Text
-                            style={
-                              styles.ratingText
-                            }
-                          >
-                            ★ 4.9
-                          </Text>
-                        </View>
                       </View>
 
                       <View
@@ -1224,11 +1236,11 @@ export default function CustomerView({
                               Sold Out
                             </Text>
                           </View>
-                        ) : (activeTable?.occupiedByOther || activeTable?.isLocked) ? (
+                        ) : (activeTable?.occupiedByOther || activeTable?.isLocked || (activeTable?.isSessionExpired && !activeTable?.isDiningActive)) ? (
                           <View style={styles.lockedItemBadge}>
                             <Lock size={12} color="#94a3b8" />
                             <Text style={styles.lockedItemText}>
-                              {activeTable?.isCleaning ? 'Cleaning' : activeTable?.isReserved ? 'Reserved' : 'Locked'}
+                              {activeTable?.isCleaning ? 'Cleaning' : activeTable?.isReserved ? 'Reserved' : activeTable?.isSessionExpired ? 'QR Expired' : 'Locked'}
                             </Text>
                           </View>
                         ) : qty > 0 ? (
@@ -1317,7 +1329,7 @@ export default function CustomerView({
                           <TouchableOpacity
                             style={[
                               styles.addBtn,
-                              Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) &&
+                              (Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) || Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)) &&
                                 styles.addBtnDisabled,
                             ]}
                             onPress={() => {
@@ -1334,7 +1346,7 @@ export default function CustomerView({
                               }
                             }}
                             disabled={
-                              itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder)
+                              itemBusy || Boolean(storeOperatingStatus && !storeOperatingStatus.canPlaceOrder) || Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
                             }
                           >
                             {itemBusy ? (
@@ -1395,16 +1407,20 @@ export default function CustomerView({
               </Text>
             </View>
 
-            <Text
-              style={
-                styles.cartCenterText
-              }
-            >
-              {totalCartCount ===
-              1
-                ? '1 Item Added'
-                : `${totalCartCount} Items Added`}
-            </Text>
+            <View style={{ flex: 1, paddingHorizontal: 8, justifyContent: 'center' }}>
+              <Text style={styles.cartCenterText}>
+                {totalCartCount === 1 ? '1 Item Added' : `${totalCartCount} Items Added`}
+              </Text>
+              {typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0 && !activeTable?.isSessionExpired ? (
+                <Text style={{ fontSize: 11, color: activeTable.sessionRemainingSeconds <= 180 ? '#fde047' : '#fef08a', fontWeight: '700', marginTop: 2 }}>
+                  {`⏱️ Table Session: ${Math.floor(activeTable.sessionRemainingSeconds / 60)}m ${String(activeTable.sessionRemainingSeconds % 60).padStart(2, '0')}s remaining`}
+                </Text>
+              ) : activeTable?.isSessionExpired ? (
+                <Text style={{ fontSize: 11, color: '#fca5a5', fontWeight: '700', marginTop: 2 }}>
+                  ⚠️ Session Expired • Re-scan Table QR
+                </Text>
+              ) : null}
+            </View>
 
             <View
               style={
@@ -1451,7 +1467,14 @@ export default function CustomerView({
         let pillText = 'Order Placed';
         let subText = 'Order placed with restaurant.';
 
-        if (isKitchenActive) {
+        const isAwaitingCounterPay = !liveOrder.isPaid && !liveOrder.isOnline && String(liveOrder.paymentStatus || '').toLowerCase() !== 'paid';
+
+        if (isAwaitingCounterPay) {
+          barStyle = { ...styles.liveOrderBarPlaced, backgroundColor: '#d97706' };
+          iconNode = <Clock size={18} color="#ffffff" />;
+          pillText = 'Pay at Counter';
+          subText = 'Please pay at the counter to start preparation.';
+        } else if (isKitchenActive) {
           const kLower = String(liveOrder.kitchenStatus || '').toLowerCase();
           const oLower = String(liveOrder.orderStatus || '').toLowerCase();
 
@@ -1822,20 +1845,6 @@ const styles = StyleSheet.create({
   nonVegLabel: {
     color:
       COLORS.red,
-  },
-  ratingPill: {
-    backgroundColor:
-      COLORS.orangeSoft,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    flexShrink: 0,
-  },
-  ratingText: {
-    color:
-      COLORS.orangeDark,
-    fontSize: 9,
-    fontWeight: '700',
   },
   cardBody: {
     flex: 1,
@@ -2451,10 +2460,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#0284c7',
   },
   liveOrderBarCooking: {
-    backgroundColor: '#ea580c',
+    backgroundColor: '#15803d',
   },
   liveOrderBarReady: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: '#15803d',
   },
   liveOrderBarServed: {
     backgroundColor: '#15803d',
