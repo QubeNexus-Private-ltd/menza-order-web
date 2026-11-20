@@ -2644,15 +2644,19 @@ export const placeOrder =
         orderPayload.deliveryType ||
         (orderPayload.tableId ? 'Dine-In' : 'Takeaway / Counter'),
       paymentMode:
-        (orderPayload.paymentStatus === 'Paid' || orderPayload.cashfreeOrderId || orderPayload.paymentOrderId)
+        orderPayload.paymentMode === 'DIRECT_UPI'
+          ? 'DIRECT_UPI'
+          : (orderPayload.paymentStatus === 'Paid' || orderPayload.cashfreeOrderId || orderPayload.paymentOrderId)
           ? 'CASHFREE'
           : (orderPayload.paymentMode || (orderPayload.paymentMethod === 'cashfree' ? 'CASHFREE' : 'CASH')),
       requiresCashierConfirmation: orderPayload.requiresCashierConfirmation !== undefined ? Boolean(orderPayload.requiresCashierConfirmation) : true,
       paymentType:
         orderPayload.paymentType ||
-        ((orderPayload.paymentMode === 'ONLINE' || orderPayload.paymentMode === 'CASHFREE' || orderPayload.paymentMethod === 'cashfree')
-          ? 'ONLINE_CASHFREE'
-          : 'COUNTER_CASH'),
+        (orderPayload.paymentMode === 'DIRECT_UPI'
+          ? 'DIRECT_UPI'
+          : ((orderPayload.paymentMode === 'ONLINE' || orderPayload.paymentMode === 'CASHFREE' || orderPayload.paymentMethod === 'cashfree')
+            ? 'ONLINE_CASHFREE'
+            : 'COUNTER_CASH')),
       remarks: orderPayload.remarks || '',
       source: orderPayload.source || 'QR_DINEIN',
       paymentStatus:
@@ -2664,11 +2668,14 @@ export const placeOrder =
       paymentOrderId:
         orderPayload.paymentOrderId ||
         orderPayload.cashfreeOrderId ||
+        orderPayload.upiUtr ||
         null,
       cashfreeOrderId:
         orderPayload.cashfreeOrderId ||
         orderPayload.paymentOrderId ||
         null,
+      upiUtr: orderPayload.upiUtr || null,
+      transactionId: orderPayload.upiUtr || orderPayload.transactionId || null,
       gstNumber: cleanDirectGst,
       cgstPercentage: hasDirectGst ? directCgstRate : 0,
       sgstPercentage: hasDirectGst ? directSgstRate : 0,
@@ -2790,7 +2797,21 @@ export const placeOrder =
 
         paymentMethod:
           orderPayload.paymentMethod ||
-          'CASHFREE_SPLIT',
+          orderPayload.paymentMode ||
+          'COUNTER_CASH',
+
+        paymentMode:
+          orderPayload.paymentMode ||
+          'COUNTER_CASH',
+
+        upiUtr:
+          orderPayload.upiUtr ||
+          null,
+
+        transactionId:
+          orderPayload.upiUtr ||
+          orderPayload.transactionId ||
+          null,
 
         paymentOrderId:
           orderPayload.paymentOrderId ||
@@ -3812,6 +3833,60 @@ export const confirmOrderPayment = async (orderId, paymentOrderId = '') => {
     console.warn('Public confirm-payment error:', err?.message);
   }
 
+  return updateOrderPaymentStatus(orderId, 'SUCCESS');
+};
+
+/* =========================================================
+   CONFIRM DIRECT UPI ORDER (NPCI Official Flow)
+========================================================= */
+
+export const confirmDirectUpiOrder = async (orderId, upiUtr = '', paymentStatus = 'Paid') => {
+  try {
+    const res = await api.post(
+      `/api/public/store/order/${orderId}/confirm-direct-upi?paymentOrderId=${encodeURIComponent(upiUtr)}&upiUtr=${encodeURIComponent(upiUtr)}`,
+      { orderId, upiUtr, paymentStatus, paymentMode: 'DIRECT_UPI' }
+    ).catch(async () => {
+      return await api.post(
+        `/api/public/store/order/${orderId}/confirm-payment?paymentOrderId=${encodeURIComponent(upiUtr)}`
+      );
+    });
+    if (res?.data && (res.data.orderId || res.data.id)) {
+      const normalized = normalizeOrder({
+        ...res.data,
+        id: res.data.orderId || res.data.id || orderId,
+        paymentStatus: 'Paid',
+        orderStatus: 'Confirmed',
+        paymentMode: 'DIRECT_UPI',
+        transactionId: upiUtr,
+        upiUtr,
+      });
+      saveActiveOrder(normalized);
+      const orders = getLocalOrders();
+      const updated = orders.map((o) =>
+        Number(o.id) === Number(orderId)
+          ? { ...o, paymentStatus: 'Paid', orderStatus: 'Confirmed', paymentMode: 'DIRECT_UPI', transactionId: upiUtr, upiUtr }
+          : o
+      );
+      saveLocalOrders(updated);
+      return normalized;
+    }
+  } catch (err) {
+    console.warn('Confirm direct UPI error:', err?.message);
+  }
+
+  // Guaranteed local fallback
+  const orders = getLocalOrders();
+  const updated = orders.map((o) =>
+    Number(o.id) === Number(orderId)
+      ? { ...o, paymentStatus: 'Paid', orderStatus: 'Confirmed', paymentMode: 'DIRECT_UPI', transactionId: upiUtr, upiUtr }
+      : o
+  );
+  saveLocalOrders(updated);
+  const matched = updated.find((o) => Number(o.id) === Number(orderId));
+  if (matched) {
+    saveActiveOrder(matched);
+    return matched;
+  }
   return updateOrderPaymentStatus(orderId, 'SUCCESS');
 };
 

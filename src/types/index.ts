@@ -70,6 +70,7 @@ export interface Order {
   paymentType?: string;
   paymentOrderId?: string;
   cashfreeOrderId?: string;
+  upiUtr?: string;
   orderStatus?: string;
   status?: string;
   kitchenStatus?: string;
@@ -146,6 +147,9 @@ export interface Catalog {
   isKitchenActive?: boolean;
   categories?: Category[];
   items?: MenuItem[];
+  bankerUpiId?: string;
+  bankerAccountHolderName?: string;
+  upiId?: string;
   [key: string]: any;
 }
 

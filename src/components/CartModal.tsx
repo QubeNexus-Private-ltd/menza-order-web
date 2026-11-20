@@ -31,7 +31,12 @@ import {
   Check,
   Utensils,
   Clock,
+  QrCode,
+  Copy,
+  ExternalLink,
+  HelpCircle,
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import * as api from '../services/api';
 import { joinOrderGroup } from '../services/signalr';
 import { Catalog, Table, StoreOperatingStatus, OrderItem } from '../types';
@@ -310,8 +315,12 @@ export default function CartModal({
 
   const isPostpaidTable = Boolean(activeTable && String(activeTable.dineInPaymentMode || '').toUpperCase() === 'POSTPAID');
   const isPrepaidTable = !isPostpaidTable && Boolean(isTableOrder || isDynamicQr);
-  // Store profile ordering is locked to Pay at Counter with Cashier confirmation required
-  const isPayAtCounterOnly = true;
+  
+  // Available restaurant UPI ID for Direct NPCI UPI Intent
+  const availableUpiId = catalog?.bankerUpiId || catalog?.upiId || activeTable?.bankerUpiId || 'menzaorder@upi';
+  const availablePayeeName = catalog?.bankerAccountHolderName || catalog?.restaurantName || 'Menza Restaurant';
+  const isDirectUpiAvailable = Boolean(availableUpiId);
+  const isPayAtCounterOnly = false;
   const isOnlinePaymentVisible = false;
 
   const [guestName, setGuestName] = useState<string>('');
@@ -319,7 +328,17 @@ export default function CartModal({
   const [mobileError, setMobileError] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
   const [orderTypeId, setOrderTypeId] = useState<number>(() => (isTableOrder || isDynamicQr || activeTable) ? 1 : 2);
-  const [paymentMethod, setPaymentMethod] = useState<string>('payatcounter');
+  const [paymentMethod, setPaymentMethod] = useState<string>(() => isDirectUpiAvailable ? 'direct_upi' : 'payatcounter');
+
+  /* Direct NPCI UPI Intent State */
+  const [upiModalVisible, setUpiModalVisible] = useState<boolean>(false);
+  const [pendingUpiOrder, setPendingUpiOrder] = useState<any>(null);
+  const [enteredUtr, setEnteredUtr] = useState<string>('');
+  const [utrError, setUtrError] = useState<string>('');
+  const [showQrCode, setShowQrCode] = useState<boolean>(false);
+  const [copiedUpiId, setCopiedUpiId] = useState<boolean>(false);
+  const [showUtrHelp, setShowUtrHelp] = useState<boolean>(false);
+  const [confirmingDirectUpi, setConfirmingDirectUpi] = useState<boolean>(false);
 
   const handleMobileNumberChange = (val: string) => {
     const clean = api.sanitizeIndianMobile(val);
@@ -335,11 +354,44 @@ export default function CartModal({
   };
 
   useEffect(() => {
-    setPaymentMethod('payatcounter');
+    if (isDirectUpiAvailable) {
+      setPaymentMethod('direct_upi');
+    } else {
+      setPaymentMethod('payatcounter');
+    }
     if (isTableOrder || isDynamicQr || activeTable) {
       setOrderTypeId(1);
     }
-  }, [isTableOrder, isDynamicQr, activeTable, visible]);
+  }, [isTableOrder, isDynamicQr, activeTable, visible, isDirectUpiAvailable]);
+
+  // Auto-detect 12-digit UTR from clipboard when customer returns to browser tab
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && upiModalVisible && !enteredUtr) {
+        try {
+          if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+            const clipboardText = await navigator.clipboard.readText();
+            if (clipboardText) {
+              const utrMatch = clipboardText.trim().match(/\b\d{12}\b/);
+              if (utrMatch && utrMatch[0]) {
+                setEnteredUtr(utrMatch[0]);
+                logger.payment('UPI_CLIPBOARD_UTR_DETECTED', `Auto-detected 12-digit UTR from clipboard: ${utrMatch[0]}`);
+              }
+            }
+          }
+        } catch {
+          // Clipboard read permission might be denied; silently ignored
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [upiModalVisible, enteredUtr]);
 
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [processingPayment, setProcessingPayment] = useState<boolean>(false);
@@ -822,6 +874,44 @@ export default function CartModal({
     }
   };
 
+  const handleConfirmUpiPayment = async (isManualPaidOnly = false) => {
+    if (!pendingUpiOrder) return;
+    const utrVal = enteredUtr.trim();
+
+    if (!isManualPaidOnly && utrVal.length > 0 && utrVal.length !== 12) {
+      setUtrError('UPI Reference / UTR must be exactly 12 digits');
+      return;
+    }
+    setUtrError('');
+    setConfirmingDirectUpi(true);
+
+    try {
+      const orderId = pendingUpiOrder.orderId;
+      await api.confirmDirectUpiOrder(
+        orderId,
+        utrVal || (isManualPaidOnly ? 'MANUAL_CONFIRMED' : 'AWAITING_VERIFICATION'),
+        'Paid'
+      );
+
+      logger.payment('UPI_DIRECT_CONFIRMED', `Customer confirmed direct UPI payment for Order #${orderId}: UTR=${utrVal || 'N/A'}`);
+
+      setConfirmingDirectUpi(false);
+      setUpiModalVisible(false);
+      onClose();
+      if (typeof onClearCart === 'function') {
+        await onClearCart();
+      }
+    } catch (e: any) {
+      console.warn('Confirm UPI error:', e);
+      setConfirmingDirectUpi(false);
+      setUpiModalVisible(false);
+      onClose();
+      if (typeof onClearCart === 'function') {
+        await onClearCart();
+      }
+    }
+  };
+
   const handleCheckout = async () => {
     if (!guestName.trim()) {
       setErrorMsg(
@@ -1009,11 +1099,116 @@ export default function CartModal({
       totalAmount: grandTotal,
     };
 
+    // 1. Direct NPCI UPI Intent Flow
+    if (paymentMethod === 'direct_upi') {
+      setSubmittingOrder(true);
+      setProcessingPayment(false);
+      try {
+        const directUpiOrderPayload = {
+          ...orderPayload,
+          tableId: isThisTableOrder ? effectiveTableId : null,
+          tableNumber: isThisTableOrder ? effectiveTableName : null,
+          encryptedTableId: isThisTableOrder ? (activeTable?.encryptedTableId || effectiveTableToken || null) : null,
+          tableSessionToken: isThisTableOrder ? effectiveTableToken : null,
+          paymentMode: 'DIRECT_UPI',
+          paymentType: 'DIRECT_UPI',
+          paymentMethod: 'DIRECT_UPI',
+          paymentStatus: 'Pending',
+          orderStatus: 'Placed',
+          isOnline: true,
+          isSettled: false,
+          requiresCashierConfirmation: true,
+          source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
+          deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
+          orderTypeId: isThisTableOrder ? 1 : orderTypeId,
+        };
+
+        logger.checkout('CHECKOUT_DIRECT_UPI_INITIATED', `Customer initiated Direct NPCI UPI checkout for ₹${grandTotal}`, {
+          tableId: isThisTableOrder ? effectiveTableId : null,
+          tableName: isThisTableOrder ? effectiveTableName : null,
+          grandTotal,
+          itemsCount: orderItems.length,
+          paymentMode: 'DIRECT_UPI',
+        });
+
+        let placedRes: any = null;
+        if (typeof onPlaceOrder === 'function') {
+          placedRes = await onPlaceOrder(directUpiOrderPayload);
+        } else {
+          placedRes = await api.placeOrder(directUpiOrderPayload);
+        }
+
+        const placedOrderId = placedRes?.id || placedRes?.orderId || Date.now().toString().slice(-6);
+
+        // Join real-time SignalR order group
+        try {
+          joinOrderGroup(placedOrderId);
+        } catch {}
+
+        // Construct official NPCI UPI Deep Link with &url= callback
+        const payeeUpi = catalog?.bankerUpiId || catalog?.upiId || activeTable?.bankerUpiId || availableUpiId || 'menzaorder@upi';
+        const payeeName = catalog?.bankerAccountHolderName || catalog?.restaurantName || availablePayeeName || 'Menza Restaurant';
+        const formattedAmount = Number(grandTotal).toFixed(2);
+        const txnRef = `ORD_${restId}_${placedOrderId}`;
+        const txnNote = `Order #${placedOrderId} Table ${effectiveTableName || 'Counter'}`;
+
+        const encRestId = catalog?.encryptedRestaurantId || api.encryptRestaurantId(restId);
+        const returnOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+        const returnPathname = typeof window !== 'undefined' ? window.location.pathname : '';
+        const customCallbackUrl = `${returnOrigin}${returnPathname}?upi_return=true&order_id=${encodeURIComponent(placedOrderId)}&r=${encodeURIComponent(encRestId)}${effectiveTableId ? `&tableId=${encodeURIComponent(effectiveTableId)}` : ''}`;
+
+        const npciUpiUri = `upi://pay?pa=${payeeUpi}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent(txnNote)}&url=${encodeURIComponent(customCallbackUrl)}`;
+
+        const upiOrderData = {
+          orderId: placedOrderId,
+          amount: grandTotal,
+          payeeUpi,
+          payeeName,
+          npciUpiUri,
+          gpayUri: `gpay://upi/pay?pa=${payeeUpi}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent(txnNote)}&url=${encodeURIComponent(customCallbackUrl)}`,
+          phonepeUri: `phonepe://pay?pa=${payeeUpi}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent(txnNote)}&url=${encodeURIComponent(customCallbackUrl)}`,
+          paytmUri: `paytmmp://pay?pa=${payeeUpi}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent(txnNote)}&url=${encodeURIComponent(customCallbackUrl)}`,
+          callbackUrl: customCallbackUrl,
+          orderPayload: directUpiOrderPayload,
+        };
+
+        setPendingUpiOrder(upiOrderData);
+        setSubmittingOrder(false);
+        setUpiModalVisible(true);
+
+        logger.payment('UPI_DIRECT_INITIATED', `NPCI UPI intent generated for Order #${placedOrderId}: ₹${grandTotal}`, {
+          placedOrderId,
+          payeeUpi,
+          npciUpiUri,
+        });
+
+        // Try opening UPI Intent automatically
+        if (typeof window !== 'undefined') {
+          try {
+            window.location.href = npciUpiUri;
+          } catch (launchErr) {
+            console.warn('Could not auto-launch UPI app:', launchErr);
+          }
+        }
+
+        return;
+      } catch (placeErr: any) {
+        console.error('Direct UPI place order error:', placeErr);
+        logger.error('CHECKOUT', 'CHECKOUT_DIRECT_UPI_FAILED', placeErr, {
+          tableId: isThisTableOrder ? effectiveTableId : null,
+          amount: grandTotal,
+        });
+        setErrorMsg(placeErr?.response?.data?.message || placeErr?.message || 'Unable to place order. Please alert restaurant staff.');
+        setSubmittingOrder(false);
+        return;
+      }
+    }
+
+    // 2. Direct Counter Order Flow (Cash / Pay at Counter)
     const isDirectPlaceOrder = true;
 
     if (isDirectPlaceOrder) {
-      // Store Profile & Dine-In orders: Locked to Pay at Counter with Cashier Confirmation Required
-      // NEVER REDIRECT TO CASHFREE PAYMENT GATEWAY!
+      // Store Profile & Dine-In orders: Pay at Counter with Cashier Confirmation Required
       setSubmittingOrder(true);
       setProcessingPayment(false);
       try {
@@ -1057,7 +1252,7 @@ export default function CartModal({
         if (typeof onClearCart === 'function') {
           await onClearCart();
         }
-        return; // ABSOLUTE RETURN - PREVENTS CASHFREE
+        return; // ABSOLUTE RETURN
       } catch (placeErr: any) {
         console.error('Counter place order error:', placeErr);
         logger.error('CHECKOUT', 'CHECKOUT_COUNTER_FAILED', placeErr, {
@@ -1067,7 +1262,7 @@ export default function CartModal({
         setErrorMsg(placeErr?.response?.data?.message || placeErr?.message || 'Unable to place order. Please alert restaurant staff.');
         setSubmittingOrder(false);
         setProcessingPayment(false);
-        return; // ABSOLUTE RETURN - PREVENTS CASHFREE EVEN ON ERROR
+        return;
       }
     }
 
@@ -1322,7 +1517,7 @@ export default function CartModal({
     }
   };
 
-  if (!visible) return null;
+  if (!visible && !upiModalVisible) return null;
 
   const isLoadingState =
     loading || submittingOrder || processingPayment;
@@ -1330,12 +1525,13 @@ export default function CartModal({
   const selectedItemsCount = activeCartItems.length;
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <>
+      <Modal
+        visible={visible && !upiModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={onClose}
+      >
       <View style={styles.overlay} className="responsive-modal-overlay">
         <View style={styles.sheetContainer} className="responsive-modal-sheet">
           {submittingOrder && (
@@ -2204,7 +2400,7 @@ export default function CartModal({
                   </View>
                 </View>
 
-                {(isTableOrder || isDynamicQr || activeTable) ? (
+                {(isTableOrder || isDynamicQr || activeTable) && (
                   <View style={{
                     marginTop: 14,
                     padding: 14,
@@ -2232,7 +2428,7 @@ export default function CartModal({
                         Dine-In • Table {activeTable?.tableName || activeTable?.tableNumber || activeTable?.id || 'Table'}
                       </Text>
                       <Text style={{ fontSize: 11, color: '#15803d', marginTop: 3, lineHeight: 16 }}>
-                        Pay at Counter • Cashier Confirmation Required. Dishes will be prepared upon confirmation.
+                        Select your preferred payment method below.
                       </Text>
                       {typeof activeTable?.sessionRemainingSeconds === 'number' && activeTable.sessionRemainingSeconds > 0 && (
                         <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 3 }}>
@@ -2241,58 +2437,81 @@ export default function CartModal({
                       )}
                     </View>
                   </View>
-                ) : (
-                  <View style={styles.formSection}>
-                    <Text style={styles.sectionTitle}>
-                      Payment Method
-                    </Text>
-
-                    {/* Online payment option is disabled / invisible (visible: false) */}
-                    {isOnlinePaymentVisible && (
-                      <View style={styles.paymentMethodRow}>
-                        <View style={[styles.paymentCard, styles.paymentCardActive, { flex: 1 }]}>
-                          <CreditCard size={22} color="#10b981" />
-                          <View style={{ flex: 1 }}>
-                            <Text style={[styles.paymentCardTitle, styles.paymentCardTitleActive]}>
-                              Online Direct Pay
-                            </Text>
-                            <Text style={styles.paymentCardSub}>
-                              UPI (GPay / PhonePe / Paytm) • Cards • NetBanking
-                            </Text>
-                            <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '700', marginTop: 4 }}>
-                              ⚡ Instant Auto-Confirmed & Kitchen Dispatched
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Pay at Counter option (Active & Only payment option) */}
-                    <View style={styles.paymentMethodRow}>
-                      <View
-                        style={[
-                          styles.paymentCard,
-                          styles.paymentCardActive,
-                          { flex: 1, borderColor: '#10b981', backgroundColor: '#f0fdf4' }
-                        ]}
-                      >
-                        <IndianRupee size={22} color="#15803d" />
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.paymentCardTitle, { color: '#166534' }]}>
-                            Pay at Counter
-                          </Text>
-                          <Text style={[styles.paymentCardSub, { color: '#15803d' }]}>
-                            Cash / UPI at Counter • Cashier Confirmation Required
-                          </Text>
-                          <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 4 }}>
-                            ⏳ Confirmation Required: Dishes prepared once cashier accepts order
-                          </Text>
-                        </View>
-                        <CheckCircle2 size={18} color="#15803d" />
-                      </View>
-                    </View>
-                  </View>
                 )}
+
+                <View style={styles.formSection}>
+                  <Text style={styles.sectionTitle}>
+                    Payment Method
+                  </Text>
+
+                  {/* Direct NPCI UPI Intent Option */}
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setPaymentMethod('direct_upi')}
+                    style={styles.paymentMethodRow}
+                  >
+                    <View
+                      style={[
+                        styles.paymentCard,
+                        paymentMethod === 'direct_upi' && styles.paymentCardActive,
+                        paymentMethod === 'direct_upi' && { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
+                        { flex: 1 }
+                      ]}
+                    >
+                      <Smartphone size={22} color={paymentMethod === 'direct_upi' ? '#15803d' : '#64748b'} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.paymentCardTitle, paymentMethod === 'direct_upi' && { color: '#166534' }]}>
+                          Direct UPI Payment
+                        </Text>
+                        <Text style={[styles.paymentCardSub, paymentMethod === 'direct_upi' && { color: '#15803d' }]}>
+                          Google Pay • PhonePe • Paytm • BHIM
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 4 }}>
+                          ⚡ Instant NPCI Intent • Direct to Restaurant (0% Fee)
+                        </Text>
+                      </View>
+                      {paymentMethod === 'direct_upi' ? (
+                        <CheckCircle2 size={18} color="#15803d" />
+                      ) : (
+                        <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#cbd5e1' }} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Pay at Counter option */}
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setPaymentMethod('payatcounter')}
+                    style={[styles.paymentMethodRow, { marginTop: 10 }]}
+                  >
+                    <View
+                      style={[
+                        styles.paymentCard,
+                        paymentMethod === 'payatcounter' && styles.paymentCardActive,
+                        paymentMethod === 'payatcounter' && { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
+                        { flex: 1 }
+                      ]}
+                    >
+                      <IndianRupee size={22} color={paymentMethod === 'payatcounter' ? '#15803d' : '#64748b'} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.paymentCardTitle, paymentMethod === 'payatcounter' && { color: '#166534' }]}>
+                          Pay at Counter
+                        </Text>
+                        <Text style={[styles.paymentCardSub, paymentMethod === 'payatcounter' && { color: '#15803d' }]}>
+                          Cash / UPI at Counter • Cashier Confirmation Required
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#64748b', fontWeight: '500', marginTop: 4 }}>
+                          Dishes prepared once cashier accepts order
+                        </Text>
+                      </View>
+                      {paymentMethod === 'payatcounter' ? (
+                        <CheckCircle2 size={18} color="#15803d" />
+                      ) : (
+                        <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#cbd5e1' }} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                </View>
 
                 <View
                   style={styles.summarySection}
@@ -2610,7 +2829,7 @@ export default function CartModal({
                             : 'KITCHEN CLOSED FOR ORDERING')
                         : Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
                         ? 'SESSION EXPIRED • RE-SCAN TABLE QR'
-                        : ((isTableOrder || isDynamicQr || isPayAtCounterOnly) ? `PLACE ORDER • ₹${money(grandTotal)}` : `PAY ONLINE & PLACE ORDER • ₹${money(grandTotal)}`)}
+                        : (paymentMethod === 'direct_upi' ? `PAY VIA UPI • ₹${money(grandTotal)}` : `PLACE ORDER • ₹${money(grandTotal)}`)}
                     </Text>
 
                     <ArrowRight
@@ -2625,6 +2844,239 @@ export default function CartModal({
         </View>
       </View>
     </Modal>
+
+    {/* Direct NPCI UPI Intent & UTR Confirmation Modal */}
+    <Modal
+      visible={upiModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setUpiModalVisible(false)}
+    >
+      <View style={styles.upiModalOverlay}>
+        <View style={styles.upiModalCard}>
+          {/* Header */}
+          <View style={styles.upiModalHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Smartphone size={20} color="#15803d" />
+              <Text style={styles.upiModalTitle}>Complete UPI Payment</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setUpiModalVisible(false)}
+              style={styles.closeBtn}
+            >
+              <X size={18} color="#64748b" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
+            {/* Amount & Order Card */}
+            <View style={styles.upiAmountCard}>
+              <Text style={styles.upiAmountLabel}>Total Amount to Pay</Text>
+              <Text style={styles.upiAmountValue}>₹{pendingUpiOrder ? money(pendingUpiOrder.amount) : '0'}</Text>
+              <View style={styles.upiOrderBadge}>
+                <Text style={styles.upiOrderBadgeText}>Order #{pendingUpiOrder?.orderId || ''}</Text>
+              </View>
+            </View>
+
+            {/* Payee Info Banner */}
+            <View style={styles.upiPayeeBanner}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.upiPayeeLabel}>Paying Directly to Restaurant Account</Text>
+                <Text style={styles.upiPayeeName}>{pendingUpiOrder?.payeeName || 'Menza Restaurant'}</Text>
+                <Text style={styles.upiPayeeId}>{pendingUpiOrder?.payeeUpi || ''}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  if (pendingUpiOrder?.payeeUpi && typeof navigator !== 'undefined' && navigator.clipboard) {
+                    navigator.clipboard.writeText(pendingUpiOrder.payeeUpi);
+                    setCopiedUpiId(true);
+                    setTimeout(() => setCopiedUpiId(false), 2000);
+                  }
+                }}
+                style={styles.upiCopyBtn}
+              >
+                {copiedUpiId ? <Check size={14} color="#15803d" /> : <Copy size={14} color="#64748b" />}
+                <Text style={[styles.upiCopyBtnText, copiedUpiId && { color: '#15803d' }]}>
+                  {copiedUpiId ? 'Copied' : 'Copy'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Quick App Launchers */}
+            <View style={{ marginVertical: 12, gap: 8 }}>
+              <Text style={styles.upiSectionHeading}>Open Your Installed UPI App</Text>
+
+              <TouchableOpacity
+                style={styles.upiAppBtnPrimary}
+                onPress={() => {
+                  if (pendingUpiOrder?.npciUpiUri && typeof window !== 'undefined') {
+                    window.location.href = pendingUpiOrder.npciUpiUri;
+                  }
+                }}
+                activeOpacity={0.85}
+              >
+                <Smartphone size={18} color="#FFFFFF" />
+                <Text style={styles.upiAppBtnPrimaryText}>Pay with Any UPI App</Text>
+                <ExternalLink size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+
+              <View style={styles.upiAppBtnRow}>
+                <TouchableOpacity
+                  style={styles.upiAppBtnSecondary}
+                  onPress={() => {
+                    if (pendingUpiOrder?.gpayUri && typeof window !== 'undefined') {
+                      window.location.href = pendingUpiOrder.gpayUri;
+                    }
+                  }}
+                >
+                  <Text style={styles.upiAppBtnSecondaryText}>Google Pay</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.upiAppBtnSecondary}
+                  onPress={() => {
+                    if (pendingUpiOrder?.phonepeUri && typeof window !== 'undefined') {
+                      window.location.href = pendingUpiOrder.phonepeUri;
+                    }
+                  }}
+                >
+                  <Text style={styles.upiAppBtnSecondaryText}>PhonePe</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.upiAppBtnSecondary}
+                  onPress={() => {
+                    if (pendingUpiOrder?.paytmUri && typeof window !== 'undefined') {
+                      window.location.href = pendingUpiOrder.paytmUri;
+                    }
+                  }}
+                >
+                  <Text style={styles.upiAppBtnSecondaryText}>Paytm</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Dynamic QR Toggle */}
+            <TouchableOpacity
+              style={styles.upiQrToggleBtn}
+              onPress={() => setShowQrCode(!showQrCode)}
+            >
+              <QrCode size={16} color="#475569" />
+              <Text style={styles.upiQrToggleText}>
+                {showQrCode ? 'Hide QR Code' : 'Show QR Code to Scan with Another Phone'}
+              </Text>
+            </TouchableOpacity>
+
+            {showQrCode && pendingUpiOrder?.npciUpiUri && (
+              <View style={styles.upiQrBox}>
+                <QRCodeSVG
+                  value={pendingUpiOrder.npciUpiUri}
+                  size={160}
+                  level="M"
+                />
+                <Text style={styles.upiQrHint}>Scan with Google Pay, PhonePe, Paytm, or BHIM</Text>
+              </View>
+            )}
+
+            {/* Auto-Return Notice */}
+            <View style={styles.upiAutoReturnCard}>
+              <RefreshCw size={15} color="#15803d" />
+              <Text style={styles.upiAutoReturnText}>
+                Official NPCI Auto-Return active: When payment is completed in your UPI app, this screen will verify and update automatically.
+              </Text>
+            </View>
+
+            {/* Manual UTR Fallback Card */}
+            <View style={styles.upiUtrCard}>
+              <Text style={styles.upiUtrTitle}>Returned manually? Enter 12-digit UPI Ref / UTR:</Text>
+              <View style={styles.upiUtrInputRow}>
+                <TextInput
+                  style={[styles.upiUtrInput as any, Boolean(utrError) && { borderColor: '#ef4444' }]}
+                  placeholder="e.g. 432589012345"
+                  placeholderTextColor="#94a3b8"
+                  keyboardType="numeric"
+                  maxLength={12}
+                  value={enteredUtr}
+                  onChangeText={(val) => {
+                    const clean = val.replace(/\D/g, '');
+                    setEnteredUtr(clean);
+                    if (utrError) setUtrError('');
+                  }}
+                />
+                <TouchableOpacity
+                  style={styles.upiPasteBtn}
+                  onPress={async () => {
+                    if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+                      try {
+                        const txt = await navigator.clipboard.readText();
+                        const match = txt.trim().match(/\b\d{12}\b/);
+                        if (match && match[0]) {
+                          setEnteredUtr(match[0]);
+                          if (utrError) setUtrError('');
+                        } else if (txt.trim().length <= 12) {
+                          setEnteredUtr(txt.replace(/\D/g, ''));
+                        }
+                      } catch {}
+                    }
+                  }}
+                >
+                  <Text style={styles.upiPasteBtnText}>Paste</Text>
+                </TouchableOpacity>
+              </View>
+
+              {utrError ? <Text style={styles.upiUtrError}>{utrError}</Text> : null}
+
+              <TouchableOpacity
+                onPress={() => setShowUtrHelp(!showUtrHelp)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}
+              >
+                <HelpCircle size={13} color="#64748b" />
+                <Text style={{ fontSize: 11, color: '#64748b', textDecorationLine: 'underline' }}>
+                  {showUtrHelp ? 'Hide guide' : 'Where do I find my 12-digit UTR?'}
+                </Text>
+              </TouchableOpacity>
+
+              {showUtrHelp && (
+                <View style={styles.upiUtrHelpBox}>
+                  <Text style={styles.upiUtrHelpItem}>• <Text style={{ fontWeight: '700' }}>Google Pay:</Text> Tap transaction ➔ Scroll down ➔ "UPI transaction ID"</Text>
+                  <Text style={styles.upiUtrHelpItem}>• <Text style={{ fontWeight: '700' }}>PhonePe:</Text> Tap History ➔ View details ➔ "UTR"</Text>
+                  <Text style={styles.upiUtrHelpItem}>• <Text style={{ fontWeight: '700' }}>Paytm:</Text> Passbook ➔ Tap payment ➔ "UPI Ref No"</Text>
+                </View>
+              )}
+            </View>
+          </ScrollView>
+
+          {/* Modal Actions */}
+          <View style={styles.upiModalFooter}>
+            <TouchableOpacity
+              style={[styles.upiSubmitUtrBtn, confirmingDirectUpi && { opacity: 0.7 }]}
+              onPress={() => handleConfirmUpiPayment(false)}
+              disabled={confirmingDirectUpi}
+              activeOpacity={0.85}
+            >
+              {confirmingDirectUpi ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.upiSubmitUtrBtnText}>
+                  {enteredUtr.length === 12 ? 'Submit UTR & Confirm Order' : '✅ I Have Paid (Confirm Order)'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.upiCancelBtn}
+              onPress={() => {
+                setUpiModalVisible(false);
+              }}
+              disabled={confirmingDirectUpi}
+            >
+              <Text style={styles.upiCancelBtnText}>Cancel / Change Payment Method</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  </>
   );
 }
 
@@ -3599,5 +4051,309 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  // Direct NPCI UPI Modal Styles
+  upiModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    zIndex: 9999,
+  },
+  upiModalCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 440,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  upiModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  upiModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  upiAmountCard: {
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    borderRadius: 14,
+    padding: 14,
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  upiAmountLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#166534',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  upiAmountValue: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#15803d',
+    marginVertical: 4,
+  },
+  upiOrderBadge: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 20,
+    marginTop: 2,
+  },
+  upiOrderBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#15803d',
+  },
+  upiPayeeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 6,
+    gap: 8,
+  },
+  upiPayeeLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748b',
+    textTransform: 'uppercase',
+  },
+  upiPayeeName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginTop: 2,
+  },
+  upiPayeeId: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0284c7',
+    marginTop: 1,
+  },
+  upiCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+  },
+  upiCopyBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  upiSectionHeading: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  upiAppBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#15803d',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    shadowColor: '#15803d',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  upiAppBtnPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  upiAppBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  upiAppBtnSecondary: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+  },
+  upiAppBtnSecondaryText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  upiQrToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    marginVertical: 6,
+  },
+  upiQrToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  upiQrBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    marginVertical: 8,
+  },
+  upiQrHint: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  upiAutoReturnCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#dcfce7',
+    borderRadius: 10,
+    padding: 10,
+    marginVertical: 6,
+  },
+  upiAutoReturnText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#166534',
+    lineHeight: 16,
+    fontWeight: '500',
+  },
+  upiUtrCard: {
+    backgroundColor: '#fafaf9',
+    borderWidth: 1,
+    borderColor: '#e7e5e4',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 8,
+  },
+  upiUtrTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#292524',
+    marginBottom: 6,
+  },
+  upiUtrInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  upiUtrInput: {
+    flex: 1,
+    height: 42,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#d6d3d1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1c1917',
+    letterSpacing: 1,
+  },
+  upiPasteBtn: {
+    backgroundColor: '#e7e5e4',
+    paddingHorizontal: 12,
+    height: 42,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  upiPasteBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#44403c',
+  },
+  upiUtrError: {
+    color: '#dc2626',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  upiUtrHelpBox: {
+    backgroundColor: '#f5f5f4',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 8,
+    gap: 4,
+  },
+  upiUtrHelpItem: {
+    fontSize: 11,
+    color: '#57534e',
+    lineHeight: 15,
+  },
+  upiModalFooter: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    gap: 8,
+  },
+  upiSubmitUtrBtn: {
+    backgroundColor: '#15803d',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  upiSubmitUtrBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  upiCancelBtn: {
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  upiCancelBtnText: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

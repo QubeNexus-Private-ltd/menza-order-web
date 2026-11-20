@@ -46,8 +46,18 @@ function getTrackOrderIdFromUrl(): string | null {
     }
   }
 
-  // 2. Query param: ?trackOrderId=123, ?track=123, ?orderId=123 (if not returning from gateway checkout)
-  const isPaymentGatewayReturn = searchParams.has('order_token') || searchParams.has('cf_id');
+  // 2. Query param: ?trackOrderId=123, ?track=123, ?orderId=123 (if not returning from gateway checkout or UPI callback)
+  const isPaymentGatewayReturn =
+    searchParams.has('order_token') ||
+    searchParams.has('cf_id') ||
+    searchParams.get('upi_return') === 'true' ||
+    searchParams.has('ApprovalRefNo') ||
+    searchParams.has('approvalRefNo') ||
+    searchParams.has('responseCode') ||
+    (searchParams.has('Status') && !searchParams.has('cf_order_id')) ||
+    (searchParams.has('status') && !searchParams.has('cf_order_id')) ||
+    (typeof window !== 'undefined' && window.location.pathname.toLowerCase().includes('/upi-callback'));
+
   if (!isPaymentGatewayReturn) {
     const qId = searchParams.get('trackOrderId') || searchParams.get('track') || searchParams.get('orderId');
     if (qId && qId.trim() && !['undefined', 'null'].includes(qId.trim().toLowerCase())) {
@@ -69,6 +79,20 @@ export default function App() {
       // Explicit staff route
       if (path === '/staff' || searchParams.get('staff') === 'true' || searchParams.get('view') === 'staff') {
         return 'staff';
+      }
+
+      // Check if user came from official NPCI UPI callback
+      const isUpiCallbackRoute =
+        path.includes('/upi-callback') ||
+        searchParams.get('upi_return') === 'true' ||
+        searchParams.has('ApprovalRefNo') ||
+        searchParams.has('approvalRefNo') ||
+        searchParams.has('responseCode') ||
+        (searchParams.has('Status') && !searchParams.has('cf_order_id')) ||
+        (searchParams.has('status') && !searchParams.has('cf_order_id'));
+
+      if (isUpiCallbackRoute) {
+        return 'customer';
       }
 
       // Check if user came via track link: /track/:orderId or ?trackOrderId= or ?orderId=
@@ -625,8 +649,107 @@ export default function App() {
       searchParams.get('orderId') ||
       searchParams.get('cf_order_id');
 
+    const isUpiReturn =
+      (typeof window !== 'undefined' && window.location.pathname.toLowerCase().includes('/upi-callback')) ||
+      searchParams.get('upi_return') === 'true' ||
+      searchParams.has('ApprovalRefNo') ||
+      searchParams.has('approvalRefNo') ||
+      searchParams.has('responseCode') ||
+      (searchParams.has('Status') && !searchParams.has('cf_order_id')) ||
+      (searchParams.has('status') && !searchParams.has('cf_order_id'));
+
+    const upiStatus = (searchParams.get('Status') || searchParams.get('status') || '').toUpperCase();
+    const upiResponseCode = searchParams.get('responseCode') || '';
+    const upiApprovalRefNo = searchParams.get('ApprovalRefNo') || searchParams.get('approvalRefNo') || '';
+    const upiTxnRef = searchParams.get('order_id') || searchParams.get('orderId') || searchParams.get('txnRef') || paymentReturnOrderId;
+
     const initializeMenu =
       async () => {
+        // 1. Process Official NPCI UPI Deep Link Callback Return (&url=)
+        if (isUpiReturn) {
+          try {
+            logger.payment('UPI_DIRECT_RETURN_RECEIVED', `NPCI UPI callback received for order: ${upiTxnRef}`, {
+              upiTxnRef,
+              upiStatus,
+              upiResponseCode,
+              upiApprovalRefNo,
+            });
+
+            const isSuccess =
+              upiStatus === 'SUCCESS' ||
+              upiResponseCode === '00' ||
+              (!upiStatus && Boolean(upiApprovalRefNo));
+
+            const isFailure =
+              upiStatus === 'FAILURE' ||
+              upiStatus === 'FAILED' ||
+              upiResponseCode === 'U30' ||
+              upiResponseCode === 'ZM' ||
+              upiResponseCode === 'ZA';
+
+            if (isFailure) {
+              logger.payment('UPI_DIRECT_RETURN_FAILED', `UPI payment cancelled or declined. Code=${upiResponseCode}`);
+              showToast('❌ UPI payment was cancelled or declined.');
+            } else if (isSuccess) {
+              // Extract clean order ID accurately
+              let cleanOrderId = searchParams.get('order_id') || searchParams.get('orderId') || '';
+              if (!cleanOrderId && upiTxnRef) {
+                const parts = String(upiTxnRef).split('_');
+                cleanOrderId = parts.length > 2 ? parts[2] : parts[parts.length - 1].replace(/\D/g, '');
+              }
+
+              if (cleanOrderId) {
+                signalrService.joinOrderGroup(cleanOrderId);
+
+                const confirmed = await api.confirmDirectUpiOrder(
+                  cleanOrderId,
+                  upiApprovalRefNo || 'VERIFIED_NPCI',
+                  'Paid'
+                );
+
+                if (confirmed) {
+                  setActiveOrder(confirmed);
+                  setTrackedOrderId(cleanOrderId);
+                  showToast(`✅ Payment Successful! Order #${cleanOrderId} confirmed via UPI${upiApprovalRefNo ? ` (Ref: ${upiApprovalRefNo})` : ''}.`);
+                }
+
+                // Clear cart after confirmed direct UPI payment
+                await api.clearCart();
+                syncCart(null);
+
+                // If user returned directly to root/callback without restaurant context in URL, switch to order tracking
+                if (!encRestId && !urlRestId) {
+                  setTrackedOrderId(cleanOrderId);
+                  setMode('track');
+                  setLoading(false);
+                  return;
+                }
+              }
+            }
+          } catch (upiErr) {
+            console.error('NPCI UPI Return handling error:', upiErr);
+          } finally {
+            if (typeof window !== 'undefined' && window.history?.replaceState) {
+              const cleanUrl = new URL(window.location.href);
+              cleanUrl.searchParams.delete('upi_return');
+              cleanUrl.searchParams.delete('Status');
+              cleanUrl.searchParams.delete('status');
+              cleanUrl.searchParams.delete('responseCode');
+              cleanUrl.searchParams.delete('ApprovalRefNo');
+              cleanUrl.searchParams.delete('approvalRefNo');
+              cleanUrl.searchParams.delete('txnId');
+              cleanUrl.searchParams.delete('txnRef');
+              cleanUrl.searchParams.delete('order_id');
+              cleanUrl.searchParams.delete('orderId');
+              cleanUrl.searchParams.delete('cf_order_id');
+              if (cleanUrl.pathname.toLowerCase().includes('/upi-callback')) {
+                cleanUrl.pathname = '/';
+              }
+              window.history.replaceState({}, document.title, cleanUrl.toString());
+            }
+          }
+        }
+
         // If no restaurant parameter exists in URL (TYPE C: e.g. /, /random, ?foo=bar, ?tableId=T12)
         if (!encRestId && !urlRestId) {
           const trackId = getTrackOrderIdFromUrl();
@@ -767,7 +890,7 @@ export default function App() {
           }
         }
 
-        if (paymentReturnOrderId) {
+if (paymentReturnOrderId) {
           try {
             logger.payment('PAYMENT_RETURN_RECEIVED', `Payment callback received for order: ${paymentReturnOrderId}`, { paymentReturnOrderId });
             // Join real-time SignalR group for immediate settlement events
