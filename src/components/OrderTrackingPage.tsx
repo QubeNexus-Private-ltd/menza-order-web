@@ -399,7 +399,8 @@ export default function OrderTrackingPage({
   const tax = Number(activeOrderData.taxAmount || (cgst + sgst));
   const discount = Number(activeOrderData.discountAmount || 0);
   const grandTotal = Number(activeOrderData.totalAmount || subTotal + tax - discount);
-  const isPaid = activeOrderData.isSettled || String(activeOrderData.paymentStatus || '').toUpperCase() === 'PAID';
+  const isPaid = String(activeOrderData.paymentStatus || '').toUpperCase() === 'PAID' ||
+    (Boolean(activeOrderData.isSettled) && String(activeOrderData.paymentMode || '').toUpperCase() !== 'DIRECT_UPI');
 
   // Payment Mode Resolution: accurately extract paymentMode from the API response
   const paymentMode = (

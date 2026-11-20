@@ -125,8 +125,9 @@ const getOrderStatusInfo = (ord, isKitchenActiveOverride = null, catalog = null,
     PAYMENT_METHOD_ONLINE.includes(paymentMethod) ||
     ord?.isOnline === true;
 
-  const isPaid = PAYMENT_STATES_PAID.includes(paymentState) || Boolean(ord?.settledDateUtc) || ord?.isSettled === true || isOnline;
-  const isAwaitingPayment = isOnline && !isPaid;
+  const isPaid = PAYMENT_STATES_PAID.includes(paymentState) || Boolean(ord?.settledDateUtc) || ord?.isSettled === true;
+  const isDirectUpi = paymentMode === 'DIRECT_UPI' || paymentMethod === 'DIRECT_UPI';
+  const isAwaitingPayment = !isPaid;
 
   let rawStatus = 'Pending';
   let badge = null;
@@ -1527,8 +1528,8 @@ export default function OrderTrackerModal({
 
             <View style={styles.infoTableRow}>
               <Text style={styles.infoTableLabel}>Settlement Status:</Text>
-              <Text style={[styles.infoTableValue, { color: (isPaid || isOnline) ? '#16a34a' : '#ea580c', fontWeight: '700' }]}>
-                {(isPaid || isOnline) ? '✓ Settled & Auto-Confirmed' : '⏳ Awaiting Cashier Confirmation'}
+              <Text style={[styles.infoTableValue, { color: isPaid ? '#16a34a' : (isDirectUpi ? '#0284c7' : '#ea580c'), fontWeight: '700' }]}>
+                {isPaid ? '✓ Settled & Confirmed' : (isDirectUpi ? '⏳ Awaiting UPI Payment' : '⏳ Awaiting Cashier Confirmation')}
               </Text>
             </View>
 
@@ -2013,7 +2014,7 @@ export default function OrderTrackerModal({
               <View
                 style={[
                   styles.paymentPill,
-                  (isPaid || isOnline)
+                  isPaid
                     ? styles.paymentPillPaid
                     : styles.paymentPillPending,
                 ]}
@@ -2021,14 +2022,14 @@ export default function OrderTrackerModal({
                 <Text
                   style={[
                     styles.paymentPillText,
-                    (isPaid || isOnline)
+                    isPaid
                       ? styles.paymentPillTextPaid
                       : styles.paymentPillTextPending,
                   ]}
                 >
-                  {(isPaid || isOnline)
+                  {isPaid
                     ? '✓ PAID & SETTLED'
-                    : 'PENDING CASHIER CONFIRMATION'}
+                    : (isDirectUpi ? '⏳ UPI PAYMENT PENDING' : 'PENDING CASHIER CONFIRMATION')}
                 </Text>
               </View>
             </View>
@@ -2041,11 +2042,13 @@ export default function OrderTrackerModal({
               Delivery Type: {diningType} • Mode: {curOrder.paymentMode || (isOnline ? 'ONLINE' : 'CASH')}
             </Text>
 
-            <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: (isPaid || isOnline) ? '#f0fdf4' : '#fffbeb' }}>
-              <Text style={{ fontSize: 11, color: (isPaid || isOnline) ? '#166534' : '#92400e', fontWeight: '500', lineHeight: 15 }}>
-                {(isPaid || isOnline)
-                  ? '✓ This online order is settled and confirmed directly to kitchen for preparation.'
-                  : '⏳ Please pay at the counter first to get the orders.'}
+            <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: isPaid ? '#f0fdf4' : (isDirectUpi ? '#eff6ff' : '#fffbeb') }}>
+              <Text style={{ fontSize: 11, color: isPaid ? '#166534' : (isDirectUpi ? '#1e40af' : '#92400e'), fontWeight: '500', lineHeight: 15 }}>
+                {isPaid
+                  ? '✓ This order is paid and confirmed directly to kitchen for preparation.'
+                  : (isDirectUpi
+                    ? '⏳ Please complete UPI payment so kitchen can begin preparation.'
+                    : '⏳ Please pay at the counter first to get the orders.')}
               </Text>
             </View>
 
@@ -2468,16 +2471,16 @@ export default function OrderTrackerModal({
                         paddingHorizontal: 6,
                         paddingVertical: 2,
                         borderRadius: 4,
-                        backgroundColor: (isPaid || isOnline) ? '#f0fdf4' : '#fffbeb',
+                        backgroundColor: isPaid ? '#f0fdf4' : (isDirectUpi ? '#eff6ff' : '#fffbeb'),
                         borderWidth: 1,
-                        borderColor: (isPaid || isOnline) ? '#bbf7d0' : '#fde68a'
+                        borderColor: isPaid ? '#bbf7d0' : (isDirectUpi ? '#bfdbfe' : '#fde68a')
                       }}>
                         <Text style={{
                           fontSize: 10,
                           fontWeight: '700',
-                          color: (isPaid || isOnline) ? '#166534' : '#92400e'
+                          color: isPaid ? '#166534' : (isDirectUpi ? '#1e40af' : '#92400e')
                         }}>
-                          {(isPaid || isOnline) ? '✓ Online Paid' : '💵 Cash (Pending)'}
+                          {isPaid ? '✓ Paid' : (isDirectUpi ? '📱 UPI (Pending)' : '💵 Cash (Pending)')}
                         </Text>
                       </View>
 

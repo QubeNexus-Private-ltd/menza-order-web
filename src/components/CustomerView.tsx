@@ -1467,9 +1467,17 @@ export default function CustomerView({
         let pillText = 'Order Placed';
         let subText = 'Order placed with restaurant.';
 
-        const isAwaitingCounterPay = !liveOrder.isPaid && !liveOrder.isOnline && String(liveOrder.paymentStatus || '').toLowerCase() !== 'paid';
+        const isPaid = String(liveOrder.paymentStatus || '').toLowerCase() === 'paid' || Boolean(liveOrder.isPaid);
+        const isDirectUpi = String(liveOrder.paymentMode || '').toUpperCase() === 'DIRECT_UPI';
+        const isAwaitingCounterPay = !isPaid && !liveOrder.isOnline && !isDirectUpi;
+        const isAwaitingUpiPay = !isPaid && isDirectUpi;
 
-        if (isAwaitingCounterPay) {
+        if (isAwaitingUpiPay) {
+          barStyle = { ...styles.liveOrderBarPlaced, backgroundColor: '#0284c7' };
+          iconNode = <Clock size={18} color="#ffffff" />;
+          pillText = 'UPI Payment Pending';
+          subText = 'Please complete your UPI payment to begin preparation.';
+        } else if (isAwaitingCounterPay) {
           barStyle = { ...styles.liveOrderBarPlaced, backgroundColor: '#d97706' };
           iconNode = <Clock size={18} color="#ffffff" />;
           pillText = 'Pay at Counter';

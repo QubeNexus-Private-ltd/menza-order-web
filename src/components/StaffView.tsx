@@ -561,8 +561,8 @@ export default function StaffView({
                 filteredOrders.map((ord) => {
                   const rawMode = (ord.paymentMode || ord.paymentMethod || 'CASH').toString().toUpperCase();
                   const isOnline = rawMode.includes('ONLINE') || rawMode.includes('CASHFREE') || rawMode.includes('UPI') || ord.isOnline === true;
-                  const isPaid = String(ord.paymentStatus || '').toUpperCase() === 'PAID' || isOnline;
-                  const isSettled = isPaid || isOnline || Boolean(ord.settledDateUtc);
+                  const isPaid = String(ord.paymentStatus || '').toUpperCase() === 'PAID';
+                  const isSettled = isPaid || Boolean(ord.settledDateUtc);
                   const deliveryType = ord.deliveryType || (ord.tableName || ord.tableId ? 'Dine-In' : 'Takeaway / Counter');
                   const isQr = String(ord.source || '').toUpperCase().includes('QR') || !ord.source;
 
@@ -609,7 +609,7 @@ export default function StaffView({
                               fontWeight: '700',
                               color: isSettled ? '#166534' : '#92400e'
                             }}>
-                              {isSettled ? '✓ Online Paid & Settled' : '⏳ Cash (Needs Confirm)'}
+                              {isPaid ? '✓ Paid & Settled' : (isOnline ? '⏳ UPI/Online Pending' : '⏳ Cash (Needs Confirm)')}
                             </Text>
                           </View>
                         </View>

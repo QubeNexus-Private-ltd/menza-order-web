@@ -2121,17 +2121,24 @@ if (paymentReturnOrderId) {
 
         /*
          * Close cart and
-         * open tracker.
+         * open tracker for counter orders.
+         * For Direct UPI, keep cart modal open to display UPI Intent / QR payment dialog.
          */
-        setCartModalOpen(false);
-        setOrderTrackerOpen(true);
+        if (payload.paymentMode !== 'DIRECT_UPI') {
+          setCartModalOpen(false);
+          setOrderTrackerOpen(true);
+        }
 
         const grandTotalAmt = completePlacedOrder.totalAmount || payload.totalAmount || 0;
         const isPrepaidOrder = String(activeTable?.dineInPaymentMode || '').toUpperCase() === 'PREPAID' && (payload.paymentMode === 'CASH' || payload.paymentType === 'COUNTER_CASH');
+        const isDirectUpiOrder = payload.paymentMode === 'DIRECT_UPI';
+
         showToast(
-          isPrepaidOrder
-            ? `Order #${result.orderId} placed! Please pay ₹${grandTotalAmt} at the counter to start preparation.`
-            : `Order #${result.orderId} created successfully!`
+          isDirectUpiOrder
+            ? `Order #${result.orderId} created! Please complete UPI payment.`
+            : (isPrepaidOrder
+              ? `Order #${result.orderId} placed! Please pay ₹${grandTotalAmt} at the counter to start preparation.`
+              : `Order #${result.orderId} created successfully!`)
         );
 
         return result;

@@ -316,10 +316,43 @@ export default function CartModal({
   const isPostpaidTable = Boolean(activeTable && String(activeTable.dineInPaymentMode || '').toUpperCase() === 'POSTPAID');
   const isPrepaidTable = !isPostpaidTable && Boolean(isTableOrder || isDynamicQr);
   
-  // Available restaurant UPI ID for Direct NPCI UPI Intent
-  const availableUpiId = catalog?.bankerUpiId || catalog?.upiId || activeTable?.bankerUpiId || 'menzaorder@upi';
-  const availablePayeeName = catalog?.bankerAccountHolderName || catalog?.restaurantName || 'Menza Restaurant';
-  const isDirectUpiAvailable = Boolean(availableUpiId);
+  // Dynamically fetched UPI configuration directly from Restaurant Owner Config
+  const [dynamicUpiConfig, setDynamicUpiConfig] = useState<{ upiId?: string; bankerAccountHolderName?: string } | null>(null);
+
+  useEffect(() => {
+    if (visible && !catalog?.bankerUpiId && !catalog?.upiId) {
+      const encId = catalog?.encryptedRestaurantId || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('r') : null);
+      const restId = catalog?.restaurantId;
+      if (encId || restId) {
+        api.getRestaurantUpiConfig(encId, restId).then((config) => {
+          if (config && (config.bankerUpiId || config.upiId)) {
+            setDynamicUpiConfig({
+              upiId: config.bankerUpiId || config.upiId,
+              bankerAccountHolderName: config.bankerAccountHolderName,
+            });
+          }
+        }).catch(() => {});
+      }
+    }
+  }, [visible, catalog?.encryptedRestaurantId, catalog?.restaurantId, catalog?.bankerUpiId, catalog?.upiId]);
+
+  // Available restaurant owner UPI ID for Direct NPCI UPI Intent (zero fallback to fake/placeholder IDs)
+  const availableUpiId =
+    catalog?.bankerUpiId ||
+    catalog?.upiId ||
+    activeTable?.bankerUpiId ||
+    activeTable?.upiId ||
+    dynamicUpiConfig?.upiId ||
+    '';
+
+  const availablePayeeName =
+    catalog?.bankerAccountHolderName ||
+    dynamicUpiConfig?.bankerAccountHolderName ||
+    activeTable?.bankerAccountHolderName ||
+    catalog?.restaurantName ||
+    'Restaurant';
+
+  const isDirectUpiAvailable = Boolean(availableUpiId && availableUpiId.trim().length > 0);
   const isPayAtCounterOnly = false;
   const isOnlinePaymentVisible = false;
 
@@ -874,12 +907,12 @@ export default function CartModal({
     }
   };
 
-  const handleConfirmUpiPayment = async (isManualPaidOnly = false) => {
+  const handleConfirmUpiPayment = async () => {
     if (!pendingUpiOrder) return;
     const utrVal = enteredUtr.trim();
 
-    if (!isManualPaidOnly && utrVal.length > 0 && utrVal.length !== 12) {
-      setUtrError('UPI Reference / UTR must be exactly 12 digits');
+    if (!utrVal || utrVal.length !== 12) {
+      setUtrError('Please enter the 12-digit UPI Reference / UTR number from your payment receipt');
       return;
     }
     setUtrError('');
@@ -889,11 +922,11 @@ export default function CartModal({
       const orderId = pendingUpiOrder.orderId;
       await api.confirmDirectUpiOrder(
         orderId,
-        utrVal || (isManualPaidOnly ? 'MANUAL_CONFIRMED' : 'AWAITING_VERIFICATION'),
+        utrVal,
         'Paid'
       );
 
-      logger.payment('UPI_DIRECT_CONFIRMED', `Customer confirmed direct UPI payment for Order #${orderId}: UTR=${utrVal || 'N/A'}`);
+      logger.payment('UPI_DIRECT_CONFIRMED', `Customer confirmed direct UPI payment for Order #${orderId}: UTR=${utrVal}`);
 
       setConfirmingDirectUpi(false);
       setUpiModalVisible(false);
@@ -1101,6 +1134,11 @@ export default function CartModal({
 
     // 1. Direct NPCI UPI Intent Flow
     if (paymentMethod === 'direct_upi') {
+      if (!availableUpiId) {
+        setErrorMsg('Restaurant owner UPI ID is not configured. Please choose Pay at Counter.');
+        setPaymentMethod('payatcounter');
+        return;
+      }
       setSubmittingOrder(true);
       setProcessingPayment(false);
       try {
@@ -1146,8 +1184,8 @@ export default function CartModal({
         } catch {}
 
         // Construct official NPCI UPI Deep Link with &url= callback
-        const payeeUpi = catalog?.bankerUpiId || catalog?.upiId || activeTable?.bankerUpiId || availableUpiId || 'menzaorder@upi';
-        const payeeName = catalog?.bankerAccountHolderName || catalog?.restaurantName || availablePayeeName || 'Menza Restaurant';
+        const payeeUpi = availableUpiId;
+        const payeeName = availablePayeeName;
         const formattedAmount = Number(grandTotal).toFixed(2);
         const txnRef = `ORD_${restId}_${placedOrderId}`;
         const txnNote = `Order #${placedOrderId} Table ${effectiveTableName || 'Counter'}`;
@@ -2445,38 +2483,52 @@ export default function CartModal({
                   </Text>
 
                   {/* Direct NPCI UPI Intent Option */}
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => setPaymentMethod('direct_upi')}
-                    style={styles.paymentMethodRow}
-                  >
-                    <View
-                      style={[
-                        styles.paymentCard,
-                        paymentMethod === 'direct_upi' && styles.paymentCardActive,
-                        paymentMethod === 'direct_upi' && { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
-                        { flex: 1 }
-                      ]}
+                  {isDirectUpiAvailable ? (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => setPaymentMethod('direct_upi')}
+                      style={styles.paymentMethodRow}
                     >
-                      <Smartphone size={22} color={paymentMethod === 'direct_upi' ? '#15803d' : '#64748b'} />
+                      <View
+                        style={[
+                          styles.paymentCard,
+                          paymentMethod === 'direct_upi' && styles.paymentCardActive,
+                          paymentMethod === 'direct_upi' && { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
+                          { flex: 1 }
+                        ]}
+                      >
+                        <Smartphone size={22} color={paymentMethod === 'direct_upi' ? '#15803d' : '#64748b'} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.paymentCardTitle, paymentMethod === 'direct_upi' && { color: '#166534' }]}>
+                            Direct UPI Payment
+                          </Text>
+                          <Text style={[styles.paymentCardSub, paymentMethod === 'direct_upi' && { color: '#15803d' }]}>
+                            Google Pay • PhonePe • Paytm • BHIM
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 4 }}>
+                            ⚡ Direct to {availablePayeeName} ({availableUpiId})
+                          </Text>
+                        </View>
+                        {paymentMethod === 'direct_upi' ? (
+                          <CheckCircle2 size={18} color="#15803d" />
+                        ) : (
+                          <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#cbd5e1' }} />
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[styles.paymentCard, { opacity: 0.65, borderColor: '#e2e8f0', backgroundColor: '#f8fafc', marginBottom: 6 }]}>
+                      <Smartphone size={22} color="#94a3b8" />
                       <View style={{ flex: 1 }}>
-                        <Text style={[styles.paymentCardTitle, paymentMethod === 'direct_upi' && { color: '#166534' }]}>
+                        <Text style={[styles.paymentCardTitle, { color: '#64748b' }]}>
                           Direct UPI Payment
                         </Text>
-                        <Text style={[styles.paymentCardSub, paymentMethod === 'direct_upi' && { color: '#15803d' }]}>
-                          Google Pay • PhonePe • Paytm • BHIM
-                        </Text>
-                        <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 4 }}>
-                          ⚡ Instant NPCI Intent • Direct to Restaurant (0% Fee)
+                        <Text style={[styles.paymentCardSub, { color: '#94a3b8' }]}>
+                          Direct UPI not configured by restaurant • Please pay at counter
                         </Text>
                       </View>
-                      {paymentMethod === 'direct_upi' ? (
-                        <CheckCircle2 size={18} color="#15803d" />
-                      ) : (
-                        <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#cbd5e1' }} />
-                      )}
                     </View>
-                  </TouchableOpacity>
+                  )}
 
                   {/* Pay at Counter option */}
                   <TouchableOpacity
@@ -3049,16 +3101,19 @@ export default function CartModal({
           {/* Modal Actions */}
           <View style={styles.upiModalFooter}>
             <TouchableOpacity
-              style={[styles.upiSubmitUtrBtn, confirmingDirectUpi && { opacity: 0.7 }]}
-              onPress={() => handleConfirmUpiPayment(false)}
-              disabled={confirmingDirectUpi}
+              style={[
+                styles.upiSubmitUtrBtn,
+                (confirmingDirectUpi || enteredUtr.trim().length !== 12) && { opacity: 0.5, backgroundColor: '#94a3b8' }
+              ]}
+              onPress={() => handleConfirmUpiPayment()}
+              disabled={confirmingDirectUpi || enteredUtr.trim().length !== 12}
               activeOpacity={0.85}
             >
               {confirmingDirectUpi ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Text style={styles.upiSubmitUtrBtnText}>
-                  {enteredUtr.length === 12 ? 'Submit UTR & Confirm Order' : '✅ I Have Paid (Confirm Order)'}
+                  {enteredUtr.trim().length === 12 ? '✅ Submit 12-Digit UTR to Confirm' : 'Enter 12-Digit UTR to Confirm'}
                 </Text>
               )}
             </TouchableOpacity>

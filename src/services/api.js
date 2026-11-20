@@ -998,6 +998,34 @@ const normalizeCatalogData = (
         ? Number(data.sgstPercentage ?? data.SgstPercentage ?? data.sgstRate ?? 2.5)
         : 0,
 
+    bankerUpiId:
+      data.bankerUpiId ||
+      data.BankerUpiId ||
+      data.upiId ||
+      data.UpiId ||
+      null,
+
+    upiId:
+      data.upiId ||
+      data.UpiId ||
+      data.bankerUpiId ||
+      data.BankerUpiId ||
+      null,
+
+    bankerAccountHolderName:
+      data.bankerAccountHolderName ||
+      data.BankerAccountHolderName ||
+      data.restaurantName ||
+      data.RestaurantName ||
+      null,
+
+    printUpiQrOnReceipts:
+      data.printUpiQrOnReceipts !== undefined
+        ? Boolean(data.printUpiQrOnReceipts)
+        : data.PrintUpiQrOnReceipts !== undefined
+        ? Boolean(data.PrintUpiQrOnReceipts)
+        : true,
+
     items: normalizedItems,
   };
 };
@@ -1152,6 +1180,33 @@ export const getStoreProfile = async (
         return res2.data?.data ?? res2.data;
       }
     } catch {}
+  }
+  return null;
+};
+
+export const getRestaurantUpiConfig = async (
+  encryptedRestaurantId,
+  restaurantId = null
+) => {
+  try {
+    const params = new URLSearchParams();
+    if (encryptedRestaurantId) params.set('r', encryptedRestaurantId);
+    if (restaurantId) params.set('restaurantId', String(restaurantId));
+
+    let res = null;
+    try {
+      res = await api.get(`/api/public/store/upi-config?${params.toString()}`);
+    } catch {
+      if (restaurantId) {
+        res = await api.get(`/api/public/store/restaurant/${restaurantId}/upi-config`);
+      }
+    }
+
+    if (res?.data) {
+      return res.data;
+    }
+  } catch (e) {
+    logger.warn('Failed to fetch restaurant UPI config', { error: e?.message });
   }
   return null;
 };
