@@ -1026,6 +1026,12 @@ const normalizeCatalogData = (
         ? Boolean(data.PrintUpiQrOnReceipts)
         : true,
 
+    contactNumber:
+      data.contactNumber ||
+      data.ContactNumber ||
+      data.contactPhone ||
+      null,
+
     items: normalizedItems,
   };
 };
@@ -3059,6 +3065,8 @@ export const getOrder = async (orderId, phone = '') => {
   orderTrackInFlightCache.set(cacheKey, { promise, time: now });
   return promise;
 };
+
+export const trackOrder = getOrder;
 
 /* =========================================================
    GET CURRENT DEVICE ORDERS

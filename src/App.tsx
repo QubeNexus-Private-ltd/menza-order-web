@@ -2797,6 +2797,13 @@ if (paymentReturnOrderId) {
         orderTypes={orderTypes}
         loading={loading}
         storeOperatingStatus={storeOperatingStatus}
+        onOrderConfirmed={(orderId) => {
+          setCartModalOpen(false);
+          if (orderId) {
+            setTrackerTargetOrder({ id: orderId, orderId });
+          }
+          setOrderTrackerOpen(true);
+        }}
       />
 
       <OrderTrackerModal
