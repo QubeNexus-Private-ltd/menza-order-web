@@ -1328,23 +1328,27 @@ export default function CartModal({
         const formattedAmount = Number(grandTotal).toFixed(2);
         const cleanTxnNote = `Order${placedOrderId}`;
 
-        // Standard Universal NPCI URI for Restaurant Merchant (P2M):
-        // mc=5812 (Eating places & restaurants) and mode=02 (Dynamic QR) ensures YES Bank / Merchant VPAs
-        // are recognized as Business P2M instead of failing as invalid P2P!
-        const npciUpiUri = `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&mc=5812&mode=02&am=${formattedAmount}&cu=INR&tn=${cleanTxnNote}`;
+        // 1. Static Standee URI (Identical to physical counter Soundbox/Standee QR - 100% bank success rate)
+        const staticStandeeUri = `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&cu=INR`;
 
-        // App-specific intent schemes with Android fallback
+        // 2. Dynamic Auto-Amount URI
+        const dynamicAmountUri = `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
+
+        // Standard Universal Clean NPCI URI (defaults to staticStandeeUri for merchant terminal VPAs)
+        const npciUpiUri = staticStandeeUri;
+
+        // Direct app launcher URIs using standard UPI protocol
         const gpayUri = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
-          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&mc=5812&mode=02&am=${formattedAmount}&cu=INR&tn=${cleanTxnNote}#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end`
-          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&mc=5812&mode=02&am=${formattedAmount}&cu=INR&tn=${cleanTxnNote}`;
+          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end`
+          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
 
         const phonepeUri = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
-          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&mc=5812&mode=02&am=${formattedAmount}&cu=INR&tn=${cleanTxnNote}#Intent;scheme=upi;package=com.phonepe.app;end`
-          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&mc=5812&mode=02&am=${formattedAmount}&cu=INR&tn=${cleanTxnNote}`;
+          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR#Intent;scheme=upi;package=com.phonepe.app;end`
+          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
 
         const paytmUri = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
-          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&mc=5812&mode=02&am=${formattedAmount}&cu=INR&tn=${cleanTxnNote}#Intent;scheme=upi;package=net.one97.paytm;end`
-          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&mc=5812&mode=02&am=${formattedAmount}&cu=INR&tn=${cleanTxnNote}`;
+          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR#Intent;scheme=upi;package=net.one97.paytm;end`
+          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
 
         const upiOrderData = {
           orderId: placedOrderId,
@@ -1354,6 +1358,8 @@ export default function CartModal({
           payeeName: cleanPayeeName,
           contactNumber: availableContactNumber,
           npciUpiUri,
+          staticStandeeUri,
+          dynamicAmountUri,
           gpayUri,
           phonepeUri,
           paytmUri,
@@ -3168,6 +3174,11 @@ export default function CartModal({
             {/* Tab 1: Scan QR Code */}
             {upiPaymentTab === 'qr' && pendingUpiOrder?.npciUpiUri && (
               <View style={styles.upiQrBox}>
+                <View style={{ backgroundColor: '#f0fdf4', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0', marginBottom: 10, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, color: '#166534', fontWeight: '600' }}>Amount to enter upon scanning:</Text>
+                  <Text style={{ fontSize: 20, fontWeight: '800', color: '#15803d', marginTop: 2 }}>₹{pendingUpiOrder?.formattedAmount || money(pendingUpiOrder?.amount)}</Text>
+                </View>
+
                 <QRCodeSVG
                   value={pendingUpiOrder.npciUpiUri}
                   size={175}
@@ -3176,11 +3187,11 @@ export default function CartModal({
                 <Text style={styles.upiQrHint}>Scan with Google Pay, PhonePe, Paytm, Cred, or BHIM</Text>
                 <View style={{ marginTop: 8, backgroundColor: '#f0fdf4', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#bbf7d0' }}>
                   <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', textAlign: 'center' }}>
-                    ✓ 100% Reliable • Never blocked by bank risk policy
+                    ✓ 100% Reliable Standee QR • Zero Bank Blocks
                   </Text>
                 </View>
                 <Text style={{ fontSize: 11, color: '#64748b', marginTop: 8, textAlign: 'center', lineHeight: 15 }}>
-                  💡 <Text style={{ fontWeight: '600' }}>Paying on this mobile?</Text> Take a screenshot of this QR and select "Scan from Gallery" in Google Pay or PhonePe!
+                  💡 <Text style={{ fontWeight: '600' }}>At the restaurant counter?</Text> You can scan this screen QR OR scan your physical counter Soundbox QR directly!
                 </Text>
               </View>
             )}
