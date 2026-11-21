@@ -368,7 +368,7 @@ export default function CartModal({
   const [pendingUpiOrder, setPendingUpiOrder] = useState<any>(null);
   const [enteredUtr, setEnteredUtr] = useState<string>('');
   const [utrError, setUtrError] = useState<string>('');
-  const [showQrCode, setShowQrCode] = useState<boolean>(false);
+  const [showQrCode, setShowQrCode] = useState<boolean>(true);
   const [copiedUpiId, setCopiedUpiId] = useState<boolean>(false);
   const [showUtrHelp, setShowUtrHelp] = useState<boolean>(false);
   const [confirmingDirectUpi, setConfirmingDirectUpi] = useState<boolean>(false);
@@ -1183,19 +1183,22 @@ export default function CartModal({
           joinOrderGroup(placedOrderId);
         } catch {}
 
-        // Construct official NPCI UPI Deep Link with &url= callback
+        // Construct clean NPCI-compliant UPI URI
+        // NOTE: NPCI guidelines and TPAPs (Google Pay, PhonePe, Paytm) actively flag or block
+        // raw intents containing &url= or &tr= as "UPI Risk Policy" / "Security Issue" unless signed.
+        // A clean UPI URI with pa, pn, am, cu, and clean tn executes smoothly with 0 security warnings.
         const payeeUpi = availableUpiId;
         const payeeName = availablePayeeName;
         const formattedAmount = Number(grandTotal).toFixed(2);
-        const txnRef = `ORD_${restId}_${placedOrderId}`;
-        const txnNote = `Order #${placedOrderId} Table ${effectiveTableName || 'Counter'}`;
+        const cleanTxnNote = `Order ${placedOrderId}`;
 
-        const encRestId = catalog?.encryptedRestaurantId || api.encryptRestaurantId(restId);
-        const returnOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-        const returnPathname = typeof window !== 'undefined' ? window.location.pathname : '';
-        const customCallbackUrl = `${returnOrigin}${returnPathname}?upi_return=true&order_id=${encodeURIComponent(placedOrderId)}&r=${encodeURIComponent(encRestId)}${effectiveTableId ? `&tableId=${encodeURIComponent(effectiveTableId)}` : ''}`;
+        // Standard Universal NPCI URI accepted by all UPI apps without risk engine blocks
+        const npciUpiUri = `upi://pay?pa=${encodeURIComponent(payeeUpi)}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tn=${encodeURIComponent(cleanTxnNote)}`;
 
-        const npciUpiUri = `upi://pay?pa=${payeeUpi}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent(txnNote)}&url=${encodeURIComponent(customCallbackUrl)}`;
+        // App-specific intent schemes
+        const gpayUri = `tez://upi/pay?pa=${encodeURIComponent(payeeUpi)}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tn=${encodeURIComponent(cleanTxnNote)}`;
+        const phonepeUri = `phonepe://pay?pa=${encodeURIComponent(payeeUpi)}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tn=${encodeURIComponent(cleanTxnNote)}`;
+        const paytmUri = `paytmmp://pay?pa=${encodeURIComponent(payeeUpi)}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tn=${encodeURIComponent(cleanTxnNote)}`;
 
         const upiOrderData = {
           orderId: placedOrderId,
@@ -1203,10 +1206,9 @@ export default function CartModal({
           payeeUpi,
           payeeName,
           npciUpiUri,
-          gpayUri: `gpay://upi/pay?pa=${payeeUpi}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent(txnNote)}&url=${encodeURIComponent(customCallbackUrl)}`,
-          phonepeUri: `phonepe://pay?pa=${payeeUpi}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent(txnNote)}&url=${encodeURIComponent(customCallbackUrl)}`,
-          paytmUri: `paytmmp://pay?pa=${payeeUpi}&pn=${encodeURIComponent(payeeName)}&am=${formattedAmount}&cu=INR&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent(txnNote)}&url=${encodeURIComponent(customCallbackUrl)}`,
-          callbackUrl: customCallbackUrl,
+          gpayUri,
+          phonepeUri,
+          paytmUri,
           orderPayload: directUpiOrderPayload,
         };
 
@@ -1220,15 +1222,8 @@ export default function CartModal({
           npciUpiUri,
         });
 
-        // Try opening UPI Intent automatically
-        if (typeof window !== 'undefined') {
-          try {
-            window.location.href = npciUpiUri;
-          } catch (launchErr) {
-            console.warn('Could not auto-launch UPI app:', launchErr);
-          }
-        }
-
+        // Do not force automatic background redirect (window.location.href) as mobile browsers
+        // and Android security block unprompted external protocol redirects.
         return;
       } catch (placeErr: any) {
         console.error('Direct UPI place order error:', placeErr);
@@ -3026,21 +3021,26 @@ export default function CartModal({
                   size={160}
                   level="M"
                 />
-                <Text style={styles.upiQrHint}>Scan with Google Pay, PhonePe, Paytm, or BHIM</Text>
+                <Text style={styles.upiQrHint}>Scan with Google Pay, PhonePe, Paytm, Cred, or BHIM</Text>
+                <Text style={{ fontSize: 11, color: '#15803d', fontWeight: '700', marginTop: 4, textAlign: 'center' }}>
+                  ✓ 100% Direct • Bypasses browser risk alerts
+                </Text>
               </View>
             )}
 
-            {/* Auto-Return Notice */}
-            <View style={styles.upiAutoReturnCard}>
-              <RefreshCw size={15} color="#15803d" />
-              <Text style={styles.upiAutoReturnText}>
-                Official NPCI Auto-Return active: When payment is completed in your UPI app, this screen will verify and update automatically.
+            {/* Step-by-Step Payment Instructions */}
+            <View style={[styles.upiAutoReturnCard, { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }]}>
+              <ShieldCheck size={16} color="#15803d" />
+              <Text style={[styles.upiAutoReturnText, { color: '#166534' }]}>
+                1. Pay via UPI app or scan the QR code above.{'\n'}
+                2. Copy the 12-digit UTR / UPI Ref from your payment screen.{'\n'}
+                3. Paste it below and submit to confirm order with kitchen.
               </Text>
             </View>
 
-            {/* Manual UTR Fallback Card */}
+            {/* Manual UTR Card */}
             <View style={styles.upiUtrCard}>
-              <Text style={styles.upiUtrTitle}>Returned manually? Enter 12-digit UPI Ref / UTR:</Text>
+              <Text style={styles.upiUtrTitle}>Enter 12-digit UPI Ref / UTR to Confirm:</Text>
               <View style={styles.upiUtrInputRow}>
                 <TextInput
                   style={[styles.upiUtrInput as any, Boolean(utrError) && { borderColor: '#ef4444' }]}
