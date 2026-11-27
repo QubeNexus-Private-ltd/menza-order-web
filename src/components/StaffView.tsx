@@ -560,10 +560,10 @@ export default function StaffView({
               ) : (
                 filteredOrders.map((ord) => {
                   const rawMode = (ord.paymentMode || ord.paymentMethod || 'CASH').toString().toUpperCase();
-                  const isOnline = rawMode.includes('ONLINE') || rawMode.includes('CASHFREE') || rawMode.includes('UPI') || ord.isOnline === true;
+                  const isOnline = rawMode.includes('ONLINE') || rawMode.includes('CASHFREE') || rawMode.includes('RAZORPAY') || rawMode.includes('UPI') || ord.isOnline === true;
                   const isPaid = String(ord.paymentStatus || '').toUpperCase() === 'PAID';
                   const isSettled = isPaid || Boolean(ord.settledDateUtc);
-                  const deliveryType = ord.deliveryType || (ord.tableName || ord.tableId ? 'Dine-In' : 'Takeaway / Counter');
+                  const deliveryType = ord.deliveryType || (ord.tableName || ord.tableId ? 'Dine-In' : (ord.isHomeDelivery || Number(ord.orderTypeId) === 3 ? 'Delivery' : 'Takeaway / Counter'));
                   const isQr = String(ord.source || '').toUpperCase().includes('QR') || !ord.source;
 
                   return (

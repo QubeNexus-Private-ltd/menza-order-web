@@ -392,13 +392,27 @@ export default function OrderTrackingPage({
     activeOrderData.tableId ||
     (activeOrderData.deliveryType && activeOrderData.deliveryType.toLowerCase().includes('dine'))
   );
+  const isHomeDelivery = Boolean(
+    !isDineIn &&
+    (activeOrderData.isHomeDelivery ||
+      Number(activeOrderData.orderTypeId) === 3 ||
+      (activeOrderData.deliveryType && activeOrderData.deliveryType.toLowerCase().includes('delivery')) ||
+      activeOrderData.deliveryAddress)
+  );
+  const deliveryAddress = String(activeOrderData.deliveryAddress || '').trim();
 
   const subTotal = Number(activeOrderData.itemTotal || activeOrderData.subTotal || activeOrderData.orderAmount || 0);
   const cgst = Number(activeOrderData.cgstAmount || activeOrderData.cgst || 0);
   const sgst = Number(activeOrderData.sgstAmount || activeOrderData.sgst || 0);
+  const deliveryFee = Number(activeOrderData.deliveryFee || 0);
+  const deliveryGstAmount = Number(activeOrderData.deliveryGstAmount || 0);
+  const platformFee = Number(activeOrderData.platformFee || 0);
   const tax = Number(activeOrderData.taxAmount || (cgst + sgst));
   const discount = Number(activeOrderData.discountAmount || 0);
-  const grandTotal = Number(activeOrderData.totalAmount || subTotal + tax - discount);
+  const grandTotal = Number(
+    activeOrderData.totalAmount ||
+      Math.max(0, subTotal - discount + tax + deliveryFee + deliveryGstAmount + platformFee)
+  );
   const isPaid = String(activeOrderData.paymentStatus || '').toUpperCase() === 'PAID' ||
     (Boolean(activeOrderData.isSettled) && String(activeOrderData.paymentMode || '').toUpperCase() !== 'DIRECT_UPI');
 
@@ -478,7 +492,12 @@ export default function OrderTrackingPage({
         orderId: cleanOrderId || '1048',
         customerName: activeOrderData.customerName,
         tableName: activeOrderData.tableName,
-        orderType: activeOrderData.deliveryType || (isDineIn ? 'Dine-In' : 'Takeaway'),
+        orderType: isHomeDelivery ? 'Home Delivery' : (activeOrderData.deliveryType || (isDineIn ? 'Dine-In' : 'Takeaway')),
+        deliveryAddress: deliveryAddress || undefined,
+        deliveryFee,
+        deliveryGstAmount,
+        platformFee,
+        fssaiNumber: (activeOrderData as any).fssaiNumber || undefined,
         items: itemsList.map((it: any) => ({
           itemName: it.itemName || it.name,
           quantity: Number(it.quantity || 1),
@@ -811,7 +830,9 @@ export default function OrderTrackingPage({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500 font-medium">Place of Supply:</span>
-                      <span className="text-slate-800">Bengaluru, Karnataka (29)</span>
+                      <span className="text-slate-800">
+                        {(activeOrderData as any).stateCode || activeOrderData.restaurantAddress || 'As per Restaurant State'}
+                      </span>
                     </div>
                   </div>
 
@@ -832,8 +853,16 @@ export default function OrderTrackingPage({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500 font-medium">Table / Service Mode:</span>
-                      <strong className="text-slate-900">{activeOrderData.tableName || (isDineIn ? 'Dine-In Table' : 'Takeaway')}</strong>
+                      <strong className="text-slate-900">
+                        {isHomeDelivery ? 'Home Delivery' : (activeOrderData.tableName || (isDineIn ? 'Dine-In Table' : 'Takeaway'))}
+                      </strong>
                     </div>
+                    {isHomeDelivery && deliveryAddress && (
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-500 font-medium shrink-0">Delivery Address:</span>
+                        <span className="text-slate-800 text-right">{deliveryAddress}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-slate-500 font-medium">Payment Settlement:</span>
                       <span className={`font-bold px-1.5 py-0.2 rounded text-[11px] ${
@@ -919,7 +948,7 @@ export default function OrderTrackingPage({
                   {hasGstBifurcation ? (
                     <div className="pt-2 border-t border-slate-200 text-[11px] space-y-1">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                        GST Breakup Summary (SAC 996331 - 5% GST):
+                        GST Breakup Summary (SAC 996331 - {Number(activeOrderData.cgstPercentage ?? 2.5) + Number(activeOrderData.sgstPercentage ?? 2.5)}% GST):
                       </div>
                       <div className="grid grid-cols-3 gap-1 bg-white p-2 rounded border border-slate-200 text-center font-medium">
                         <div>
@@ -927,11 +956,11 @@ export default function OrderTrackingPage({
                           <strong>₹{(subTotal - discount).toFixed(2)}</strong>
                         </div>
                         <div>
-                          <span className="text-[10px] text-slate-400 block">CGST (2.5%)</span>
+                          <span className="text-[10px] text-slate-400 block">CGST ({activeOrderData.cgstPercentage ?? 2.5}%)</span>
                           <strong>₹{cgst.toFixed(2)}</strong>
                         </div>
                         <div>
-                          <span className="text-[10px] text-slate-400 block">SGST (2.5%)</span>
+                          <span className="text-[10px] text-slate-400 block">SGST ({activeOrderData.sgstPercentage ?? 2.5}%)</span>
                           <strong>₹{sgst.toFixed(2)}</strong>
                         </div>
                       </div>
@@ -991,6 +1020,29 @@ export default function OrderTrackingPage({
                     <div className="flex justify-between py-1.5 border-t border-slate-100 text-emerald-700 text-xs font-semibold">
                       <span>Taxes & Duties:</span>
                       <span>Net total is inclusive of all taxes</span>
+                    </div>
+                  )}
+
+                  {(isHomeDelivery || deliveryFee > 0) && (
+                    <div className="flex justify-between py-0.5">
+                      <span className="font-medium">Delivery Charges:</span>
+                      <strong className={deliveryFee === 0 ? 'text-emerald-700 font-bold' : 'text-slate-900 tabular-nums font-bold'}>
+                        {deliveryFee > 0 ? `₹${deliveryFee.toFixed(2)}` : 'FREE'}
+                      </strong>
+                    </div>
+                  )}
+
+                  {deliveryGstAmount > 0 && (
+                    <div className="flex justify-between py-0.5">
+                      <span className="font-medium">Delivery GST (5%):</span>
+                      <strong className="text-slate-900 tabular-nums font-bold">₹{deliveryGstAmount.toFixed(2)}</strong>
+                    </div>
+                  )}
+
+                  {platformFee > 0 && (
+                    <div className="flex justify-between py-0.5">
+                      <span className="font-medium">Platform Fee:</span>
+                      <strong className="text-slate-900 tabular-nums font-bold">₹{platformFee.toFixed(2)}</strong>
                     </div>
                   )}
 

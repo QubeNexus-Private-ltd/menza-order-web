@@ -38,6 +38,11 @@ import {
   Radio,
   Zap,
   Sparkles,
+  MapPin,
+  LocateFixed,
+  Bike,
+  Home,
+  Briefcase,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as api from '../services/api';
@@ -51,6 +56,7 @@ import {
 import { Catalog, Table, StoreOperatingStatus, OrderItem } from '../types';
 import { ENV } from '../config/env';
 import { logger } from '../services/logger';
+import { openRazorpayCheckout } from '../services/razorpayPayment';
 
 interface ItemImageWithFallbackProps {
   uri?: string;
@@ -327,58 +333,85 @@ export default function CartModal({
   const isPostpaidTable = Boolean(activeTable && String(activeTable.dineInPaymentMode || '').toUpperCase() === 'POSTPAID');
   const isPrepaidTable = !isPostpaidTable && Boolean(isTableOrder || isDynamicQr);
   
-  // Dynamically fetched UPI configuration directly from Restaurant Owner Config
+  // Dynamically fetched UPI configuration directly from Restaurant Owner Config API
   const [dynamicUpiConfig, setDynamicUpiConfig] = useState<{ upiId?: string; bankerAccountHolderName?: string; contactNumber?: string } | null>(null);
 
   useEffect(() => {
-    if (visible && !catalog?.bankerUpiId && !catalog?.upiId) {
+    if (visible) {
       const encId = catalog?.encryptedRestaurantId || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('r') : null);
       const restId = catalog?.restaurantId;
       if (encId || restId) {
         api.getRestaurantUpiConfig(encId, restId).then((config) => {
           if (config && (config.bankerUpiId || config.upiId)) {
             setDynamicUpiConfig({
-              upiId: config.bankerUpiId || config.upiId,
-              bankerAccountHolderName: config.bankerAccountHolderName,
-              contactNumber: config.contactNumber,
+              upiId: (config.bankerUpiId || config.upiId).trim(),
+              bankerAccountHolderName: config.bankerAccountHolderName?.trim(),
+              contactNumber: config.contactNumber?.trim(),
             });
           }
         }).catch(() => {});
       }
     }
-  }, [visible, catalog?.encryptedRestaurantId, catalog?.restaurantId, catalog?.bankerUpiId, catalog?.upiId]);
+  }, [visible, catalog?.encryptedRestaurantId, catalog?.restaurantId]);
 
-  // Available restaurant owner UPI ID for Direct NPCI UPI Intent (zero fallback to fake/placeholder IDs)
+  // Available restaurant owner UPI ID fetched dynamically from the API (dynamicUpiConfig takes highest precedence)
   const availableUpiId =
+    dynamicUpiConfig?.upiId ||
     catalog?.bankerUpiId ||
     catalog?.upiId ||
     activeTable?.bankerUpiId ||
     activeTable?.upiId ||
-    dynamicUpiConfig?.upiId ||
     '';
 
   const availablePayeeName =
-    catalog?.bankerAccountHolderName ||
     dynamicUpiConfig?.bankerAccountHolderName ||
+    catalog?.bankerAccountHolderName ||
     activeTable?.bankerAccountHolderName ||
     catalog?.restaurantName ||
     'Restaurant';
 
   const availableContactNumber =
-    catalog?.contactNumber ||
     dynamicUpiConfig?.contactNumber ||
+    catalog?.contactNumber ||
     activeTable?.contactNumber ||
     '';
 
+  const [gatewayConfig, setGatewayConfig] = useState<{ paymentGateway?: string; isRazorpay?: boolean; isCashfree?: boolean } | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      api.getPaymentGatewayConfig().then((cfg) => {
+        if (cfg) setGatewayConfig(cfg);
+      }).catch(() => {});
+    }
+  }, [visible]);
+
+  const isRazorpayActive = Boolean(
+    catalog?.isRazorpayEnabled ||
+    catalog?.razorpay ||
+    storeOperatingStatus?.isRazorpayEnabled ||
+    storeOperatingStatus?.razorpay ||
+    gatewayConfig?.isRazorpay
+  );
+  const activeOnlineGateway: 'razorpay' | 'cashfree' = isRazorpayActive ? 'razorpay' : 'cashfree';
+
   const isDirectUpiAvailable = Boolean(availableUpiId && availableUpiId.trim().length > 0);
   const isPayAtCounterOnly = false;
-  const isOnlinePaymentVisible = false;
+  const isOnlinePaymentVisible = Boolean(
+    storeOperatingStatus?.isOnlinePaymentEnabled ||
+    isRazorpayActive
+  );
 
   const [guestName, setGuestName] = useState<string>('');
   const [mobileNumber, setMobileNumber] = useState<string>('');
   const [mobileError, setMobileError] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
-  const [orderTypeId, setOrderTypeId] = useState<number>(() => (isTableOrder || isDynamicQr || activeTable) ? 1 : 2);
+  const [orderTypeId, setOrderTypeId] = useState<number>(() => {
+    if (isTableOrder || isDynamicQr || activeTable) return 1;
+    if (catalog?.isSelfPickupEnabled !== false) return 2;
+    if (catalog?.isDeliveryEnabled) return 3;
+    return 1;
+  });
   const [paymentMethod, setPaymentMethod] = useState<string>(() => isDirectUpiAvailable ? 'direct_upi' : 'payatcounter');
 
   /* Direct NPCI UPI Intent State */
@@ -414,15 +447,24 @@ export default function CartModal({
   };
 
   useEffect(() => {
-    if (isDirectUpiAvailable) {
-      setPaymentMethod('direct_upi');
-    } else {
-      setPaymentMethod('payatcounter');
-    }
     if (isTableOrder || isDynamicQr || activeTable) {
       setOrderTypeId(1);
     }
-  }, [isTableOrder, isDynamicQr, activeTable, visible, isDirectUpiAvailable]);
+  }, [isTableOrder, isDynamicQr, activeTable, visible]);
+
+  useEffect(() => {
+    if (isDeliveryOrder) {
+      setPaymentMethod(activeOnlineGateway);
+    } else if (isDirectUpiAvailable) {
+      setPaymentMethod((prev) =>
+        prev === 'razorpay' || prev === 'cashfree' ? (isOnlinePaymentVisible ? activeOnlineGateway : 'direct_upi') : 'direct_upi'
+      );
+    } else {
+      setPaymentMethod((prev) =>
+        prev === 'razorpay' || prev === 'cashfree' ? (isOnlinePaymentVisible ? activeOnlineGateway : 'payatcounter') : 'payatcounter'
+      );
+    }
+  }, [visible, isDirectUpiAvailable, isOnlinePaymentVisible, activeOnlineGateway]);
 
   // Auto-detect 12-digit UTR from clipboard when customer returns to browser tab
   useEffect(() => {
@@ -573,12 +615,20 @@ export default function CartModal({
     }
   }, [isTableOrder, isDynamicQr, activeTable, visible]);
 
-  // Guard: Delivery option is disabled; reset to Dine-In (1) or Self Pickup (2)
+  const allowDeliveryOption = Boolean(
+    !isTableOrder &&
+    !isDynamicQr &&
+    !activeTable &&
+    catalog?.isDeliveryEnabled
+  );
+  const isDeliveryOrder = Boolean(allowDeliveryOption && Number(orderTypeId) === 3);
+
+  // Reset Delivery selection only if delivery is not permitted for the current session
   useEffect(() => {
-    if (orderTypeId === 3) {
+    if (orderTypeId === 3 && !allowDeliveryOption) {
       setOrderTypeId((isTableOrder || isDynamicQr || activeTable) ? 1 : 2);
     }
-  }, [orderTypeId, isTableOrder, isDynamicQr, activeTable]);
+  }, [orderTypeId, allowDeliveryOption, isTableOrder, isDynamicQr, activeTable]);
 
   /* Customer OTP Verification State */
   const [isVerified, setIsVerified] = useState<boolean>(false);
@@ -829,12 +879,40 @@ export default function CartModal({
       ];
     }
 
-    // Explicitly filter out Delivery option (User requirement: Disable delivery option)
+    // Filter order types strictly by restaurant configuration flags
     rawList = rawList.filter((t: any) => {
       const typeName = String(t.typeName || t.name || t.code || '').toLowerCase();
       const desc = String(t.description || '').toLowerCase();
-      return Number(t.id) !== 3 && !typeName.includes('delivery') && !desc.includes('delivery');
+      const tId = Number(t.id);
+      const isDelivType = tId === 3 || typeName.includes('delivery') || desc.includes('delivery');
+      const isPickupType = tId === 2 || typeName.includes('pickup') || typeName.includes('takeaway');
+      const isDineInType = tId === 1 || typeName.includes('dine');
+
+      if (isDelivType && !allowDeliveryOption) {
+        return false;
+      }
+      if (isPickupType && catalog?.isSelfPickupEnabled === false && !isTableOrder && !isDynamicQr && !activeTable) {
+        return false;
+      }
+      if (isDineInType && catalog?.isDineInEnabled === false && !isTableOrder && !isDynamicQr && !activeTable) {
+        return false;
+      }
+      return true;
     });
+
+    if (allowDeliveryOption) {
+      const hasDeliveryType = rawList.some(
+        (t: any) =>
+          Number(t.id) === 3 ||
+          String(t.typeName || t.name || t.code || '').toLowerCase().includes('delivery')
+      );
+      if (!hasDeliveryType) {
+        rawList = [
+          ...rawList,
+          { id: 3, typeName: 'Delivery', description: 'Home delivery from restaurant' },
+        ];
+      }
+    }
 
     if (isTableOrder || isDynamicQr || activeTable) {
       const hasDineIn = rawList.some((t: any) => t.id === 1 || String(t.typeName || t.name).toLowerCase().includes('dine'));
@@ -849,7 +927,26 @@ export default function CartModal({
       return [dineInItem, ...otherItems];
     }
     return rawList;
-  }, [liveOrderTypes, orderTypes, cart?.availableOrderTypes, isTableOrder, isDynamicQr, activeTable]);
+  }, [liveOrderTypes, orderTypes, cart?.availableOrderTypes, isTableOrder, isDynamicQr, activeTable, allowDeliveryOption, catalog?.isSelfPickupEnabled, catalog?.isDineInEnabled]);
+
+  // Ensure selected orderTypeId always belongs to the restaurant's active configured types
+  useEffect(() => {
+    if (isTableOrder || isDynamicQr || activeTable) {
+      if (orderTypeId !== 1) setOrderTypeId(1);
+      return;
+    }
+    if (!Array.isArray(effectiveOrderTypes) || effectiveOrderTypes.length === 0) return;
+    const isValidCurrent = effectiveOrderTypes.some((t: any) => Number(t.id) === Number(orderTypeId));
+    if (!isValidCurrent) {
+      const preferred =
+        effectiveOrderTypes.find((t: any) => Number(t.id) === 2) ||
+        effectiveOrderTypes.find((t: any) => Number(t.id) === 3) ||
+        effectiveOrderTypes[0];
+      if (preferred?.id) {
+        setOrderTypeId(Number(preferred.id));
+      }
+    }
+  }, [effectiveOrderTypes, orderTypeId, isTableOrder, isDynamicQr, activeTable]);
 
   const activeCartItems =
     cart && Array.isArray(cart.items)
@@ -912,13 +1009,207 @@ export default function CartModal({
     : 0;
 
   const taxAmount = hasGst ? Math.round((cgst + sgst) * 100) / 100 : 0;
-  const platformFee = Number(
-    cart?.platformFee ?? 0
-  );
 
-  // Grand Total: strictly sum GST amount in the total if GST is present
+  /* Home Delivery Location, Saved Addresses & Serviceability State */
+  const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<number | 'gps' | null>(null);
+  const [deliveryLabel, setDeliveryLabel] = useState<'Home' | 'Work' | 'Other'>('Home');
+  const [deliveryAddressText, setDeliveryAddressText] = useState<string>('');
+  const [deliveryHouseFlat, setDeliveryHouseFlat] = useState<string>('');
+  const [deliveryLandmark, setDeliveryLandmark] = useState<string>('');
+  const [deliveryCity, setDeliveryCity] = useState<string>('');
+  const [deliveryPincode, setDeliveryPincode] = useState<string>('');
+  const [deliveryLat, setDeliveryLat] = useState<number | null>(() => api.getLastCustomerLocation()?.lat ?? null);
+  const [deliveryLng, setDeliveryLng] = useState<number | null>(() => api.getLastCustomerLocation()?.lng ?? null);
+  const [gpsDetecting, setGpsDetecting] = useState<boolean>(false);
+  const [gpsError, setGpsError] = useState<string>('');
+  const [serviceability, setServiceability] = useState<any>(null);
+  const [checkingServiceability, setCheckingServiceability] = useState<boolean>(false);
+  const [savingAddress, setSavingAddress] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!visible || !isDeliveryOrder) return;
+    let active = true;
+    const cleanMob = api.sanitizeIndianMobile(mobileNumber || '');
+    api.getCustomerDeliveryAddresses(cleanMob).then((list) => {
+      if (!active || !Array.isArray(list)) return;
+      setSavedAddresses(list);
+      if (list.length > 0 && !selectedAddressId && !deliveryAddressText) {
+        const def = list.find((a) => a.isDefault) || list[0];
+        if (def) {
+          setSelectedAddressId(def.id || null);
+          setDeliveryLabel((def.label as any) || 'Home');
+          setDeliveryAddressText(def.fullAddress || '');
+          setDeliveryHouseFlat(def.houseFlatFloor || '');
+          setDeliveryLandmark(def.landmark || '');
+          setDeliveryCity(def.city || '');
+          setDeliveryPincode(def.pincode || '');
+          if (typeof def.latitude === 'number' && typeof def.longitude === 'number') {
+            setDeliveryLat(def.latitude);
+            setDeliveryLng(def.longitude);
+          }
+        }
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [visible, isDeliveryOrder]);
+
+  useEffect(() => {
+    if (!visible || !isDeliveryOrder) {
+      setServiceability(null);
+      return;
+    }
+    if (deliveryLat === null || deliveryLng === null || isNaN(deliveryLat) || isNaN(deliveryLng)) {
+      return;
+    }
+    let active = true;
+    setCheckingServiceability(true);
+    api.checkDeliveryServiceability({
+      encryptedRestaurantId: catalog?.encryptedRestaurantId || '',
+      restaurantId: catalog?.restaurantId || null,
+      customerLat: deliveryLat,
+      customerLng: deliveryLng,
+      orderSubTotal: taxableAmount,
+    }).then((res) => {
+      if (active && res) setServiceability(res);
+    }).catch(() => {
+      if (active) setServiceability(null);
+    }).finally(() => {
+      if (active) setCheckingServiceability(false);
+    });
+    return () => { active = false; };
+  }, [visible, isDeliveryOrder, deliveryLat, deliveryLng, taxableAmount, catalog?.encryptedRestaurantId, catalog?.restaurantId]);
+
+  const handleSelectSavedAddress = (addr: any) => {
+    setSelectedAddressId(addr.id || null);
+    setDeliveryLabel((addr.label as any) || 'Home');
+    setDeliveryAddressText(addr.fullAddress || '');
+    setDeliveryHouseFlat(addr.houseFlatFloor || '');
+    setDeliveryLandmark(addr.landmark || '');
+    setDeliveryCity(addr.city || '');
+    setDeliveryPincode(addr.pincode || '');
+    if (typeof addr.latitude === 'number' && typeof addr.longitude === 'number') {
+      setDeliveryLat(addr.latitude);
+      setDeliveryLng(addr.longitude);
+    }
+    setGpsError('');
+    setErrorMsg('');
+  };
+
+  const handleDetectGpsLocation = () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGpsError('Browser GPS is unavailable. Please select a saved address or allow location permissions.');
+      return;
+    }
+    setGpsDetecting(true);
+    setGpsError('');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        setSelectedAddressId('gps');
+        setDeliveryLat(lat);
+        setDeliveryLng(lng);
+        api.saveLastCustomerLocation({ lat, lng, label: 'Pinned GPS Location' });
+        if (!deliveryAddressText.trim()) {
+          setDeliveryAddressText(`Pinned Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+        }
+        setGpsDetecting(false);
+      },
+      (err) => {
+        setGpsDetecting(false);
+        setGpsError(
+          err?.code === 1
+            ? 'Location permission denied. Enable browser location to verify delivery radius.'
+            : 'Unable to detect GPS coordinates right now. Please try again.'
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+    );
+  };
+
+  const handleSaveCurrentAddress = async () => {
+    if (deliveryLat === null || deliveryLng === null) {
+      setGpsError('Please detect GPS coordinates before saving this address.');
+      return;
+    }
+    if (!deliveryAddressText.trim() && !deliveryHouseFlat.trim()) {
+      setGpsError('Please enter your street address or house/flat number.');
+      return;
+    }
+    setSavingAddress(true);
+    setGpsError('');
+    try {
+      const saved = await api.saveCustomerDeliveryAddress({
+        label: deliveryLabel,
+        recipientName: guestName.trim() || undefined,
+        mobileNumber: api.sanitizeIndianMobile(mobileNumber || '') || undefined,
+        fullAddress: deliveryAddressText.trim() || deliveryHouseFlat.trim(),
+        houseFlatFloor: deliveryHouseFlat.trim() || undefined,
+        landmark: deliveryLandmark.trim() || undefined,
+        city: deliveryCity.trim() || catalog?.city || undefined,
+        pincode: deliveryPincode.trim() || undefined,
+        latitude: deliveryLat,
+        longitude: deliveryLng,
+        isDefault: savedAddresses.length === 0,
+      });
+      if (saved) {
+        setSavedAddresses((prev) => [saved, ...prev.filter((a) => Number(a.id) !== Number(saved.id))]);
+        setSelectedAddressId(saved.id || 'gps');
+      }
+    } catch (e: any) {
+      setGpsError(e?.response?.data?.message || e?.message || 'Could not save address.');
+    } finally {
+      setSavingAddress(false);
+    }
+  };
+
+  const handleDeleteSavedAddress = async (addrId: number) => {
+    try {
+      await api.deleteCustomerDeliveryAddress(addrId, mobileNumber);
+      setSavedAddresses((prev) => prev.filter((a) => Number(a.id) !== Number(addrId)));
+      if (selectedAddressId === addrId) {
+        setSelectedAddressId(null);
+      }
+    } catch {}
+  };
+
+  const rawCatalogDeliveryFee = Number(catalog?.deliveryFee ?? 0);
+  const freeDeliveryThreshold = Number(catalog?.freeDeliveryAbove ?? 0);
+  const minDeliveryOrderAmount = Number(serviceability?.minDeliveryOrderAmount ?? catalog?.minDeliveryOrderAmount ?? 0);
+  const fallbackDeliveryFee =
+    freeDeliveryThreshold > 0 && taxableAmount >= freeDeliveryThreshold
+      ? 0
+      : rawCatalogDeliveryFee;
+
+  const deliveryFee = isDeliveryOrder
+    ? Number(serviceability?.deliveryFee ?? fallbackDeliveryFee)
+    : 0;
+  const deliveryGstAmount =
+    isDeliveryOrder && hasGst && deliveryFee > 0
+      ? Number(
+          serviceability?.deliveryGstAmount ??
+            Math.round(deliveryFee * 0.05 * 100) / 100
+        )
+      : 0;
+  const platformFee = isDeliveryOrder
+    ? Number(serviceability?.platformFee ?? 10)
+    : Number(cart?.platformFee ?? 0);
+  const totalTaxAmount = Math.round((taxAmount + deliveryGstAmount) * 100) / 100;
+
+  // Strict business rule: Home delivery orders must ALWAYS be prepaid online.
+  const deliveryRequiresOnline = Boolean(isDeliveryOrder);
+  const deliveryAllowsCod = false;
+
+  useEffect(() => {
+    if (isDeliveryOrder && paymentMethod !== activeOnlineGateway) {
+      setPaymentMethod(activeOnlineGateway);
+    }
+  }, [isDeliveryOrder, paymentMethod, activeOnlineGateway]);
+
+  // Grand Total: strictly sum item GST + delivery fee + delivery GST (5%) + platform fee
   const grandTotal = Math.round(
-    (taxableAmount + taxAmount + platformFee) * 100
+    (taxableAmount + totalTaxAmount + deliveryFee + platformFee) * 100
   ) / 100;
 
   const hasUnavailableItems =
@@ -1176,6 +1467,38 @@ export default function CartModal({
       return;
     }
 
+    if (isDeliveryOrder) {
+      if (deliveryLat === null || deliveryLng === null || isNaN(deliveryLat) || isNaN(deliveryLng)) {
+        setErrorMsg('Please detect your GPS location or choose a saved address to verify delivery availability.');
+        return;
+      }
+      if (!deliveryAddressText.trim() && !deliveryHouseFlat.trim()) {
+        setErrorMsg('Please enter your delivery house/flat or street address.');
+        return;
+      }
+      if (checkingServiceability) {
+        setErrorMsg('Verifying delivery range and charges. Please wait a moment.');
+        return;
+      }
+      if (!serviceability) {
+        setErrorMsg('Unable to verify delivery serviceability for this location. Please retry GPS detection.');
+        return;
+      }
+      if (serviceability.isServiceable === false) {
+        setErrorMsg(serviceability.reason || 'Delivery is currently not available for your selected location or order value.');
+        return;
+      }
+      if (minDeliveryOrderAmount > 0 && taxableAmount < minDeliveryOrderAmount) {
+        setErrorMsg(`Minimum order amount for home delivery is ₹${money(minDeliveryOrderAmount)}.`);
+        return;
+      }
+      if (paymentMethod !== 'razorpay' && paymentMethod !== 'cashfree') {
+        setErrorMsg('Prepaid online payment is required for home delivery orders.');
+        setPaymentMethod(activeOnlineGateway);
+        return;
+      }
+    }
+
     setErrorMsg('');
 
     logger.checkout('CHECKOUT_STARTED', `Customer initiated checkout: ₹${grandTotal} (${activeCartItems.length} items)`, {
@@ -1239,14 +1562,24 @@ export default function CartModal({
       otpCode: isVerified ? null : (otpCode.trim() || null),
       customerUserId: verifiedCustomer?.userId || null,
       remarks: remarks.trim(),
-      isHomeDelivery: false,
+      isHomeDelivery: isDeliveryOrder,
       orderTypeId: isThisTableOrder ? 1 : orderTypeId,
       tableId: isThisTableOrder ? effectiveTableId : null,
       tableNumber: isThisTableOrder ? effectiveTableName : null,
       encryptedTableId: isThisTableOrder ? (activeTable?.encryptedTableId || effectiveTableToken || null) : null,
       tableSessionToken: isThisTableOrder ? effectiveTableToken : null,
+      deliveryAddressId: isDeliveryOrder && typeof selectedAddressId === 'number' ? selectedAddressId : null,
+      deliveryAddressLabel: isDeliveryOrder ? deliveryLabel : null,
+      deliveryAddress: isDeliveryOrder ? (deliveryAddressText.trim() || deliveryHouseFlat.trim()) : null,
+      deliveryHouseFlatFloor: isDeliveryOrder ? (deliveryHouseFlat.trim() || null) : null,
+      deliveryLandmark: isDeliveryOrder ? (deliveryLandmark.trim() || null) : null,
+      deliveryLatitude: isDeliveryOrder ? deliveryLat : null,
+      deliveryLongitude: isDeliveryOrder ? deliveryLng : null,
+      deliveryFee: isDeliveryOrder ? deliveryFee : 0,
+      deliveryGstAmount: isDeliveryOrder ? deliveryGstAmount : 0,
+      platformFee,
       items: orderItems,
-      deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
+      deliveryType: isThisTableOrder ? 'Dine-In' : (isDeliveryOrder ? 'Delivery' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter')),
       paymentMode: 'CASH',
       paymentType: 'COUNTER_CASH',
       paymentMethod: 'COUNTER_CASH',
@@ -1264,7 +1597,7 @@ export default function CartModal({
       subTotal,
       cgstAmount: hasGst ? cgst : 0,
       sgstAmount: hasGst ? sgst : 0,
-      taxAmount: hasGst ? taxAmount : 0,
+      taxAmount: totalTaxAmount,
       totalAmount: grandTotal,
     };
 
@@ -1293,7 +1626,7 @@ export default function CartModal({
           isSettled: false,
           requiresCashierConfirmation: true,
           source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
-          deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
+          deliveryType: isThisTableOrder ? 'Dine-In' : (isDeliveryOrder ? 'Delivery' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter')),
           orderTypeId: isThisTableOrder ? 1 : orderTypeId,
         };
 
@@ -1334,7 +1667,7 @@ export default function CartModal({
         // 2. Dynamic Auto-Amount URI
         const dynamicAmountUri = `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
 
-        // Standard Universal Clean NPCI URI (defaults to staticStandeeUri for merchant terminal VPAs)
+Implement delivery         // Standard Universal Clean NPCI URI (defaults to staticStandeeUri for merchant terminal VPAs)
         const npciUpiUri = staticStandeeUri;
 
         // Direct app launcher URIs using standard UPI protocol
@@ -1372,7 +1705,7 @@ export default function CartModal({
 
         logger.payment('UPI_DIRECT_INITIATED', `NPCI UPI intent generated for Order #${placedOrderId}: ₹${grandTotal}`, {
           placedOrderId,
-          payeeUpi,
+          payeeUpi: cleanPayeeUpi,
           npciUpiUri,
         });
 
@@ -1391,8 +1724,8 @@ export default function CartModal({
       }
     }
 
-    // 2. Direct Counter Order Flow (Cash / Pay at Counter)
-    const isDirectPlaceOrder = true;
+    // 2. Direct Counter / Cash on Delivery Order Flow
+    const isDirectPlaceOrder = paymentMethod !== 'cashfree' && paymentMethod !== 'razorpay';
 
     if (isDirectPlaceOrder) {
       // Store Profile & Dine-In orders: Pay at Counter with Cashier Confirmation Required
@@ -1414,7 +1747,7 @@ export default function CartModal({
           isSettled: false,
           requiresCashierConfirmation: true,
           source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
-          deliveryType: isThisTableOrder ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
+          deliveryType: isThisTableOrder ? 'Dine-In' : (isDeliveryOrder ? 'Delivery' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter')),
           orderTypeId: isThisTableOrder ? 1 : orderTypeId,
         };
 
@@ -1453,11 +1786,180 @@ export default function CartModal({
       }
     }
 
-    // Double-guard: Dynamic QR and Table Orders MUST NEVER proceed to Cashfree
+    // Double-guard: Dynamic QR and Table Orders MUST NEVER proceed to online gateway
     if (isThisTableOrder || isDynamicQr) {
       setErrorMsg('Dynamic QR and Table orders must be placed directly at counter.');
       setProcessingPayment(false);
       return;
+    }
+
+    // 3. Razorpay Online Prepaid Checkout Flow
+    if (paymentMethod === 'razorpay') {
+      setProcessingPayment(true);
+      try {
+        const isTableOrdering = catalog?.isTableOrderingEnabled !== false;
+        const effectiveTable = isTableOrdering && activeTable ? String(activeTable.id) : null;
+        const encRestId = catalog?.encryptedRestaurantId || api.encryptRestaurantId(restId);
+
+        logger.payment('RAZORPAY_INITIATED', `Initiating Razorpay checkout for ₹${grandTotal}`, {
+          amount: grandTotal,
+          isDeliveryOrder,
+        });
+
+        const checkoutRes: any = await api.initiateRazorpayCheckout({
+          restaurantId: restId,
+          encryptedRestaurantId: encRestId,
+          amount: Math.round(grandTotal * 100) / 100,
+          customerName: guestName.trim(),
+          customerPhone: cleanPhone,
+          customerEmail: `${cleanPhone}@menza.customer`,
+          tableNumber: effectiveTable || '',
+          orderNotes: remarks.trim(),
+        });
+
+        const razorpayOrderId =
+          checkoutRes?.orderId ||
+          checkoutRes?.OrderId ||
+          checkoutRes?.paymentSessionId ||
+          checkoutRes?.data?.orderId;
+
+        const razorpayKeyId =
+          checkoutRes?.keyId ||
+          checkoutRes?.KeyId ||
+          checkoutRes?.data?.keyId ||
+          catalog?.razorpayKeyId;
+
+        const amountPaise = Math.round(Number(checkoutRes?.amount ?? grandTotal) * 100);
+
+        if (!razorpayOrderId || !razorpayKeyId) {
+          throw new Error('Razorpay payment gateway did not return a valid order ID or key.');
+        }
+
+        const pendingRazorpayOrderPayload = {
+          ...orderPayload,
+          restaurantId: restId,
+          encryptedRestaurantId: encRestId,
+          customerName: guestName.trim() || 'Guest Diner',
+          name: guestName.trim() || 'Guest Diner',
+          customerPhone: cleanPhone,
+          mobileNumber: cleanPhone,
+          customerEmail: `${cleanPhone}@menza.customer`,
+          otpCode: isVerified ? null : (otpCode.trim() || null),
+          customerUserId: verifiedCustomer?.userId || null,
+          tableId: isTableOrdering && activeTable ? activeTable.id : null,
+          tableNumber: effectiveTable,
+          orderTypeId: activeTable ? 1 : orderTypeId,
+          deliveryType: activeTable ? 'Dine-In' : (isDeliveryOrder ? 'Delivery' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter')),
+          paymentMode: 'RAZORPAY',
+          paymentType: 'ONLINE_RAZORPAY',
+          paymentMethod: 'RAZORPAY',
+          paymentStatus: 'Paid',
+          orderStatus: 'Confirmed',
+          isOnline: true,
+          isSettled: true,
+          requiresCashierConfirmation: false,
+          paymentOrderId: razorpayOrderId,
+          razorpayOrderId,
+          subTotal,
+          itemTotal: subTotal,
+          orderAmount: subTotal,
+          gstNumber: cleanGstNumber,
+          cgstPercentage: hasGst ? cgstPercentage : 0,
+          sgstPercentage: hasGst ? sgstPercentage : 0,
+          cgstAmount: hasGst ? cgst : 0,
+          sgstAmount: hasGst ? sgst : 0,
+          deliveryFee: isDeliveryOrder ? deliveryFee : 0,
+          deliveryGstAmount: isDeliveryOrder ? deliveryGstAmount : 0,
+          platformFee,
+          taxAmount: totalTaxAmount,
+          totalAmount: grandTotal,
+          deviceId: api.getDeviceId(),
+          hardwareFingerprint: api.getHardwareFingerprint(),
+          items: orderItems,
+          createdAt: new Date().toISOString(),
+        };
+
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('pending_rzp_order_' + razorpayOrderId, JSON.stringify(pendingRazorpayOrderPayload));
+            localStorage.setItem('pending_rzp_order_latest', JSON.stringify(pendingRazorpayOrderPayload));
+            joinOrderGroup(razorpayOrderId);
+          } catch {}
+        }
+
+        const rzpSuccess = await openRazorpayCheckout({
+          key: razorpayKeyId,
+          amountPaise,
+          currency: checkoutRes?.currency || 'INR',
+          name: catalog?.restaurantName || 'MenzaOrder',
+          description: isDeliveryOrder ? 'Home Delivery Order' : 'Food Order',
+          orderId: razorpayOrderId,
+          prefill: {
+            name: guestName.trim(),
+            contact: cleanPhone,
+            email: `${cleanPhone}@menza.customer`,
+          },
+          notes: {
+            restaurantId: String(restId),
+            orderType: isDeliveryOrder ? 'Delivery' : 'Pickup',
+          },
+        });
+
+        const verifyRes: any = await api.verifyRazorpayPayment({
+          orderId: rzpSuccess.razorpay_order_id || razorpayOrderId,
+          restaurantId: restId,
+          razorpayPaymentId: rzpSuccess.razorpay_payment_id,
+          razorpaySignature: rzpSuccess.razorpay_signature,
+        });
+
+        const verifiedStatus = String(verifyRes?.paymentStatus || verifyRes?.status || '').toUpperCase();
+        if (!['SUCCESS', 'PAID', 'CAPTURED', 'COMPLETED'].includes(verifiedStatus)) {
+          throw new Error('Razorpay payment could not be verified. Please contact support if money was debited.');
+        }
+
+        const finalPayload = {
+          ...pendingRazorpayOrderPayload,
+          razorpayOrderId: rzpSuccess.razorpay_order_id || razorpayOrderId,
+          razorpayPaymentId: rzpSuccess.razorpay_payment_id,
+          paymentOrderId: rzpSuccess.razorpay_order_id || razorpayOrderId,
+          transactionId: rzpSuccess.razorpay_payment_id,
+        };
+
+        let placedRes: any = null;
+        if (typeof onPlaceOrder === 'function') {
+          placedRes = await onPlaceOrder(finalPayload);
+        } else {
+          placedRes = await api.placeOrder(finalPayload);
+        }
+
+        const placedOrderId = placedRes?.id || placedRes?.orderId || razorpayOrderId;
+
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem('pending_rzp_order_' + razorpayOrderId);
+            localStorage.removeItem('pending_rzp_order_latest');
+          } catch {}
+        }
+
+        setProcessingPayment(false);
+        onClose();
+        if (typeof onClearCart === 'function') {
+          await onClearCart();
+        }
+        if (typeof onOrderConfirmed === 'function') {
+          onOrderConfirmed(placedOrderId);
+        }
+        return;
+      } catch (rzpErr: any) {
+        logger.error('PAYMENT', 'RAZORPAY_CHECKOUT_FAILED', rzpErr, { amount: grandTotal });
+        setErrorMsg(
+          rzpErr?.isDismissed
+            ? 'Payment cancelled. Please complete Razorpay payment to place your order.'
+            : (rzpErr?.response?.data?.message || rzpErr?.message || 'Razorpay payment failed. Please try again.')
+        );
+        setProcessingPayment(false);
+        return;
+      }
     }
 
     if (paymentMethod === 'cashfree') {
@@ -1559,7 +2061,7 @@ export default function CartModal({
               : null,
           tableNumber: effectiveTable,
           orderTypeId: activeTable ? 1 : orderTypeId,
-          deliveryType: activeTable ? 'Dine-In' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter'),
+          deliveryType: activeTable ? 'Dine-In' : (isDeliveryOrder ? 'Delivery' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter')),
           paymentMode: 'CASHFREE',
           paymentType: 'ONLINE_CASHFREE',
           paymentStatus: 'Paid',
@@ -1574,7 +2076,7 @@ export default function CartModal({
           sgstPercentage: hasGst ? sgstPercentage : 0,
           cgstAmount: hasGst ? cgst : 0,
           sgstAmount: hasGst ? sgst : 0,
-          taxAmount: hasGst ? (cgst + sgst) : 0,
+          taxAmount: totalTaxAmount,
           totalAmount: grandTotal,
           deviceId: api.getDeviceId(),
           hardwareFingerprint: api.getHardwareFingerprint(),
@@ -1766,7 +2268,9 @@ export default function CartModal({
                   styles.paymentProcessingTitle
                 }
               >
-                Connecting to Cashfree Payment Gateway...
+                {paymentMethod === 'razorpay'
+                  ? 'Connecting to Razorpay Payment Gateway...'
+                  : 'Connecting to Cashfree Payment Gateway...'}
               </Text>
 
               <Text
@@ -1774,7 +2278,9 @@ export default function CartModal({
                   styles.paymentProcessingSubtitle
                 }
               >
-                Please wait while we redirect you to secure checkout. Do not close or refresh this page.
+                {paymentMethod === 'razorpay'
+                  ? 'Complete your secure prepaid payment in the Razorpay window. Do not refresh this page.'
+                  : 'Please wait while we redirect you to secure checkout. Do not close or refresh this page.'}
               </Text>
             </View>
           )}
@@ -2451,7 +2957,7 @@ export default function CartModal({
                           String(type.typeName || type.name || type.code || '').toLowerCase().includes('delivery')
                         );
 
-                        if (isDelivery) {
+                        if (isDelivery && !allowDeliveryOption) {
                           return null;
                         }
 
@@ -2491,6 +2997,211 @@ export default function CartModal({
                       }
                     )}
                   </View>
+
+                  {isDeliveryOrder && (
+                    <View
+                      style={{
+                        marginTop: 12,
+                        marginBottom: 14,
+                        padding: 14,
+                        borderRadius: 16,
+                        backgroundColor: '#eff6ff',
+                        borderWidth: 1,
+                        borderColor: '#bfdbfe',
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Bike size={16} color="#1d4ed8" />
+                          <Text style={{ fontSize: 13.5, fontWeight: '800', color: '#1e3a8a' }}>
+                            Delivery Location &amp; Address
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={handleDetectGpsLocation}
+                          disabled={gpsDetecting}
+                          activeOpacity={0.8}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 5,
+                            backgroundColor: '#2563eb',
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 10,
+                          }}
+                        >
+                          {gpsDetecting ? (
+                            <ActivityIndicator size="small" color="#ffffff" />
+                          ) : (
+                            <LocateFixed size={13} color="#ffffff" />
+                          )}
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#ffffff' }}>
+                            {gpsDetecting ? 'Detecting...' : (deliveryLat !== null ? 'Update GPS' : 'Use Current GPS')}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Saved Addresses Chips */}
+                      {savedAddresses.length > 0 && (
+                        <View style={{ marginBottom: 10 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#334155', marginBottom: 6 }}>
+                            Saved Addresses
+                          </Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                              {savedAddresses.map((addr: any) => {
+                                const isSel = selectedAddressId === addr.id;
+                                return (
+                                  <View
+                                    key={addr.id}
+                                    style={{
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      paddingHorizontal: 10,
+                                      paddingVertical: 6,
+                                      borderRadius: 10,
+                                      borderWidth: 1,
+                                      borderColor: isSel ? '#2563eb' : '#cbd5e1',
+                                      backgroundColor: isSel ? '#dbeafe' : '#ffffff',
+                                    }}
+                                  >
+                                    <TouchableOpacity
+                                      onPress={() => handleSelectSavedAddress(addr)}
+                                      style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}
+                                    >
+                                      {addr.label === 'Work' ? (
+                                        <Briefcase size={12} color={isSel ? '#1d4ed8' : '#64748b'} />
+                                      ) : (
+                                        <Home size={12} color={isSel ? '#1d4ed8' : '#64748b'} />
+                                      )}
+                                      <Text style={{ fontSize: 11.5, fontWeight: '700', color: isSel ? '#1e3a8a' : '#334155', maxWidth: 140 }} numberOfLines={1}>
+                                        {addr.label}: {addr.houseFlatFloor || addr.fullAddress}
+                                      </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={() => handleDeleteSavedAddress(addr.id)}>
+                                      <Trash2 size={12} color="#94a3b8" />
+                                    </TouchableOpacity>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </ScrollView>
+                        </View>
+                      )}
+
+                      {/* Address Label Selector */}
+                      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                        {(['Home', 'Work', 'Other'] as const).map((lbl) => (
+                          <TouchableOpacity
+                            key={lbl}
+                            onPress={() => setDeliveryLabel(lbl)}
+                            style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 5,
+                              borderRadius: 8,
+                              backgroundColor: deliveryLabel === lbl ? '#1e40af' : '#ffffff',
+                              borderWidth: 1,
+                              borderColor: deliveryLabel === lbl ? '#1e40af' : '#cbd5e1',
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: deliveryLabel === lbl ? '#ffffff' : '#475569' }}>
+                              {lbl}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <TextInput
+                        style={[styles.textInput, { backgroundColor: '#ffffff', marginBottom: 8 }] as any}
+                        placeholder="House / Flat / Floor No. *"
+                        placeholderTextColor="#64748b"
+                        value={deliveryHouseFlat}
+                        onChangeText={setDeliveryHouseFlat}
+                      />
+
+                      <TextInput
+                        style={[styles.textInput, { backgroundColor: '#ffffff', marginBottom: 8 }] as any}
+                        placeholder="Street, Area / Colony, Full Address *"
+                        placeholderTextColor="#64748b"
+                        value={deliveryAddressText}
+                        onChangeText={setDeliveryAddressText}
+                      />
+
+                      <TextInput
+                        style={[styles.textInput, { backgroundColor: '#ffffff', marginBottom: 8 }] as any}
+                        placeholder="Nearby Landmark (optional)"
+                        placeholderTextColor="#64748b"
+                        value={deliveryLandmark}
+                        onChangeText={setDeliveryLandmark}
+                      />
+
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1 }}>
+                          <MapPin size={13} color={deliveryLat !== null ? '#15803d' : '#dc2626'} />
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: deliveryLat !== null ? '#166534' : '#b91c1c' }} numberOfLines={1}>
+                            {deliveryLat !== null && deliveryLng !== null
+                              ? `GPS Locked (${deliveryLat.toFixed(4)}, ${deliveryLng.toFixed(4)})`
+                              : 'GPS location required to verify distance'}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={handleSaveCurrentAddress}
+                          disabled={savingAddress}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                            backgroundColor: '#ffffff',
+                            borderWidth: 1,
+                            borderColor: '#93c5fd',
+                            paddingHorizontal: 9,
+                            paddingVertical: 5,
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Plus size={12} color="#1d4ed8" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#1d4ed8' }}>
+                            {savingAddress ? 'Saving...' : 'Save Address'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {gpsError ? (
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: '#dc2626', marginTop: 6 }}>
+                          {gpsError}
+                        </Text>
+                      ) : null}
+
+                      {/* Live Delivery Serviceability Status */}
+                      {checkingServiceability ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                          <ActivityIndicator size="small" color="#2563eb" />
+                          <Text style={{ fontSize: 11.5, fontWeight: '600', color: '#1e40af' }}>
+                            Checking delivery radius &amp; fee...
+                          </Text>
+                        </View>
+                      ) : serviceability ? (
+                        <View
+                          style={{
+                            marginTop: 8,
+                            padding: 9,
+                            borderRadius: 10,
+                            backgroundColor: serviceability.isServiceable ? '#dcfce7' : '#fee2e2',
+                            borderWidth: 1,
+                            borderColor: serviceability.isServiceable ? '#86efac' : '#fca5a5',
+                          }}
+                        >
+                          <Text style={{ fontSize: 11.5, fontWeight: '700', color: serviceability.isServiceable ? '#166534' : '#991b1b' }}>
+                            {serviceability.isServiceable
+                              ? `✓ Deliverable (~${Number(serviceability.estimatedRoadDistanceKm || serviceability.straightDistanceKm || 0).toFixed(1)} km road) • ${deliveryFee > 0 ? `Fee ₹${deliveryFee}` : 'Free Delivery'}`
+                              : `✕ ${serviceability.reason || 'Out of delivery range or below minimum order'}`}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  )}
 
                   <View
                     style={styles.inputGroup}
@@ -2631,8 +3342,43 @@ export default function CartModal({
                     Payment Method
                   </Text>
 
-                  {/* Direct NPCI UPI Intent Option */}
-                  {isDirectUpiAvailable ? (
+                  {/* Online Payment (Razorpay / Cashfree Gateway) for Home Delivery or Online Storefront */}
+                  {!isTableOrder && !isDynamicQr && (isOnlinePaymentVisible || isDeliveryOrder) && (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => setPaymentMethod(activeOnlineGateway)}
+                      style={[styles.paymentMethodRow, { marginBottom: 10 }]}
+                    >
+                      <View
+                        style={[
+                          styles.paymentCard,
+                          (paymentMethod === 'cashfree' || paymentMethod === 'razorpay') && styles.paymentCardActive,
+                          (paymentMethod === 'cashfree' || paymentMethod === 'razorpay') && { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+                          { flex: 1 },
+                        ]}
+                      >
+                        <CreditCard size={22} color={(paymentMethod === 'cashfree' || paymentMethod === 'razorpay') ? '#1d4ed8' : '#64748b'} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.paymentCardTitle, (paymentMethod === 'cashfree' || paymentMethod === 'razorpay') && { color: '#1e3a8a' }]}>
+                            Pay Online (UPI / Cards / NetBanking)
+                          </Text>
+                          <Text style={[styles.paymentCardSub, (paymentMethod === 'cashfree' || paymentMethod === 'razorpay') && { color: '#1d4ed8' }]}>
+                            {isRazorpayActive
+                              ? 'Instant Prepaid Checkout • Secured by Razorpay'
+                              : 'Instant Prepaid Checkout • Secured by Cashfree'}
+                          </Text>
+                        </View>
+                        {(paymentMethod === 'cashfree' || paymentMethod === 'razorpay') ? (
+                          <CheckCircle2 size={18} color="#1d4ed8" />
+                        ) : (
+                          <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#cbd5e1' }} />
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Direct NPCI UPI Intent Option (Disabled for Home Delivery to enforce verified prepaid gateway) */}
+                  {!isDeliveryOrder && isDirectUpiAvailable ? (
                     <TouchableOpacity
                       activeOpacity={0.8}
                       onPress={() => setPaymentMethod('direct_upi')}
@@ -2665,7 +3411,7 @@ export default function CartModal({
                         )}
                       </View>
                     </TouchableOpacity>
-                  ) : (
+                  ) : !isDeliveryOrder ? (
                     <View style={[styles.paymentCard, { opacity: 0.65, borderColor: '#e2e8f0', backgroundColor: '#f8fafc', marginBottom: 6 }]}>
                       <Smartphone size={22} color="#94a3b8" />
                       <View style={{ flex: 1 }}>
@@ -2677,41 +3423,51 @@ export default function CartModal({
                         </Text>
                       </View>
                     </View>
-                  )}
+                  ) : null}
 
-                  {/* Pay at Counter option */}
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => setPaymentMethod('payatcounter')}
-                    style={[styles.paymentMethodRow, { marginTop: 10 }]}
-                  >
-                    <View
-                      style={[
-                        styles.paymentCard,
-                        paymentMethod === 'payatcounter' && styles.paymentCardActive,
-                        paymentMethod === 'payatcounter' && { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
-                        { flex: 1 }
-                      ]}
+                  {/* Pay at Counter / Cash on Delivery option */}
+                  {!(isDeliveryOrder && deliveryRequiresOnline && !deliveryAllowsCod) ? (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => setPaymentMethod('payatcounter')}
+                      style={[styles.paymentMethodRow, { marginTop: 10 }]}
                     >
-                      <IndianRupee size={22} color={paymentMethod === 'payatcounter' ? '#15803d' : '#64748b'} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.paymentCardTitle, paymentMethod === 'payatcounter' && { color: '#166534' }]}>
-                          Pay at Counter
-                        </Text>
-                        <Text style={[styles.paymentCardSub, paymentMethod === 'payatcounter' && { color: '#15803d' }]}>
-                          Cash / UPI at Counter • Cashier Confirmation Required
-                        </Text>
-                        <Text style={{ fontSize: 11, color: '#64748b', fontWeight: '500', marginTop: 4 }}>
-                          Dishes prepared once cashier accepts order
-                        </Text>
+                      <View
+                        style={[
+                          styles.paymentCard,
+                          paymentMethod === 'payatcounter' && styles.paymentCardActive,
+                          paymentMethod === 'payatcounter' && { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
+                          { flex: 1 }
+                        ]}
+                      >
+                        <IndianRupee size={22} color={paymentMethod === 'payatcounter' ? '#15803d' : '#64748b'} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.paymentCardTitle, paymentMethod === 'payatcounter' && { color: '#166534' }]}>
+                            {isDeliveryOrder ? 'Cash on Delivery' : 'Pay at Counter'}
+                          </Text>
+                          <Text style={[styles.paymentCardSub, paymentMethod === 'payatcounter' && { color: '#15803d' }]}>
+                            {isDeliveryOrder
+                              ? 'Pay cash / UPI upon doorstep arrival'
+                              : 'Cash / UPI at Counter • Cashier Confirmation Required'}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#64748b', fontWeight: '500', marginTop: 4 }}>
+                            Dishes prepared once cashier accepts order
+                          </Text>
+                        </View>
+                        {paymentMethod === 'payatcounter' ? (
+                          <CheckCircle2 size={18} color="#15803d" />
+                        ) : (
+                          <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#cbd5e1' }} />
+                        )}
                       </View>
-                      {paymentMethod === 'payatcounter' ? (
-                        <CheckCircle2 size={18} color="#15803d" />
-                      ) : (
-                        <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#cbd5e1' }} />
-                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={{ marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: '#fef3c7', borderWidth: 1, borderColor: '#fde68a' }}>
+                      <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#92400e' }}>
+                        🔒 Prepaid online payment is required for home delivery orders.
+                      </Text>
                     </View>
-                  </TouchableOpacity>
+                  )}
                 </View>
 
                 <View
@@ -2872,24 +3628,57 @@ export default function CartModal({
                     </View>
                   ) : null}
 
-                  <View
-                    style={
-                      styles.zeroFeeBadge
-                    }
-                  >
-                    <ShieldCheck
-                      size={14}
-                      color="#10b981"
-                    />
-
-                    <Text
+                  {isDeliveryOrder ? (
+                    <>
+                      <View style={styles.summaryRow}>
+                        <Text style={styles.summaryLabel}>
+                          Delivery Fee
+                        </Text>
+                        <Text style={[styles.summaryValue, deliveryFee === 0 && { color: '#15803d', fontWeight: '700' }]}>
+                          {deliveryFee === 0 ? 'FREE' : `₹${money(deliveryFee)}`}
+                        </Text>
+                      </View>
+                      {hasGst && deliveryGstAmount > 0 ? (
+                        <View style={styles.summaryRow}>
+                          <Text style={styles.summaryLabel}>
+                            Delivery GST (5%)
+                          </Text>
+                          <Text style={styles.summaryValue}>
+                            ₹{money(deliveryGstAmount)}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {platformFee > 0 ? (
+                        <View style={styles.summaryRow}>
+                          <Text style={styles.summaryLabel}>
+                            Platform Fee
+                          </Text>
+                          <Text style={styles.summaryValue}>
+                            ₹{money(platformFee)}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </>
+                  ) : (
+                    <View
                       style={
-                        styles.zeroFeeBadgeText
+                        styles.zeroFeeBadge
                       }
                     >
-                      Zero Platform & Payment Gateway Fee for Customers
-                    </Text>
-                  </View>
+                      <ShieldCheck
+                        size={14}
+                        color="#10b981"
+                      />
+
+                      <Text
+                        style={
+                          styles.zeroFeeBadgeText
+                        }
+                      >
+                        Zero Platform &amp; Payment Gateway Fee for Customers
+                      </Text>
+                    </View>
+                  )}
 
                   <View
                     style={styles.divider}
@@ -3030,7 +3819,11 @@ export default function CartModal({
                             : 'KITCHEN CLOSED FOR ORDERING')
                         : Boolean(activeTable?.isSessionExpired && !activeTable?.isDiningActive)
                         ? 'SESSION EXPIRED • RE-SCAN TABLE QR'
-                        : (paymentMethod === 'direct_upi' ? `PAY VIA UPI • ₹${money(grandTotal)}` : `PLACE ORDER • ₹${money(grandTotal)}`)}
+                        : ((paymentMethod === 'razorpay' || paymentMethod === 'cashfree')
+                            ? `PAY & PLACE ORDER • ₹${money(grandTotal)}`
+                            : paymentMethod === 'direct_upi'
+                            ? `PAY VIA UPI • ₹${money(grandTotal)}`
+                            : `PLACE ORDER • ₹${money(grandTotal)}`)}
                     </Text>
 
                     <ArrowRight
@@ -3140,7 +3933,7 @@ export default function CartModal({
             <View style={{ backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fef3c7', borderRadius: 10, padding: 10, marginVertical: 6, flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
               <AlertTriangle size={16} color="#d97706" style={{ marginTop: 2 }} />
               <Text style={{ flex: 1, fontSize: 11, color: '#92400e', lineHeight: 15 }}>
-                <Text style={{ fontWeight: '700' }}>App showing "Declined" or "Technical Issue"?</Text> Google Pay &amp; PhonePe restrict external browser links to direct personal accounts. Please use <Text style={{ fontWeight: '700' }}>Scan QR Code</Text> or <Text style={{ fontWeight: '700' }}>Copy UPI ID</Text> below!
+                <Text style={{ fontWeight: '700' }}>App showing "Receiver is not accepting payments" or "Declined"?</Text> Merchant terminal accounts (such as YES PAY Biz soundboxes) require QR scanning. Please scan the QR code above — it works with 100% bank success!
               </Text>
             </View>
 
@@ -3280,68 +4073,18 @@ export default function CartModal({
                 )}
 
                 {/* Easy Steps */}
-                <View style={{ backgroundColor: '#f0fdf4', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0', gap: 4 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#166534' }}>How to complete in your UPI app:</Text>
+                <View style={{ backgroundColor: '#f0fdf4', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#bbf7d0', gap: 6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#166534' }}>How to pay in your UPI app:</Text>
                   <Text style={{ fontSize: 11, color: '#15803d', lineHeight: 16 }}>
                     1. Tap <Text style={{ fontWeight: '700' }}>Copy</Text> next to UPI ID above{'\n'}
                     2. Open your UPI app (Google Pay / PhonePe / Paytm){'\n'}
                     3. Tap <Text style={{ fontWeight: '700' }}>"Pay UPI ID"</Text> or <Text style={{ fontWeight: '700' }}>"To UPI ID"</Text> and paste{'\n'}
-                    4. Pay ₹{pendingUpiOrder?.formattedAmount || money(pendingUpiOrder?.amount)} and copy the 12-digit UTR
+                    4. Enter ₹{pendingUpiOrder?.formattedAmount || money(pendingUpiOrder?.amount)} and pay{'\n'}
+                    5. Once paid, the Soundbox will speak and your order will auto-confirm!
                   </Text>
-                </View>
-
-                {/* Direct App Launchers */}
-                <View style={styles.upiAppBtnRow}>
-                  <TouchableOpacity
-                    style={styles.upiAppBtnSecondary}
-                    onPress={() => {
-                      if (pendingUpiOrder?.gpayUri && typeof window !== 'undefined') {
-                        window.location.href = pendingUpiOrder.gpayUri;
-                      }
-                    }}
-                  >
-                    <Text style={styles.upiAppBtnSecondaryText}>Open GPay</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.upiAppBtnSecondary}
-                    onPress={() => {
-                      if (pendingUpiOrder?.phonepeUri && typeof window !== 'undefined') {
-                        window.location.href = pendingUpiOrder.phonepeUri;
-                      }
-                    }}
-                  >
-                    <Text style={styles.upiAppBtnSecondaryText}>Open PhonePe</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.upiAppBtnSecondary}
-                    onPress={() => {
-                      if (pendingUpiOrder?.paytmUri && typeof window !== 'undefined') {
-                        window.location.href = pendingUpiOrder.paytmUri;
-                      }
-                    }}
-                  >
-                    <Text style={styles.upiAppBtnSecondaryText}>Open Paytm</Text>
-                  </TouchableOpacity>
                 </View>
               </View>
             )}
-
-            {/* Quick Intent Fallback Button */}
-            <TouchableOpacity
-              style={[styles.upiAppBtnPrimary, { marginVertical: 6 }]}
-              onPress={() => {
-                if (pendingUpiOrder?.npciUpiUri && typeof window !== 'undefined') {
-                  window.location.href = pendingUpiOrder.npciUpiUri;
-                }
-              }}
-              activeOpacity={0.85}
-            >
-              <Smartphone size={16} color="#FFFFFF" />
-              <Text style={[styles.upiAppBtnPrimaryText, { fontSize: 13 }]}>Try Launching Installed UPI App Directly</Text>
-              <ExternalLink size={14} color="#FFFFFF" />
-            </TouchableOpacity>
 
             {/* Optional Manual UTR Fallback Toggle */}
             <TouchableOpacity

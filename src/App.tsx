@@ -22,7 +22,7 @@ import CustomerView from './components/CustomerView';
 import StaffView from './components/StaffView';
 import CartModal from './components/CartModal';
 import OrderTrackerModal from './components/OrderTrackerModal';
-import QrScannerModal from './components/QrScannerModal';
+import QrScannerModal, { parseQrText } from './components/QrScannerModal';
 import RestaurantQrModal from './components/RestaurantQrModal';
 import CallWaiterModal from './components/CallWaiterModal';
 import LandingPage from './components/LandingPage';
@@ -908,9 +908,19 @@ if (paymentReturnOrderId) {
               );
             }
 
-            if (statusRes && (statusRes?.status === 'FAILED' || statusRes?.order_status === 'FAILED' || statusRes?.status === 'CANCELLED' || statusRes?.order_status === 'CANCELLED')) {
-              logger.payment('PAYMENT_RETURN_FAILED', `Payment was cancelled or failed for order: ${paymentReturnOrderId}`, { statusRes });
-              showToast('❌ Payment was cancelled or failed. Your order was not placed.');
+            const cfReturnStatus = String(
+              statusRes?.paymentStatus ||
+              statusRes?.status ||
+              statusRes?.order_status ||
+              ''
+            ).toUpperCase();
+
+            if (
+              ['FAILED', 'CANCELLED', 'USER_DROPPED', 'EXPIRED', 'TERMINATED'].includes(cfReturnStatus) ||
+              (statusRes && !['PAID', 'SUCCESS', 'COMPLETED', 'CAPTURED', 'CHARGED'].includes(cfReturnStatus) && cfReturnStatus !== '')
+            ) {
+              logger.payment('PAYMENT_RETURN_FAILED', `Payment was not completed (${cfReturnStatus || 'UNKNOWN'}) for order: ${paymentReturnOrderId}`, { statusRes });
+              showToast(`❌ Payment was ${cfReturnStatus ? cfReturnStatus.toLowerCase() : 'not completed'}. Your order was not placed.`);
               return;
             }
 
@@ -968,6 +978,10 @@ if (paymentReturnOrderId) {
                 tableNumber: targetTableNum ? String(targetTableNum) : null,
                 orderTypeId: isFallbackTableOrder ? 1 : 2,
                 deliveryType: isFallbackTableOrder ? 'Dine-In' : 'Takeaway / Counter',
+                isHomeDelivery: false,
+                deliveryFee: 0,
+                deliveryGstAmount: 0,
+                platformFee: Number(cart?.platformFee ?? 0),
                 customerName: 'Guest Diner',
                 customerPhone: '9999999999',
                 mobileNumber: '9999999999',
@@ -1268,6 +1282,7 @@ if (paymentReturnOrderId) {
 
         setIsInvalidRestaurant(false);
         setCatalog(resolvedCatalog);
+        api.saveRecentRestaurant(resolvedCatalog);
         setCategories(
           resolvedCatalog.categories || []
         );
@@ -1350,6 +1365,21 @@ if (paymentReturnOrderId) {
             }
           }),
           api.getStoreProfile(encryptedRestId, numericRestId, targetTableId).then(async (storeProfile) => {
+            if (storeProfile) {
+              setCatalog((prev: any) => prev ? ({
+                ...prev,
+                isDeliveryEnabled: storeProfile.isDeliveryEnabled ?? prev.isDeliveryEnabled,
+                isDineInEnabled: storeProfile.isDineInEnabled ?? prev.isDineInEnabled,
+                isSelfPickupEnabled: storeProfile.isSelfPickupEnabled ?? prev.isSelfPickupEnabled,
+                deliveryFee: storeProfile.deliveryFee ?? prev.deliveryFee,
+                freeDeliveryAbove: storeProfile.freeDeliveryAbove ?? prev.freeDeliveryAbove,
+                minDeliveryOrderAmount: storeProfile.minDeliveryOrderAmount ?? prev.minDeliveryOrderAmount,
+                isRazorpayEnabled: storeProfile.isRazorpayEnabled ?? storeProfile.razorpay ?? prev.isRazorpayEnabled,
+                razorpay: storeProfile.razorpay ?? storeProfile.isRazorpayEnabled ?? prev.razorpay,
+                fssaiNumber: storeProfile.fssaiNumber || prev.fssaiNumber,
+                stateCode: storeProfile.stateCode || prev.stateCode,
+              }) : prev);
+            }
             const localTables = await api.getTables(numericRestId).catch(() => []);
             const profileTables = Array.isArray(storeProfile?.availableTables) ? storeProfile.availableTables : [];
             const tablesData = profileTables.length > 0 ? profileTables : (localTables || []);
@@ -2622,6 +2652,21 @@ if (paymentReturnOrderId) {
         <LandingPage
           onOpenScanner={() => setScannerOpen(true)}
           isInvalidRestaurant={isInvalidRestaurant}
+          activeOrder={activeOrder}
+          onTrackOrder={(ordId) => {
+            setTrackedOrderId(String(ordId));
+            setMode('track');
+          }}
+          onExploreDelivery={() => setScannerOpen(true)}
+          onOpenLinkOrCode={async (rawInput) => {
+            const parsed = parseQrText(rawInput);
+            if (!parsed.encId) return false;
+            await handleSelectScanResult(parsed.encId, parsed.tableId);
+            return true;
+          }}
+          onSelectRestaurant={async (encId) => {
+            await handleSelectScanResult(encId, null);
+          }}
         />
       ) : mode === 'track' && trackedOrderId ? (
         <OrderTrackingPage

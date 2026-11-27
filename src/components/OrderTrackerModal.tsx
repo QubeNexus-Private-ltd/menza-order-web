@@ -72,8 +72,8 @@ const STATUS_RANKS = {
   settled: 4,
 };
 
-const PAYMENT_MODE_ONLINE = ['ONLINE', 'CASHFREE', 'UPI'];
-const PAYMENT_METHOD_ONLINE = ['CASHFREE', 'CASHFREE_SPLIT', 'ONLINE', 'UPI'];
+const PAYMENT_MODE_ONLINE = ['ONLINE', 'CASHFREE', 'RAZORPAY', 'ONLINE_RAZORPAY', 'UPI'];
+const PAYMENT_METHOD_ONLINE = ['CASHFREE', 'CASHFREE_SPLIT', 'RAZORPAY', 'ONLINE_RAZORPAY', 'ONLINE', 'UPI'];
 const PAYMENT_STATES_PAID = ['PAID', 'SUCCESS', 'COMPLETED', 'CAPTURED'];
 const TERMINAL_STATUSES = ['Served', 'Delivered', 'Cancelled'];
 
@@ -188,6 +188,7 @@ const getOrderStatusInfo = (ord, isKitchenActiveOverride = null, catalog = null,
       isKitchenActive: true,
       isOnline,
       isPaid,
+      isDirectUpi,
       isAwaitingPayment,
       ...badge,
     };
@@ -241,6 +242,7 @@ const getOrderStatusInfo = (ord, isKitchenActiveOverride = null, catalog = null,
       isKitchenActive: false,
       isOnline,
       isPaid,
+      isDirectUpi,
       isAwaitingPayment,
       ...badge,
     };
@@ -295,6 +297,14 @@ const hasOrderTableId = (ord) => {
   return String(tid).trim().length > 0;
 };
 
+const isHomeDeliveryOrder = (ord) =>
+  !hasOrderTableId(ord) &&
+  (Boolean(ord?.isHomeDelivery || ord?.IsHomeDelivery || ord?.deliveryAddress || ord?.DeliveryAddress) ||
+    Number(ord?.orderTypeId ?? ord?.OrderTypeId) === 3 ||
+    ['delivery', 'homedelivery', 'home-delivery'].includes(
+      normalizeDeliveryType(ord?.deliveryType || ord?.DeliveryType || ord?.orderTypeName || ord?.OrderTypeName)
+    ));
+
 const isDineInOrder = (ord) =>
   hasOrderTableId(ord) ||
   ['dine-in', 'dine-in-order', 'dinein'].includes(
@@ -304,16 +314,21 @@ const isDineInOrder = (ord) =>
   ord?.OrderTypeId === 1;
 
 const getOrderDiningType = (ord) =>
-  isDineInOrder(ord) ? 'Dine-In' : 'Self Pickup';
+  isHomeDeliveryOrder(ord) ? 'Home Delivery' : (isDineInOrder(ord) ? 'Dine-In' : 'Self Pickup');
 
-const getOrderChannelText = (ord) =>
-  isDineInOrder(ord)
+const getOrderChannelText = (ord) => {
+  if (isHomeDeliveryOrder(ord)) {
+    const addr = String(ord?.deliveryAddress || ord?.DeliveryAddress || '').trim();
+    return addr ? `Delivery • ${addr.slice(0, 32)}${addr.length > 32 ? '…' : ''}` : 'Home Delivery';
+  }
+  return isDineInOrder(ord)
     ? ord?.tableName
       ? `Dine-In • ${ord.tableName}`
       : hasOrderTableId(ord)
       ? `Dine-In • Table #${ord.tableId}`
       : 'Dine-In'
     : 'Self Pickup';
+};
 
 const getItemUnitName = (item) =>
   item?.unitName ||
@@ -470,7 +485,12 @@ export default function OrderTrackerModal({
       orderId: cleanOrderId,
       customerName: target.customerName || target.Name || target.name,
       tableName: activeTable?.tableName || target.tableName,
-      orderType: activeTable ? 'Dine-In' : 'Takeaway',
+      orderType: isHomeDeliveryOrder(target) ? 'Home Delivery' : (isDineInOrder(target) ? 'Dine-In' : 'Takeaway'),
+      deliveryAddress: target.deliveryAddress || target.DeliveryAddress || undefined,
+      deliveryFee: Number(target.deliveryFee || 0),
+      deliveryGstAmount: Number(target.deliveryGstAmount || 0),
+      platformFee: Number(target.platformFee || 0),
+      fssaiNumber: target.fssaiNumber || catalog?.fssaiNumber || undefined,
       items: (orderItems || []).map((it: any) => ({
         itemName: it.itemName || it.name || it.ItemName,
         quantity: Number(it.quantity || it.Quantity || 1),
@@ -816,6 +836,7 @@ export default function OrderTrackerModal({
         normalizedStatus,
         isOnline,
         isPaid,
+        isDirectUpi,
         isAwaitingPayment,
         badgeColor,
         badgeBg,
@@ -910,11 +931,17 @@ export default function OrderTrackerModal({
       : 0;
 
     const hasGstBifurcation = Boolean(hasGst && cleanOrderGst && cgst > 0 && sgst > 0);
+    const discountAmt = Number(curOrder.discountAmount ?? 0) || 0;
+    const isHomeDeliv = isHomeDeliveryOrder(curOrder);
+    const deliveryFeeVal = Number(curOrder.deliveryFee ?? 0) || 0;
+    const deliveryGstVal = Number(curOrder.deliveryGstAmount ?? 0) || 0;
+    const platformFeeVal = Number(curOrder.platformFee ?? 0) || 0;
+    const deliveryAddressText = String(curOrder.deliveryAddress || '').trim();
 
     const grandTotal =
       Number(
         (curOrder.totalAmount > 0 ? curOrder.totalAmount : null) ??
-          (subtotal + cgst + sgst)
+          Math.max(0, subtotal - discountAmt + cgst + sgst + deliveryFeeVal + deliveryGstVal + platformFeeVal)
       ) || 0;
 
     const tokenNumber = getOrderTokenNumber(curOrder);
@@ -1820,6 +1847,13 @@ export default function OrderTrackerModal({
               </Text>
             </View>
 
+            {discountAmt > 0 && (
+              <View style={styles.billRow}>
+                <Text style={[styles.billLabel, { color: '#15803d' }]}>Discount</Text>
+                <Text style={[styles.billValue, { color: '#15803d' }]}>-₹{discountAmt.toFixed(2)}</Text>
+              </View>
+            )}
+
             {hasGstBifurcation ? (
               <>
                 <View
@@ -1884,6 +1918,40 @@ export default function OrderTrackerModal({
               </View>
             )}
 
+            {(isHomeDeliv || deliveryFeeVal > 0) && (
+              <View style={styles.billRow}>
+                <Text style={styles.billLabel}>Delivery Fee</Text>
+                <Text style={[styles.billValue, deliveryFeeVal === 0 ? { color: '#15803d' } : null]}>
+                  {deliveryFeeVal > 0 ? `₹${deliveryFeeVal.toFixed(2)}` : 'FREE'}
+                </Text>
+              </View>
+            )}
+
+            {deliveryGstVal > 0 && (
+              <View style={styles.billRow}>
+                <Text style={styles.billLabel}>Delivery GST (5%)</Text>
+                <Text style={styles.billValue}>₹{deliveryGstVal.toFixed(2)}</Text>
+              </View>
+            )}
+
+            {platformFeeVal > 0 && (
+              <View style={styles.billRow}>
+                <Text style={styles.billLabel}>Platform Fee</Text>
+                <Text style={styles.billValue}>₹{platformFeeVal.toFixed(2)}</Text>
+              </View>
+            )}
+
+            {isHomeDeliv && deliveryAddressText ? (
+              <View style={{ marginTop: 6, padding: 8, borderRadius: 6, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#1e3a8a' }}>
+                  Delivery Address
+                </Text>
+                <Text style={{ fontSize: 11, color: '#1e40af', marginTop: 2 }}>
+                  {deliveryAddressText}
+                </Text>
+              </View>
+            ) : null}
+
             <View
               style={
                 styles.receiptDividerBold
@@ -1909,7 +1977,9 @@ export default function OrderTrackerModal({
                     styles.grandTotalTaxesNote
                   }
                 >
-                  (Net total is inclusive of all taxes)
+                  {hasGstBifurcation
+                    ? `(Includes CGST + SGST${deliveryGstVal > 0 ? ' + Delivery GST' : ''})`
+                    : '(Net total is inclusive of all taxes)'}
                 </Text>
               </View>
 
@@ -2007,7 +2077,7 @@ export default function OrderTrackerModal({
                 }
               >
                 {isOnline
-                  ? 'Online Payment (Direct / Cashfree)'
+                  ? `Online Payment (${String(curOrder.paymentMode || '').toUpperCase().includes('RAZORPAY') ? 'Razorpay' : isDirectUpi ? 'Direct UPI' : 'Cashfree'})`
                   : 'Cash Payment (At Counter / Self Pickup)'}
               </Text>
 
@@ -2300,6 +2370,7 @@ export default function OrderTrackerModal({
                   label,
                   isOnline,
                   isPaid,
+                  isDirectUpi,
                 } =
                   getOrderStatusInfo(
                     ord,

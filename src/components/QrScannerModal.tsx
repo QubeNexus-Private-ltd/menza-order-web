@@ -9,6 +9,83 @@ export interface QrScannerModalProps {
   onSelectScanResult: (encId: string, tableId: string | number | null) => void;
 }
 
+export function parseQrText(decodedText: string): { encId: string; tableId: string | number | null } {
+  let encId = '';
+  let tableId: string | number | null = null;
+  const text = (decodedText || '')
+    .trim()
+    .replace(/[.,;:\s]+$/, '');
+
+  // 1. JSON QR
+  if (text.startsWith('{') && text.endsWith('}')) {
+    try {
+      const obj = JSON.parse(text);
+      encId = (obj.r || obj.encRestId || obj.encryptedRestaurantId || (obj.restaurantId ? String(obj.restaurantId) : ''))
+        .trim()
+        .replace(/[.,;:\s]+$/, '');
+      if (obj.tableId || obj.table) tableId = obj.tableId || obj.table;
+      return { encId, tableId };
+    } catch {}
+  }
+
+  // 2. URL parsing
+  try {
+    if (
+      text.includes('http://') ||
+      text.includes('https://') ||
+      text.includes('menzaorder://') ||
+      text.includes('?') ||
+      text.includes('/dinein/')
+    ) {
+      let urlStr = text;
+      if (urlStr.startsWith('menzaorder://')) {
+        urlStr = urlStr.replace('menzaorder://', 'https://dummy.com/');
+      } else if (!urlStr.startsWith('http')) {
+        urlStr = `https://dummy.com/${urlStr.replace(/^\//, '')}`;
+      }
+      const u = new URL(urlStr);
+      const qR =
+        u.searchParams.get('r') ||
+        u.searchParams.get('encRestId') ||
+        u.searchParams.get('enc') ||
+        u.searchParams.get('restId') ||
+        u.searchParams.get('restaurantId') ||
+        u.searchParams.get('id');
+      const qT = u.searchParams.get('tableId') || u.searchParams.get('table');
+      if (qR) encId = qR.trim().replace(/[.,;:\s]+$/, '');
+      if (qT) tableId = qT;
+
+      const dineInMatch = u.pathname.match(/\/dinein\/([^\/]+)(?:\/([^\/]+))?/);
+      if (dineInMatch) {
+        if (dineInMatch[1]) encId = dineInMatch[1].trim().replace(/[.,;:\s]+$/, '');
+        if (dineInMatch[2]) tableId = dineInMatch[2];
+      }
+    }
+  } catch {}
+
+  // 3. Fallback Regex
+  if (!encId) {
+    const encMatch = text.match(/(?:encRestId|r|enc|eid)=([^&]+)/i);
+    const restMatch = text.match(/(?:restaurantId|restId)=([^&]+)/i);
+    if (encMatch) {
+      encId = decodeURIComponent(encMatch[1]).trim().replace(/[.,;:\s]+$/, '');
+    } else if (restMatch) {
+      encId = decodeURIComponent(restMatch[1]).trim().replace(/[.,;:\s]+$/, '');
+    } else {
+      encId = text;
+    }
+  }
+
+  if (!tableId) {
+    const tableMatch = text.match(/(?:tableId|table|t)=([^&]+)/i);
+    if (tableMatch) {
+      tableId = decodeURIComponent(tableMatch[1]);
+    }
+  }
+
+  return { encId, tableId };
+}
+
 export default function QrScannerModal({
   visible,
   onClose,
@@ -17,62 +94,13 @@ export default function QrScannerModal({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const hasScannedRef = useRef(false);
 
-  const parseQrText = (decodedText: string): { encId: string; tableId: string | number | null } => {
-    let encId = '';
-    let tableId: string | number | null = null;
-    const text = (decodedText || '').trim();
-
-    // 1. JSON QR
-    if (text.startsWith('{') && text.endsWith('}')) {
-      try {
-        const obj = JSON.parse(text);
-        encId = obj.r || obj.encRestId || obj.encryptedRestaurantId || (obj.restaurantId ? String(obj.restaurantId) : '');
-        if (obj.tableId || obj.table) tableId = obj.tableId || obj.table;
-        return { encId, tableId };
-      } catch {}
+  useEffect(() => {
+    if (visible) {
+      hasScannedRef.current = false;
     }
-
-    // 2. URL parsing
-    try {
-      if (text.includes('http://') || text.includes('https://') || text.includes('?') || text.includes('/dinein/')) {
-        const urlStr = text.startsWith('http') ? text : `https://dummy.com/${text.replace(/^\//, '')}`;
-        const u = new URL(urlStr);
-        const qR = u.searchParams.get('r') || u.searchParams.get('encRestId') || u.searchParams.get('enc') || u.searchParams.get('restaurantId');
-        const qT = u.searchParams.get('tableId') || u.searchParams.get('table');
-        if (qR) encId = qR;
-        if (qT) tableId = qT;
-
-        const dineInMatch = u.pathname.match(/\/dinein\/([^\/]+)(?:\/([^\/]+))?/);
-        if (dineInMatch) {
-          if (dineInMatch[1]) encId = dineInMatch[1];
-          if (dineInMatch[2]) tableId = dineInMatch[2];
-        }
-      }
-    } catch {}
-
-    // 3. Fallback Regex
-    if (!encId) {
-      const encMatch = text.match(/(?:encRestId|r|enc)=([^&]+)/i);
-      const restMatch = text.match(/restaurantId=([^&]+)/i);
-      if (encMatch) {
-        encId = decodeURIComponent(encMatch[1]);
-      } else if (restMatch) {
-        encId = decodeURIComponent(restMatch[1]);
-      } else {
-        encId = text;
-      }
-    }
-
-    if (!tableId) {
-      const tableMatch = text.match(/(?:tableId|table)=([^&]+)/i);
-      if (tableMatch) {
-        tableId = decodeURIComponent(tableMatch[1]);
-      }
-    }
-
-    return { encId, tableId };
-  };
+  }, [visible]);
 
   const stopScanner = async (scanner: Html5Qrcode | null) => {
     if (!scanner) return;
@@ -104,10 +132,14 @@ export default function QrScannerModal({
       scannerRef.current = html5QrCode;
 
       const onScanSuccess = async (decodedText: string) => {
+        if (hasScannedRef.current || !decodedText) return;
+        hasScannedRef.current = true;
         await stopScanner(html5QrCode);
         const parsed = parseQrText(decodedText);
-        onSelectScanResult(parsed.encId, parsed.tableId);
         onClose();
+        setTimeout(() => {
+          onSelectScanResult(parsed.encId, parsed.tableId);
+        }, 50);
       };
 
       const qrConfig = {

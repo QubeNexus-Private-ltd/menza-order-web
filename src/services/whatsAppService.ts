@@ -18,6 +18,11 @@ export interface WhatsAppReceiptData {
   paymentStatus?: string;
   billUrl?: string;
   gstNumber?: string | null;
+  fssaiNumber?: string | null;
+  deliveryAddress?: string;
+  deliveryFee?: number;
+  deliveryGstAmount?: number;
+  platformFee?: number;
 }
 
 export class OrderWhatsAppService {
@@ -101,6 +106,12 @@ export class OrderWhatsAppService {
     if (receiptData.customerName) {
       lines.push(`👤 Customer: ${receiptData.customerName}`);
     }
+    if (receiptData.deliveryAddress) {
+      lines.push(`📍 Delivery Address: ${receiptData.deliveryAddress}`);
+    }
+    if (receiptData.fssaiNumber) {
+      lines.push(`🍽️ FSSAI Lic.: ${receiptData.fssaiNumber}`);
+    }
 
     lines.push('--------------------------------');
     if (itemsText) {
@@ -119,6 +130,16 @@ export class OrderWhatsAppService {
       }
     } else {
       lines.push(`_Net total is inclusive of all taxes_`);
+    }
+
+    if (receiptData.deliveryFee && receiptData.deliveryFee > 0) {
+      lines.push(`Delivery Fee: ₹${Number(receiptData.deliveryFee).toFixed(2)}`);
+    }
+    if (receiptData.deliveryGstAmount && receiptData.deliveryGstAmount > 0) {
+      lines.push(`Delivery GST (5%): ₹${Number(receiptData.deliveryGstAmount).toFixed(2)}`);
+    }
+    if (receiptData.platformFee && receiptData.platformFee > 0) {
+      lines.push(`Platform Fee: ₹${Number(receiptData.platformFee).toFixed(2)}`);
     }
 
     if (receiptData.discountAmount && receiptData.discountAmount > 0) {

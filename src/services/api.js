@@ -557,18 +557,9 @@ export const switchRestaurant = async (
 ========================================================= */
 
 export const getOrderTypes = async (restaurantId = null) => {
-  const filterActiveAndNonDelivery = (list) => {
+  const filterActiveOrderTypes = (list) => {
     if (!Array.isArray(list)) return [];
-    return list.filter((t) => {
-      const name = String(t.typeName || t.name || t.code || '').toLowerCase();
-      const desc = String(t.description || '').toLowerCase();
-      return (
-        t.isActive !== false &&
-        Number(t.id) !== 3 &&
-        !name.includes('delivery') &&
-        !desc.includes('delivery')
-      );
-    });
+    return list.filter((t) => t && t.isActive !== false);
   };
 
   // 1. Try restaurant-specific active order types if restaurantId is provided
@@ -576,7 +567,7 @@ export const getOrderTypes = async (restaurantId = null) => {
     try {
       const res = await api.get(`/api/OrderTypeMaster/restaurant/${restaurantId}/active`);
       if (Array.isArray(res.data) && res.data.length > 0) {
-        return filterActiveAndNonDelivery(res.data);
+        return filterActiveOrderTypes(res.data);
       }
     } catch (err) {
       console.warn('Restaurant-specific order types unavailable, trying platform master:', err?.message);
@@ -587,7 +578,7 @@ export const getOrderTypes = async (restaurantId = null) => {
   try {
     const res = await api.get('/api/OrderTypeMaster');
     if (Array.isArray(res.data) && res.data.length > 0) {
-      return filterActiveAndNonDelivery(res.data);
+      return filterActiveOrderTypes(res.data);
     }
   } catch (error) {
     console.warn('Platform OrderTypeMaster unavailable, trying fallback:', error?.message);
@@ -597,7 +588,7 @@ export const getOrderTypes = async (restaurantId = null) => {
   try {
     const fallbackRes = await api.get('/api/Order/Types');
     if (fallbackRes.data && Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
-      return filterActiveAndNonDelivery(fallbackRes.data);
+      return filterActiveOrderTypes(fallbackRes.data);
     }
   } catch {
     console.log('OrderType API unavailable, using fallback.');
@@ -613,6 +604,11 @@ export const getOrderTypes = async (restaurantId = null) => {
       id: 2,
       typeName: 'Self Pickup',
       description: 'Self Pickup / Takeaway',
+    },
+    {
+      id: 3,
+      typeName: 'Delivery',
+      description: 'Home delivery from restaurant',
     },
     {
       id: 4,
@@ -1032,6 +1028,110 @@ const normalizeCatalogData = (
       data.contactPhone ||
       null,
 
+    bannerImageUrl:
+      data.bannerImageUrl ||
+      data.BannerImageUrl ||
+      data.imageUrl ||
+      data.ImageUrl ||
+      data.logoUrl ||
+      data.LogoUrl ||
+      null,
+
+    isDeliveryEnabled:
+      data.isDeliveryEnabled !== undefined
+        ? Boolean(data.isDeliveryEnabled)
+        : data.IsDeliveryEnabled !== undefined
+        ? Boolean(data.IsDeliveryEnabled)
+        : false,
+
+    isDineInEnabled:
+      data.isDineInEnabled !== undefined
+        ? Boolean(data.isDineInEnabled)
+        : data.IsDineInEnabled !== undefined
+        ? Boolean(data.IsDineInEnabled)
+        : true,
+
+    isSelfPickupEnabled:
+      data.isSelfPickupEnabled !== undefined
+        ? Boolean(data.isSelfPickupEnabled)
+        : data.IsSelfPickupEnabled !== undefined
+        ? Boolean(data.IsSelfPickupEnabled)
+        : true,
+
+    deliveryRadiusKm: Number(data.deliveryRadiusKm ?? data.DeliveryRadiusKm ?? 5),
+    deliveryFee: Number(data.deliveryFee ?? data.DeliveryFee ?? 0),
+    freeDeliveryAbove: Number(data.freeDeliveryAbove ?? data.FreeDeliveryAbove ?? 0),
+    minDeliveryOrderAmount: Number(data.minDeliveryOrderAmount ?? data.MinDeliveryOrderAmount ?? 0),
+
+    isPaymentRequiredForDelivery:
+      data.isPaymentRequiredForDelivery !== undefined
+        ? Boolean(data.isPaymentRequiredForDelivery)
+        : data.IsPaymentRequiredForDelivery !== undefined
+        ? Boolean(data.IsPaymentRequiredForDelivery)
+        : true,
+
+    allowCashOnDelivery:
+      data.allowCashOnDelivery !== undefined
+        ? Boolean(data.allowCashOnDelivery)
+        : data.AllowCashOnDelivery !== undefined
+        ? Boolean(data.AllowCashOnDelivery)
+        : false,
+
+    isRazorpayEnabled: Boolean(
+      data.isRazorpayEnabled ??
+        data.IsRazorpayEnabled ??
+        data.razorpay ??
+        data.Razorpay ??
+        false
+    ),
+    razorpay: Boolean(
+      data.isRazorpayEnabled ??
+        data.IsRazorpayEnabled ??
+        data.razorpay ??
+        data.Razorpay ??
+        false
+    ),
+    razorpayKeyId: data.razorpayKeyId || data.RazorpayKeyId || null,
+    fssaiNumber:
+      data.fssaiNumber ||
+      data.FssaiNumber ||
+      data.fssaiLicenseNumber ||
+      data.FssaiLicenseNumber ||
+      data.fssaiLicNo ||
+      null,
+    stateCode: data.stateCode || data.StateCode || null,
+
+    dietaryType: data.dietaryType || data.DietaryType || 'VegAndNonVeg',
+
+    cuisines: Array.isArray(data.cuisines)
+      ? data.cuisines
+      : Array.isArray(data.Cuisines)
+      ? data.Cuisines
+      : typeof (data.cuisines || data.Cuisines) === 'string'
+      ? String(data.cuisines || data.Cuisines)
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [],
+
+    latitude:
+      data.latitude !== undefined && data.latitude !== null
+        ? Number(data.latitude)
+        : data.Latitude !== undefined && data.Latitude !== null
+        ? Number(data.Latitude)
+        : null,
+
+    longitude:
+      data.longitude !== undefined && data.longitude !== null
+        ? Number(data.longitude)
+        : data.Longitude !== undefined && data.Longitude !== null
+        ? Number(data.Longitude)
+        : null,
+
+    avgPrepTimeMinutes: Number(data.avgPrepTimeMinutes ?? data.AvgPrepTimeMinutes ?? 20),
+    ratingAvg: Number(data.ratingAvg ?? data.RatingAvg ?? 0),
+    ratingCount: Number(data.ratingCount ?? data.RatingCount ?? 0),
+
     items: normalizedItems,
   };
 };
@@ -1066,29 +1166,33 @@ export const getCachedMenuCatalog = (encryptedRestaurantId) => {
 
 export const getMenuCatalogByEncryptedId =
   async (encryptedRestaurantId) => {
-    const cleanEncId = (encryptedRestaurantId || '').trim();
+    const cleanEncId = (encryptedRestaurantId || '')
+      .trim()
+      .replace(/[.,;:\s]+$/, '');
     if (!cleanEncId) return null;
 
     let catalogData = null;
     let decryptedRestId = null;
 
+    // 1. Try public store menu endpoint with query parameter 'r'
     try {
       const pubRes = await api.get(
         `/api/public/store/menu?r=${encodeURIComponent(
           cleanEncId
         )}`
       );
+      const rawPubData = pubRes?.data?.data || pubRes?.data;
       if (
-        pubRes?.data &&
-        (pubRes.data.restaurantId ||
-          (Array.isArray(pubRes.data.items) && pubRes.data.items.length > 0))
+        rawPubData &&
+        (rawPubData.restaurantId ||
+          (Array.isArray(rawPubData.items) && rawPubData.items.length > 0))
       ) {
         decryptedRestId =
-          pubRes.data.restaurantId ||
+          rawPubData.restaurantId ||
           decryptRestaurantId(
             cleanEncId
           );
-        catalogData = pubRes.data;
+        catalogData = rawPubData;
       }
     } catch (e) {
       console.log(
@@ -1097,30 +1201,85 @@ export const getMenuCatalogByEncryptedId =
       );
     }
 
-    if (!catalogData) {
+    // 2. If cleanEncId is a session token (starts with mzs_ or mzt_), try resolving store profile or URL restId
+    if (!catalogData && (cleanEncId.startsWith('mzs_') || cleanEncId.startsWith('mzt_'))) {
+      try {
+        let candidateRestId = null;
+        if (typeof window !== 'undefined') {
+          const sp = new URLSearchParams(window.location.search);
+          const urlRestId = sp.get('restId') || sp.get('restaurantId');
+          if (urlRestId && !isNaN(Number(urlRestId))) {
+            candidateRestId = Number(urlRestId);
+          }
+        }
+
+        if (!candidateRestId) {
+          const profRes = await api.get(`/api/public/store/profile?r=${encodeURIComponent(cleanEncId)}`);
+          const profData = profRes?.data?.data || profRes?.data;
+          if (profData?.restaurantId) {
+            candidateRestId = Number(profData.restaurantId);
+          }
+        }
+
+        if (candidateRestId) {
+          decryptedRestId = candidateRestId;
+          const mappedEncId = KNOWN_ENCRYPTED_IDS[candidateRestId] || encryptRestaurantId(candidateRestId);
+          const catRes = await api.get(`/api/MenuCatalog/encrypted/${encodeURIComponent(mappedEncId)}`);
+          const catData = catRes?.data?.data || catRes?.data;
+          if (catData && (catData.restaurantId || (Array.isArray(catData.items) && catData.items.length > 0))) {
+            catalogData = catData;
+          }
+        }
+      } catch (profErr) {
+        console.log('Store profile resolution fallback:', profErr?.message);
+      }
+    }
+
+    // 3. Try /api/MenuCatalog/encrypted/:encId (only for standard encrypted IDs)
+    if (!catalogData && !cleanEncId.startsWith('mzs_') && !cleanEncId.startsWith('mzt_')) {
       try {
         const res = await api.get(
           `/api/MenuCatalog/encrypted/${encodeURIComponent(
             cleanEncId
           )}`
         );
+        const resData = res?.data?.data || res?.data;
         if (
-          res?.data &&
-          (res.data.restaurantId ||
-            (Array.isArray(res.data.items) && res.data.items.length > 0))
+          resData &&
+          (resData.restaurantId ||
+            (Array.isArray(resData.items) && resData.items.length > 0))
         ) {
           decryptedRestId =
-            res.data?.restaurantId ||
+            resData?.restaurantId ||
             decryptRestaurantId(cleanEncId);
-          catalogData = res.data;
+          catalogData = resData;
         }
       } catch (err) {
         console.log('MenuCatalog fallback failed:', err?.message);
       }
     }
 
+    // 4. Fallback for storefront QR session tokens (mzs_ / mzt_)
+    // If backend session token resolution fails or token has expired,
+    // gracefully load the active default restaurant (Restaurant #1 "Menza prod test")
+    if (!catalogData && (cleanEncId.startsWith('mzs_') || cleanEncId.startsWith('mzt_'))) {
+      try {
+        const defaultEnc = KNOWN_ENCRYPTED_IDS[1] || 'uqQTzsGyDJy4_TBVeYXCfg';
+        const res = await api.get(`/api/MenuCatalog/encrypted/${defaultEnc}`);
+        const resData = res?.data?.data || res?.data;
+        if (resData && (resData.restaurantId || (Array.isArray(resData.items) && resData.items.length > 0))) {
+          decryptedRestId = resData.restaurantId || 1;
+          catalogData = resData;
+          console.log('✅ Resolved storefront session token to default restaurant catalog (Restaurant #1)');
+        }
+      } catch (defErr) {
+        console.log('Default catalog fallback failed:', defErr?.message);
+      }
+    }
+
+    // 5. Cached catalog fallback
     if (!catalogData || !Array.isArray(catalogData.items) || catalogData.items.length === 0) {
-      const cached = getCachedMenuCatalog(cleanEncId);
+      const cached = getCachedMenuCatalog(cleanEncId) || getCachedMenuCatalog('1');
       if (cached) {
         catalogData = cached;
         decryptedRestId = cached.restaurantId || decryptedRestId || decryptRestaurantId(cleanEncId);
@@ -1129,6 +1288,72 @@ export const getMenuCatalogByEncryptedId =
 
     if (!catalogData || !Array.isArray(catalogData.items) || catalogData.items.length === 0) {
       return null;
+    }
+
+    // Dynamically fetch live UPI configuration directly from API for this specific restaurant
+    try {
+      let liveUpiRes = null;
+      if (cleanEncId) {
+        liveUpiRes = await api.get(`/api/public/store/upi-config?r=${encodeURIComponent(cleanEncId)}`).catch(() => null);
+      }
+      if (!liveUpiRes?.data?.bankerUpiId && !liveUpiRes?.data?.upiId && decryptedRestId) {
+        liveUpiRes = await api.get(`/api/public/store/restaurant/${decryptedRestId}/upi-config`).catch(() => null);
+      }
+      const liveUpi = liveUpiRes?.data?.data || liveUpiRes?.data;
+      if (liveUpi && (liveUpi.bankerUpiId || liveUpi.upiId)) {
+        catalogData.bankerUpiId = (liveUpi.bankerUpiId || liveUpi.upiId).trim();
+        catalogData.upiId = (liveUpi.upiId || liveUpi.bankerUpiId).trim();
+        if (liveUpi.bankerAccountHolderName) {
+          catalogData.bankerAccountHolderName = liveUpi.bankerAccountHolderName.trim();
+        }
+        if (liveUpi.contactNumber) {
+          catalogData.contactNumber = liveUpi.contactNumber.trim();
+        }
+      }
+    } catch (e) {
+      console.log('Live restaurant UPI config fetch skipped:', e?.message);
+    }
+
+    // Dynamically fetch live store delivery/profile/payment metadata if catalog response omitted them
+    if (
+      catalogData.isDeliveryEnabled === undefined &&
+      catalogData.IsDeliveryEnabled === undefined ||
+      (catalogData.isRazorpayEnabled === undefined && catalogData.IsRazorpayEnabled === undefined && catalogData.razorpay === undefined)
+    ) {
+      try {
+        const spParams = new URLSearchParams();
+        if (cleanEncId) spParams.set('r', cleanEncId);
+        if (decryptedRestId) spParams.set('restaurantId', String(decryptedRestId));
+        const spRes = await api.get(`/api/public/store/profile?${spParams.toString()}`).catch(() => null);
+        const spData = spRes?.data?.data || spRes?.data;
+        if (spData) {
+          catalogData = {
+            ...catalogData,
+            isDeliveryEnabled: spData.isDeliveryEnabled ?? catalogData.isDeliveryEnabled,
+            isDineInEnabled: spData.isDineInEnabled ?? catalogData.isDineInEnabled,
+            isSelfPickupEnabled: spData.isSelfPickupEnabled ?? catalogData.isSelfPickupEnabled,
+            deliveryRadiusKm: spData.deliveryRadiusKm ?? catalogData.deliveryRadiusKm,
+            deliveryFee: spData.deliveryFee ?? catalogData.deliveryFee,
+            freeDeliveryAbove: spData.freeDeliveryAbove ?? catalogData.freeDeliveryAbove,
+            minDeliveryOrderAmount: spData.minDeliveryOrderAmount ?? catalogData.minDeliveryOrderAmount,
+            isPaymentRequiredForDelivery: spData.isPaymentRequiredForDelivery ?? catalogData.isPaymentRequiredForDelivery,
+            allowCashOnDelivery: spData.allowCashOnDelivery ?? catalogData.allowCashOnDelivery,
+            isRazorpayEnabled: spData.isRazorpayEnabled ?? spData.razorpay ?? catalogData.isRazorpayEnabled,
+            razorpay: spData.razorpay ?? spData.isRazorpayEnabled ?? catalogData.razorpay,
+            razorpayKeyId: spData.razorpayKeyId ?? catalogData.razorpayKeyId,
+            fssaiNumber: spData.fssaiNumber ?? spData.fssaiLicenseNumber ?? catalogData.fssaiNumber,
+            stateCode: spData.stateCode ?? catalogData.stateCode,
+            dietaryType: spData.dietaryType ?? catalogData.dietaryType,
+            cuisines: spData.cuisines ?? catalogData.cuisines,
+            latitude: spData.latitude ?? catalogData.latitude,
+            longitude: spData.longitude ?? catalogData.longitude,
+            avgPrepTimeMinutes: spData.avgPrepTimeMinutes ?? catalogData.avgPrepTimeMinutes,
+            ratingAvg: spData.ratingAvg ?? catalogData.ratingAvg,
+            ratingCount: spData.ratingCount ?? catalogData.ratingCount,
+            bannerImageUrl: spData.bannerImageUrl ?? catalogData.bannerImageUrl,
+          };
+        }
+      } catch {}
     }
 
     const normalized = normalizeCatalogData(
@@ -2306,24 +2531,39 @@ export const normalizeOrder = (
       )
     : 0;
 
+  const deliveryFee = Number(order.deliveryFee ?? order.DeliveryFee ?? 0);
+  const deliveryGstAmount = Number(order.deliveryGstAmount ?? order.DeliveryGstAmount ?? 0);
+  const platformFee = Number(order.platformFee ?? order.PlatformFee ?? 0);
+  const discountAmount = Number(order.discountAmount ?? order.DiscountAmount ?? 0);
+
   const calculatedTotal =
     Number(
       (order.totalAmount > 0 ? order.totalAmount : null) ??
       Math.round(
-        (effectiveSubtotal +
+        (Math.max(0, effectiveSubtotal - discountAmount) +
           cgst +
-          sgst) *
+          sgst +
+          deliveryFee +
+          deliveryGstAmount +
+          platformFee) *
           100
       ) / 100
     );
 
   const rawPaymentMode = (order.paymentMode || order.PaymentMode || order.paymentMethod || order.PaymentMethod || order.paymentType || order.PaymentType || '').toString();
-  const isOnline = rawPaymentMode.toUpperCase().includes('ONLINE') || rawPaymentMode.toUpperCase().includes('CASHFREE') || rawPaymentMode.toUpperCase().includes('UPI') || order.isOnline === true;
+  const isOnline =
+    rawPaymentMode.toUpperCase().includes('ONLINE') ||
+    rawPaymentMode.toUpperCase().includes('CASHFREE') ||
+    rawPaymentMode.toUpperCase().includes('RAZORPAY') ||
+    rawPaymentMode.toUpperCase().includes('UPI') ||
+    order.isOnline === true;
   const paymentStatus = order.paymentStatus || order.PaymentStatus || (isOnline ? 'Paid' : 'Pending');
   const isSettled = isOnline || String(paymentStatus).toLowerCase() === 'paid' || order.isSettled === true || Boolean(order.settledDateUtc);
-  const paymentType = order.paymentType || order.PaymentType || (isOnline ? 'Cashfree Online' : 'Counter Cash');
-  const paymentMode = order.paymentMode || order.PaymentMode || order.paymentMethod || order.PaymentMethod || (isOnline ? 'ONLINE' : 'CASH');
-  const deliveryType = order.deliveryType || (order.tableId ? 'Dine-In' : 'Takeaway / Counter');
+  const isRazorpayMode = rawPaymentMode.toUpperCase().includes('RAZORPAY') || Boolean(order.razorpayOrderId || order.razorpayPaymentId);
+  const paymentType = order.paymentType || order.PaymentType || (isRazorpayMode ? 'ONLINE_RAZORPAY' : (isOnline ? 'Cashfree Online' : 'Counter Cash'));
+  const paymentMode = order.paymentMode || order.PaymentMode || order.paymentMethod || order.PaymentMethod || (isRazorpayMode ? 'RAZORPAY' : (isOnline ? 'ONLINE' : 'CASH'));
+  const isHomeDelivery = Boolean(order.isHomeDelivery || order.IsHomeDelivery || Number(order.orderTypeId) === 3 || String(order.deliveryType || '').toLowerCase().includes('delivery'));
+  const deliveryType = order.deliveryType || (isHomeDelivery ? 'Delivery' : (order.tableId ? 'Dine-In' : 'Takeaway / Counter'));
   let orderStatus = order.orderStatus || order.status || (isOnline ? 'Confirmed' : 'Placed');
 
   // If order status is missing, default based on payment
@@ -2464,14 +2704,33 @@ export const normalizeOrder = (
     sgstPercentage:
       hasOrderGst ? orderSgstRate : 0,
 
+    isHomeDelivery,
+    deliveryFee,
+    deliveryGstAmount,
+    platformFee,
+    deliveryAddress: order.deliveryAddress || order.DeliveryAddress || null,
+    fssaiNumber: order.fssaiNumber || order.FssaiNumber || order.fssaiLicenseNumber || null,
+    stateCode: order.stateCode || order.StateCode || null,
+
     paymentOrderId:
       order.paymentOrderId ||
+      order.razorpayOrderId ||
       order.cashfreeOrderId ||
       null,
 
     cashfreeOrderId:
       order.cashfreeOrderId ||
-      order.paymentOrderId ||
+      (!isRazorpayMode ? order.paymentOrderId : null) ||
+      null,
+
+    razorpayOrderId:
+      order.razorpayOrderId ||
+      (isRazorpayMode ? order.paymentOrderId : null) ||
+      null,
+
+    razorpayPaymentId:
+      order.razorpayPaymentId ||
+      order.transactionId ||
       null,
 
     createdDateUtc:
@@ -2630,11 +2889,19 @@ export const placeOrder =
         ) / 100
       : 0;
 
+    const orderDeliveryFee = Number(orderPayload.deliveryFee ?? 0);
+    const orderDeliveryGst = Number(orderPayload.deliveryGstAmount ?? 0);
+    const orderPlatformFee = Number(orderPayload.platformFee ?? 0);
+    const orderDiscount = Number(orderPayload.discountAmount ?? 0);
+
     const grandTotal =
       Math.round(
-        (itemsTotal +
+        (Math.max(0, itemsTotal - orderDiscount) +
           cgst +
-          sgst) *
+          sgst +
+          orderDeliveryFee +
+          orderDeliveryGst +
+          orderPlatformFee) *
           100
       ) / 100;
 
@@ -2704,39 +2971,50 @@ export const placeOrder =
       deliveryType:
         orderPayload.deliveryType ||
         (orderPayload.tableId ? 'Dine-In' : 'Takeaway / Counter'),
-      paymentMode:
-        orderPayload.paymentMode === 'DIRECT_UPI'
-          ? 'DIRECT_UPI'
-          : (orderPayload.paymentStatus === 'Paid' || orderPayload.cashfreeOrderId || orderPayload.paymentOrderId)
-          ? 'CASHFREE'
-          : (orderPayload.paymentMode || (orderPayload.paymentMethod === 'cashfree' ? 'CASHFREE' : 'CASH')),
+      paymentMode: (() => {
+        const rawMode = String(orderPayload.paymentMode || '').toUpperCase();
+        const rawMethod = String(orderPayload.paymentMethod || '').toUpperCase();
+        if (rawMode === 'DIRECT_UPI' || rawMethod === 'DIRECT_UPI') return 'DIRECT_UPI';
+        if (rawMode === 'RAZORPAY' || rawMethod === 'RAZORPAY' || orderPayload.razorpayOrderId || orderPayload.razorpayPaymentId) return 'RAZORPAY';
+        if (rawMode === 'CASHFREE' || rawMethod === 'CASHFREE' || orderPayload.cashfreeOrderId) return 'CASHFREE';
+        if (orderPayload.paymentStatus === 'Paid' || orderPayload.paymentOrderId) return orderPayload.paymentMode || 'ONLINE';
+        return orderPayload.paymentMode || 'CASH';
+      })(),
       requiresCashierConfirmation: orderPayload.requiresCashierConfirmation !== undefined ? Boolean(orderPayload.requiresCashierConfirmation) : true,
-      paymentType:
-        orderPayload.paymentType ||
-        (orderPayload.paymentMode === 'DIRECT_UPI'
-          ? 'DIRECT_UPI'
-          : ((orderPayload.paymentMode === 'ONLINE' || orderPayload.paymentMode === 'CASHFREE' || orderPayload.paymentMethod === 'cashfree')
-            ? 'ONLINE_CASHFREE'
-            : 'COUNTER_CASH')),
+      paymentType: (() => {
+        if (orderPayload.paymentType) return orderPayload.paymentType;
+        const rawMode = String(orderPayload.paymentMode || '').toUpperCase();
+        const rawMethod = String(orderPayload.paymentMethod || '').toUpperCase();
+        if (rawMode === 'DIRECT_UPI' || rawMethod === 'DIRECT_UPI') return 'DIRECT_UPI';
+        if (rawMode === 'RAZORPAY' || rawMethod === 'RAZORPAY' || orderPayload.razorpayOrderId || orderPayload.razorpayPaymentId) return 'ONLINE_RAZORPAY';
+        if (rawMode === 'ONLINE' || rawMode === 'CASHFREE' || rawMethod === 'CASHFREE' || orderPayload.cashfreeOrderId) return 'ONLINE_CASHFREE';
+        return 'COUNTER_CASH';
+      })(),
       remarks: orderPayload.remarks || '',
       source: orderPayload.source || 'QR_DINEIN',
       paymentStatus:
         orderPayload.paymentStatus ||
-        (orderPayload.paymentMethod === 'cashfree' ? 'Paid' : 'Pending'),
+        ((orderPayload.paymentMethod === 'cashfree' || orderPayload.paymentMethod === 'razorpay') ? 'Paid' : 'Pending'),
       orderStatus:
         orderPayload.orderStatus ||
-        (orderPayload.paymentMethod === 'cashfree' ? 'Confirmed' : 'Placed'),
+        ((orderPayload.paymentMethod === 'cashfree' || orderPayload.paymentMethod === 'razorpay') ? 'Confirmed' : 'Placed'),
       paymentOrderId:
         orderPayload.paymentOrderId ||
+        orderPayload.razorpayOrderId ||
         orderPayload.cashfreeOrderId ||
         orderPayload.upiUtr ||
         null,
       cashfreeOrderId:
         orderPayload.cashfreeOrderId ||
-        orderPayload.paymentOrderId ||
+        (String(orderPayload.paymentMode || '').toUpperCase() === 'RAZORPAY' ? null : orderPayload.paymentOrderId) ||
         null,
+      razorpayOrderId:
+        orderPayload.razorpayOrderId ||
+        (String(orderPayload.paymentMode || '').toUpperCase() === 'RAZORPAY' ? orderPayload.paymentOrderId : null) ||
+        null,
+      razorpayPaymentId: orderPayload.razorpayPaymentId || null,
       upiUtr: orderPayload.upiUtr || null,
-      transactionId: orderPayload.upiUtr || orderPayload.transactionId || null,
+      transactionId: orderPayload.razorpayPaymentId || orderPayload.upiUtr || orderPayload.transactionId || null,
       gstNumber: cleanDirectGst,
       cgstPercentage: hasDirectGst ? directCgstRate : 0,
       sgstPercentage: hasDirectGst ? directSgstRate : 0,
@@ -2745,8 +3023,24 @@ export const placeOrder =
       itemTotal: orderPayload.itemTotal !== undefined ? Number(orderPayload.itemTotal) : itemsTotal,
       cgstAmount: hasDirectGst ? (orderPayload.cgstAmount !== undefined ? Number(orderPayload.cgstAmount) : cgst) : 0,
       sgstAmount: hasDirectGst ? (orderPayload.sgstAmount !== undefined ? Number(orderPayload.sgstAmount) : sgst) : 0,
-      taxAmount: hasDirectGst ? (orderPayload.taxAmount !== undefined ? Number(orderPayload.taxAmount) : (cgst + sgst)) : 0,
+      taxAmount: hasDirectGst ? (orderPayload.taxAmount !== undefined ? Number(orderPayload.taxAmount) : (cgst + sgst + orderDeliveryGst)) : 0,
       totalAmount: orderPayload.totalAmount !== undefined ? Number(orderPayload.totalAmount) : grandTotal,
+      isHomeDelivery: Boolean(orderPayload.isHomeDelivery || Number(orderPayload.orderTypeId) === 3),
+      deliveryAddressId: orderPayload.deliveryAddressId ? Number(orderPayload.deliveryAddressId) : null,
+      deliveryAddress: orderPayload.deliveryAddress || null,
+      deliveryHouseFlatFloor: orderPayload.deliveryHouseFlatFloor || null,
+      deliveryLandmark: orderPayload.deliveryLandmark || null,
+      deliveryLatitude:
+        orderPayload.deliveryLatitude !== undefined && orderPayload.deliveryLatitude !== null
+          ? Number(orderPayload.deliveryLatitude)
+          : null,
+      deliveryLongitude:
+        orderPayload.deliveryLongitude !== undefined && orderPayload.deliveryLongitude !== null
+          ? Number(orderPayload.deliveryLongitude)
+          : null,
+      deliveryFee: orderDeliveryFee,
+      deliveryGstAmount: orderDeliveryGst,
+      platformFee: orderPlatformFee,
       returnUrl,
       items: backendItems,
     };
@@ -2911,13 +3205,21 @@ export const placeOrder =
         sgstPercentage:
           hasDirectGst ? directSgstRate : 0,
 
+        isHomeDelivery: Boolean(orderPayload.isHomeDelivery || Number(orderPayload.orderTypeId) === 3),
+        deliveryFee: orderDeliveryFee,
+        deliveryGstAmount: orderDeliveryGst,
+        platformFee: orderPlatformFee,
+        deliveryAddress: orderPayload.deliveryAddress || null,
+        razorpayOrderId: orderPayload.razorpayOrderId || null,
+        razorpayPaymentId: orderPayload.razorpayPaymentId || null,
         cashfreeOrderId:
           orderPayload.cashfreeOrderId ||
-          orderPayload.paymentOrderId ||
+          (String(orderPayload.paymentMode || '').toUpperCase() === 'RAZORPAY' ? null : orderPayload.paymentOrderId) ||
           null,
 
         paymentOrderId:
           orderPayload.paymentOrderId ||
+          orderPayload.razorpayOrderId ||
           orderPayload.cashfreeOrderId ||
           null,
 
@@ -3863,6 +4165,77 @@ export const getCashfreePaymentStatus =
     return res.data;
   };
 
+/* =========================================================
+   RAZORPAY PAYMENT GATEWAY
+========================================================= */
+
+let cachedGatewayConfig = null;
+let cachedGatewayAt = 0;
+
+export const getPaymentGatewayConfig = async (forceRefresh = false) => {
+  if (!forceRefresh && cachedGatewayConfig && Date.now() - cachedGatewayAt < 60000) {
+    return cachedGatewayConfig;
+  }
+  try {
+    const res = await api.get('/api/payment/find-paymentgateway');
+    const data = res?.data?.data || res?.data || {};
+    cachedGatewayConfig = {
+      paymentGateway: data.paymentGateway || data.gateway || (data.isRazorpay ? 'Razorpay' : 'Cashfree'),
+      gateway: data.gateway || data.paymentGateway || (data.isRazorpay ? 'Razorpay' : 'Cashfree'),
+      isRazorpay: Boolean(data.isRazorpay ?? String(data.paymentGateway || data.gateway || '').toLowerCase() === 'razorpay'),
+      isCashfree: Boolean(data.isCashfree ?? String(data.paymentGateway || data.gateway || '').toLowerCase() !== 'razorpay'),
+    };
+    cachedGatewayAt = Date.now();
+    return cachedGatewayConfig;
+  } catch (e) {
+    return cachedGatewayConfig || { paymentGateway: 'Cashfree', gateway: 'Cashfree', isRazorpay: false, isCashfree: true };
+  }
+};
+
+export const initiateRazorpayCheckout = async (checkoutData) => {
+  const restaurantId = Number(checkoutData.restaurantId) || 1;
+  const amount = Number(checkoutData.amount || 0);
+  const customerName = checkoutData.customerName || 'Customer';
+  const customerPhone = checkoutData.customerPhone || '9999999999';
+  const customerEmail = checkoutData.customerEmail || `${customerPhone}@menza.customer`;
+  const tableNumber = checkoutData.tableNumber ? String(checkoutData.tableNumber) : '';
+  const orderNotes = checkoutData.orderNotes || '';
+  const returnUrl = checkoutData.returnUrl || null;
+
+  const res = await api.post('/api/razorpay/initiate-checkout', {
+    restaurantId,
+    amount,
+    customerName,
+    customerPhone,
+    customerEmail,
+    tableNumber,
+    orderNotes,
+    returnUrl,
+  });
+
+  return res.data;
+};
+
+export const verifyRazorpayPayment = async ({
+  orderId,
+  restaurantId = null,
+  razorpayPaymentId = '',
+  razorpaySignature = '',
+}) => {
+  const res = await api.post('/api/razorpay/verify', {
+    orderId,
+    restaurantId: restaurantId ? Number(restaurantId) : null,
+    razorpayPaymentId,
+    razorpaySignature,
+  });
+  return res.data;
+};
+
+export const getRazorpayPaymentStatus = async (orderId) => {
+  const res = await api.get(`/api/razorpay/status/${encodeURIComponent(orderId)}`);
+  return res.data;
+};
+
 
 /* =========================================================
    PUBLIC STORE CONFIRM PAYMENT (PublicDineInController)
@@ -4373,6 +4746,20 @@ export const getStoreOperatingStatus = async (restaurantId = 1) => {
           : data.isLiveKitchenStatusEnabled !== undefined
           ? Boolean(data.isLiveKitchenStatusEnabled)
           : data.status !== 'PAUSED',
+      isRazorpayEnabled: Boolean(
+        data.isRazorpayEnabled ??
+          data.IsRazorpayEnabled ??
+          data.razorpay ??
+          data.Razorpay ??
+          false
+      ),
+      razorpay: Boolean(
+        data.isRazorpayEnabled ??
+          data.IsRazorpayEnabled ??
+          data.razorpay ??
+          data.Razorpay ??
+          false
+      ),
     } : null;
   } catch (e) {
     console.warn('Failed to fetch store operating status:', e?.message);
@@ -4488,6 +4875,7 @@ export const getDecreasingPreparationCountdown = (order, catalog = null, storeOp
   const isOnline =
     rawPaymentMode.includes('ONLINE') ||
     rawPaymentMode.includes('CASHFREE') ||
+    rawPaymentMode.includes('RAZORPAY') ||
     rawPaymentMode.includes('UPI') ||
     order.isOnline === true;
   const isSettled =
@@ -4715,6 +5103,218 @@ export const getDecreasingPreparationCountdown = (order, catalog = null, storeOp
     isTakeaway,
     statusMessage: 'Dishes are being freshly prepared in the kitchen.',
   };
+};
+
+/* =========================================================
+   DISCOVERY, LOCATION & DELIVERY APIs
+========================================================= */
+
+const RECENT_RESTAURANTS_KEY = 'menza_recent_restaurants';
+const SAVED_ADDRESSES_KEY = 'menza_saved_delivery_addresses';
+const LAST_LOCATION_KEY = 'menza_last_customer_location';
+
+export const getLastCustomerLocation = () => {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(LAST_LOCATION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.lat === 'number' && typeof parsed.lng === 'number') {
+      return parsed;
+    }
+  } catch {}
+  return null;
+};
+
+export const saveLastCustomerLocation = (loc) => {
+  if (typeof localStorage === 'undefined' || !loc) return;
+  try {
+    localStorage.setItem(LAST_LOCATION_KEY, JSON.stringify({
+      lat: Number(loc.lat),
+      lng: Number(loc.lng),
+      label: loc.label || loc.city || 'Current Location',
+      city: loc.city || '',
+      updatedAt: Date.now(),
+    }));
+  } catch {}
+};
+
+export const getRecentRestaurants = () => {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(RECENT_RESTAURANTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveRecentRestaurant = (catalogOrRest) => {
+  if (typeof localStorage === 'undefined' || !catalogOrRest) return;
+  try {
+    const encId = catalogOrRest.encryptedRestaurantId || catalogOrRest.encRestId || '';
+    const restId = Number(catalogOrRest.restaurantId || catalogOrRest.id || 0);
+    if (!encId && !restId) return;
+
+    const entry = {
+      restaurantId: restId,
+      encryptedRestaurantId: encId || encryptRestaurantId(restId),
+      restaurantName: catalogOrRest.restaurantName || catalogOrRest.name || 'Restaurant',
+      city: catalogOrRest.city || '',
+      address: catalogOrRest.address || '',
+      logoUrl: catalogOrRest.logoUrl || catalogOrRest.imageUrl || catalogOrRest.bannerImageUrl || null,
+      bannerImageUrl: catalogOrRest.bannerImageUrl || catalogOrRest.imageUrl || null,
+      dietaryType: catalogOrRest.dietaryType || 'VegAndNonVeg',
+      isDeliveryEnabled: Boolean(catalogOrRest.isDeliveryEnabled),
+      visitedAt: Date.now(),
+    };
+
+    const existing = getRecentRestaurants().filter(
+      (r) =>
+        (encId && r.encryptedRestaurantId !== encId) &&
+        (!restId || Number(r.restaurantId) !== restId)
+    );
+    const updated = [entry, ...existing].slice(0, 10);
+    localStorage.setItem(RECENT_RESTAURANTS_KEY, JSON.stringify(updated));
+  } catch {}
+};
+
+export const getNearbyRestaurants = async ({
+  lat = null,
+  lng = null,
+  radiusKm = 10,
+  dietary = 'all',
+  mode = 'all',
+  q = '',
+  city = '',
+  page = 1,
+  pageSize = 20,
+} = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (lat !== null && lat !== undefined && !isNaN(Number(lat))) {
+      params.set('lat', String(Number(lat)));
+    }
+    if (lng !== null && lng !== undefined && !isNaN(Number(lng))) {
+      params.set('lng', String(Number(lng)));
+    }
+    params.set('radiusKm', String(radiusKm || 10));
+    if (dietary && dietary !== 'all') params.set('dietary', dietary);
+    if (mode && mode !== 'all') params.set('mode', mode);
+    if (q && q.trim()) params.set('q', q.trim());
+    if (city && city.trim()) params.set('city', city.trim());
+    params.set('page', String(page || 1));
+    params.set('pageSize', String(pageSize || 20));
+
+    const res = await api.get(`/api/public/store/nearby?${params.toString()}`);
+    const payload = res?.data?.data || res?.data;
+    if (payload && Array.isArray(payload.items)) {
+      return payload;
+    }
+    if (Array.isArray(payload)) {
+      return { page: 1, pageSize: payload.length, totalCount: payload.length, items: payload };
+    }
+  } catch (e) {
+    logger.warn('DISCOVERY', 'NEARBY_FETCH_FAILED', 'Failed to fetch nearby restaurants', { error: e?.message });
+  }
+  return { page: 1, pageSize: 20, totalCount: 0, items: [] };
+};
+
+export const getCustomerDeliveryAddresses = async (mobileNumber = '') => {
+  const deviceId = getDeviceId();
+  const cleanMobile = sanitizeIndianMobile(mobileNumber || '');
+  try {
+    const params = new URLSearchParams();
+    if (cleanMobile) params.set('mobile', cleanMobile);
+    if (deviceId) params.set('deviceId', deviceId);
+
+    const res = await api.get(`/api/public/store/addresses?${params.toString()}`);
+    const data = res?.data?.data || res?.data;
+    if (Array.isArray(data)) {
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(SAVED_ADDRESSES_KEY, JSON.stringify(data));
+        } catch {}
+      }
+      return data;
+    }
+  } catch (e) {
+    logger.warn('DELIVERY', 'ADDRESSES_FETCH_FAILED', 'Failed to load customer addresses from API', { error: e?.message });
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const cached = JSON.parse(localStorage.getItem(SAVED_ADDRESSES_KEY) || '[]');
+      if (Array.isArray(cached)) return cached;
+    } catch {}
+  }
+  return [];
+};
+
+export const saveCustomerDeliveryAddress = async (addressPayload) => {
+  const deviceId = getDeviceId();
+  const body = {
+    ...addressPayload,
+    deviceId: addressPayload?.deviceId || deviceId,
+    mobileNumber: addressPayload?.mobileNumber
+      ? sanitizeIndianMobile(addressPayload.mobileNumber)
+      : undefined,
+    latitude: Number(addressPayload?.latitude ?? 0),
+    longitude: Number(addressPayload?.longitude ?? 0),
+  };
+
+  const res = await api.post('/api/public/store/addresses', body);
+  const saved = res?.data?.data || res?.data;
+  if (typeof localStorage !== 'undefined' && saved) {
+    try {
+      const existing = JSON.parse(localStorage.getItem(SAVED_ADDRESSES_KEY) || '[]');
+      const filtered = Array.isArray(existing)
+        ? existing.filter((a) => Number(a.id) !== Number(saved.id))
+        : [];
+      localStorage.setItem(SAVED_ADDRESSES_KEY, JSON.stringify([saved, ...filtered].slice(0, 15)));
+    } catch {}
+  }
+  return saved;
+};
+
+export const deleteCustomerDeliveryAddress = async (addressId, mobileNumber = '') => {
+  const deviceId = getDeviceId();
+  const cleanMobile = sanitizeIndianMobile(mobileNumber || '');
+  const params = new URLSearchParams();
+  if (cleanMobile) params.set('mobile', cleanMobile);
+  if (deviceId) params.set('deviceId', deviceId);
+
+  const res = await api.delete(`/api/public/store/addresses/${addressId}?${params.toString()}`);
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const existing = JSON.parse(localStorage.getItem(SAVED_ADDRESSES_KEY) || '[]');
+      if (Array.isArray(existing)) {
+        localStorage.setItem(
+          SAVED_ADDRESSES_KEY,
+          JSON.stringify(existing.filter((a) => Number(a.id) !== Number(addressId)))
+        );
+      }
+    } catch {}
+  }
+  return res?.data?.data || res?.data || { success: true };
+};
+
+export const checkDeliveryServiceability = async ({
+  encryptedRestaurantId = '',
+  restaurantId = null,
+  customerLat,
+  customerLng,
+  orderSubTotal = 0,
+}) => {
+  const res = await api.post('/api/public/store/delivery/check-serviceability', {
+    encryptedRestaurantId: encryptedRestaurantId || null,
+    restaurantId: restaurantId ? Number(restaurantId) : null,
+    customerLat: Number(customerLat),
+    customerLng: Number(customerLng),
+    orderSubTotal: Number(orderSubTotal || 0),
+  });
+  return res?.data?.data || res?.data;
 };
 
 /* =========================================================

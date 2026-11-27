@@ -70,7 +70,16 @@ export interface Order {
   paymentType?: string;
   paymentOrderId?: string;
   cashfreeOrderId?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
   upiUtr?: string;
+  isHomeDelivery?: boolean;
+  deliveryAddress?: string | null;
+  deliveryFee?: number;
+  deliveryGstAmount?: number;
+  platformFee?: number;
+  fssaiNumber?: string | null;
+  stateCode?: string | null;
   orderStatus?: string;
   status?: string;
   kitchenStatus?: string;
@@ -144,13 +153,95 @@ export interface Catalog {
   hasGst?: boolean;
   logoUrl?: string;
   imageUrl?: string;
+  bannerImageUrl?: string;
   isKitchenActive?: boolean;
+  isDeliveryEnabled?: boolean;
+  isDineInEnabled?: boolean;
+  isSelfPickupEnabled?: boolean;
+  deliveryRadiusKm?: number;
+  deliveryFee?: number;
+  freeDeliveryAbove?: number;
+  minDeliveryOrderAmount?: number;
+  isPaymentRequiredForDelivery?: boolean;
+  allowCashOnDelivery?: boolean;
+  isRazorpayEnabled?: boolean;
+  razorpay?: boolean;
+  razorpayKeyId?: string | null;
+  fssaiNumber?: string | null;
+  stateCode?: string | null;
+  dietaryType?: string;
+  cuisines?: string[];
+  latitude?: number | null;
+  longitude?: number | null;
+  avgPrepTimeMinutes?: number;
+  ratingAvg?: number;
+  ratingCount?: number;
   categories?: Category[];
   items?: MenuItem[];
   bankerUpiId?: string;
   bankerAccountHolderName?: string;
   upiId?: string;
   [key: string]: any;
+}
+
+export interface NearbyRestaurantCard {
+  restaurantId: number;
+  encryptedRestaurantId: string;
+  restaurantName: string;
+  address?: string | null;
+  city?: string | null;
+  bannerImageUrl?: string | null;
+  logoUrl?: string | null;
+  dietaryType?: string | null;
+  cuisines?: string[];
+  isOpen?: boolean;
+  operatingStatus?: string;
+  isDeliveryEnabled?: boolean;
+  isDineInEnabled?: boolean;
+  isSelfPickupEnabled?: boolean;
+  distanceKm?: number | null;
+  estimatedRoadDistanceKm?: number | null;
+  isWithinDeliveryRadius?: boolean;
+  deliveryRadiusKm?: number;
+  deliveryFee?: number;
+  freeDeliveryAbove?: number | null;
+  minDeliveryOrderAmount?: number;
+  avgPrepTimeMinutes?: number;
+  ratingAvg?: number;
+  ratingCount?: number;
+}
+
+export interface CustomerDeliveryAddress {
+  id?: number;
+  userId?: number | null;
+  deviceId?: string | null;
+  mobileNumber?: string | null;
+  label: string;
+  recipientName?: string | null;
+  fullAddress: string;
+  houseFlatFloor?: string | null;
+  landmark?: string | null;
+  city?: string | null;
+  pincode?: string | null;
+  latitude: number;
+  longitude: number;
+  isDefault?: boolean;
+}
+
+export interface DeliveryServiceabilityResponse {
+  isServiceable: boolean;
+  isDeliveryEnabled: boolean;
+  isPaymentRequiredForDelivery: boolean;
+  allowCashOnDelivery: boolean;
+  straightDistanceKm: number;
+  estimatedRoadDistanceKm: number;
+  maxRadiusKm: number;
+  deliveryFee: number;
+  deliveryGstAmount: number;
+  platformFee: number;
+  minDeliveryOrderAmount: number;
+  minOrderShortfall: number;
+  reason?: string | null;
 }
 
 export interface StoreOperatingStatus {
@@ -162,6 +253,9 @@ export interface StoreOperatingStatus {
   requiresCashierConfirmation?: boolean;
   isOnlinePaymentEnabled?: boolean;
   isPayAtCounterEnabled?: boolean;
+  isRazorpayEnabled?: boolean;
+  razorpay?: boolean;
+  paymentGateway?: string;
   [key: string]: any;
 }
 
