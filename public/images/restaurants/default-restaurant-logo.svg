@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFF5F0" />
+      <stop offset="100%" stop-color="#FFE3D6" />
+    </linearGradient>
+    <linearGradient id="crestGrad" x1="28" y1="24" x2="92" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E84A17" />
+      <stop offset="100%" stop-color="#B82D01" />
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="26" fill="url(#bgGrad)" />
+  <circle cx="60" cy="60" r="38" fill="url(#crestGrad)" />
+  <circle cx="60" cy="60" r="32" stroke="#FFF4EE" stroke-opacity="0.35" stroke-width="1.5" />
+  <!-- Cloche / Dome -->
+  <path d="M38 66C38 53.85 47.85 44 60 44C72.15 44 82 53.85 82 66H38Z" fill="#FFFFFF" />
+  <!-- Cloche handle -->
+  <circle cx="60" cy="40.5" r="3.2" fill="#FFFFFF" />
+  <!-- Serving platter base -->
+  <rect x="33" y="69" width="54" height="4.5" rx="2.25" fill="#FFFFFF" />
+  <!-- Steam / garnish arcs -->
+  <path d="M51 35C51 32.5 53 31 53 28.5" stroke="#FFE3D6" stroke-width="2" stroke-linecap="round" />
+  <path d="M60 33.5C60 31 62 29.5 62 27" stroke="#FFE3D6" stroke-width="2" stroke-linecap="round" />
+  <path d="M69 35C69 32.5 71 31 71 28.5" stroke="#FFE3D6" stroke-width="2" stroke-linecap="round" />
+</svg>

@@ -7,7 +7,7 @@ import {
   MapPin,
   Bell,
 } from 'lucide-react';
-import { getOriginalImageUrl } from '../services/api';
+import { getOriginalImageUrl, IMAGE_NOT_AVAILABLE } from '../services/api';
 import { Order, Table, StoreOperatingStatus } from '../types';
 
 interface SkeletonBoxProps {
@@ -61,7 +61,16 @@ interface StoreLogoImageProps {
 function StoreLogoImage({ uri, sources = [], size = 42, style, onError }: StoreLogoImageProps) {
   const candidateList = React.useMemo(() => {
     const raw = Array.isArray(sources) && sources.length > 0 ? sources : [uri];
-    return raw.filter((u): u is string => Boolean(u && typeof u === 'string' && u.trim().length > 0));
+    return raw.filter((u): u is string => {
+      if (!u || typeof u !== 'string') return false;
+      const trimmed = u.trim();
+      return (
+        trimmed.length > 0 &&
+        trimmed.toLowerCase() !== 'null' &&
+        trimmed.toLowerCase() !== 'undefined' &&
+        trimmed !== IMAGE_NOT_AVAILABLE
+      );
+    });
   }, [uri, sources]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -74,6 +83,21 @@ function StoreLogoImage({ uri, sources = [], size = 42, style, onError }: StoreL
   const activeUri = candidateList[currentIndex];
 
   if (!activeUri || currentIndex >= candidateList.length) {
+    if (typeof window !== 'undefined') {
+      return (
+        <img
+          src="/images/restaurants/default-restaurant-logo.svg"
+          alt="Restaurant Logo"
+          style={{
+            width: size,
+            height: size,
+            objectFit: 'cover',
+            borderRadius: Math.round(size * 0.26),
+            display: 'block',
+          }}
+        />
+      );
+    }
     return <Store size={Math.round(size * 0.52)} color="#FFFFFF" />;
   }
 

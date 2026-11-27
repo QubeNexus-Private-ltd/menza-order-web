@@ -5139,6 +5139,13 @@ export const saveLastCustomerLocation = (loc) => {
   } catch {}
 };
 
+export const clearLastCustomerLocation = () => {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(LAST_LOCATION_KEY);
+  } catch {}
+};
+
 export const getRecentRestaurants = () => {
   if (typeof localStorage === 'undefined') return [];
   try {
