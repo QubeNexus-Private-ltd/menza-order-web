@@ -873,9 +873,9 @@ export default function LandingPage({
               <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
                 <ShieldCheck className="w-4 h-4" />
               </div>
-              <h4 className="text-xs sm:text-sm font-extrabold text-[#18181B]">Instant Direct UPI</h4>
+              <h4 className="text-xs sm:text-sm font-extrabold text-[#18181B]">Secure Online Checkout</h4>
               <p className="text-[11px] sm:text-xs text-slate-500 leading-snug">
-                Fast, verified QR payments directly to the restaurant.
+                Fast, verified UPI, card, and NetBanking payments via Razorpay &amp; Cashfree.
               </p>
             </div>
 

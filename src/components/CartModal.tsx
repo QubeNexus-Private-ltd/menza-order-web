@@ -25,18 +25,11 @@ import {
   ImageOff,
   CheckCircle2,
   KeyRound,
-  Smartphone,
   RefreshCw,
   Send,
   Check,
   Utensils,
   Clock,
-  QrCode,
-  Copy,
-  ExternalLink,
-  HelpCircle,
-  Radio,
-  Zap,
   Sparkles,
   MapPin,
   LocateFixed,
@@ -44,19 +37,13 @@ import {
   Home,
   Briefcase,
 } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
 import * as api from '../services/api';
-import {
-  joinOrderGroup,
-  startSignalRConnection,
-  onPaymentVerified,
-  onOrderStatusChanged,
-  playNotificationChime,
-} from '../services/signalr';
+import { joinOrderGroup } from '../services/signalr';
 import { Catalog, Table, StoreOperatingStatus, OrderItem } from '../types';
 import { ENV } from '../config/env';
 import { logger } from '../services/logger';
 import { openRazorpayCheckout } from '../services/razorpayPayment';
+import DeliveryLocationMap from './DeliveryLocationMap';
 
 interface ItemImageWithFallbackProps {
   uri?: string;
@@ -332,49 +319,6 @@ export default function CartModal({
 
   const isPostpaidTable = Boolean(activeTable && String(activeTable.dineInPaymentMode || '').toUpperCase() === 'POSTPAID');
   const isPrepaidTable = !isPostpaidTable && Boolean(isTableOrder || isDynamicQr);
-  
-  // Dynamically fetched UPI configuration directly from Restaurant Owner Config API
-  const [dynamicUpiConfig, setDynamicUpiConfig] = useState<{ upiId?: string; bankerAccountHolderName?: string; contactNumber?: string } | null>(null);
-
-  useEffect(() => {
-    if (visible) {
-      const encId = catalog?.encryptedRestaurantId || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('r') : null);
-      const restId = catalog?.restaurantId;
-      if (encId || restId) {
-        api.getRestaurantUpiConfig(encId, restId).then((config) => {
-          if (config && (config.bankerUpiId || config.upiId)) {
-            setDynamicUpiConfig({
-              upiId: (config.bankerUpiId || config.upiId).trim(),
-              bankerAccountHolderName: config.bankerAccountHolderName?.trim(),
-              contactNumber: config.contactNumber?.trim(),
-            });
-          }
-        }).catch(() => {});
-      }
-    }
-  }, [visible, catalog?.encryptedRestaurantId, catalog?.restaurantId]);
-
-  // Available restaurant owner UPI ID fetched dynamically from the API (dynamicUpiConfig takes highest precedence)
-  const availableUpiId =
-    dynamicUpiConfig?.upiId ||
-    catalog?.bankerUpiId ||
-    catalog?.upiId ||
-    activeTable?.bankerUpiId ||
-    activeTable?.upiId ||
-    '';
-
-  const availablePayeeName =
-    dynamicUpiConfig?.bankerAccountHolderName ||
-    catalog?.bankerAccountHolderName ||
-    activeTable?.bankerAccountHolderName ||
-    catalog?.restaurantName ||
-    'Restaurant';
-
-  const availableContactNumber =
-    dynamicUpiConfig?.contactNumber ||
-    catalog?.contactNumber ||
-    activeTable?.contactNumber ||
-    '';
 
   const [gatewayConfig, setGatewayConfig] = useState<{ paymentGateway?: string; isRazorpay?: boolean; isCashfree?: boolean } | null>(null);
 
@@ -395,12 +339,7 @@ export default function CartModal({
   );
   const activeOnlineGateway: 'razorpay' | 'cashfree' = isRazorpayActive ? 'razorpay' : 'cashfree';
 
-  const isDirectUpiAvailable = Boolean(availableUpiId && availableUpiId.trim().length > 0);
   const isPayAtCounterOnly = false;
-  const isOnlinePaymentVisible = Boolean(
-    storeOperatingStatus?.isOnlinePaymentEnabled ||
-    isRazorpayActive
-  );
 
   const [guestName, setGuestName] = useState<string>('');
   const [mobileNumber, setMobileNumber] = useState<string>('');
@@ -412,26 +351,7 @@ export default function CartModal({
     if (catalog?.isDeliveryEnabled) return 3;
     return 1;
   });
-  const [paymentMethod, setPaymentMethod] = useState<string>(() => isDirectUpiAvailable ? 'direct_upi' : 'payatcounter');
-
-  /* Direct NPCI UPI Intent State */
-  const [upiModalVisible, setUpiModalVisible] = useState<boolean>(false);
-  const [pendingUpiOrder, setPendingUpiOrder] = useState<any>(null);
-  const [enteredUtr, setEnteredUtr] = useState<string>('');
-  const [utrError, setUtrError] = useState<string>('');
-  const [showQrCode, setShowQrCode] = useState<boolean>(true);
-  const [copiedUpiId, setCopiedUpiId] = useState<boolean>(false);
-  const [copiedAmount, setCopiedAmount] = useState<boolean>(false);
-  const [copiedPhone, setCopiedPhone] = useState<boolean>(false);
-  const [upiPaymentTab, setUpiPaymentTab] = useState<'qr' | 'upi_id'>('qr');
-  const [showUtrHelp, setShowUtrHelp] = useState<boolean>(false);
-  const [confirmingDirectUpi, setConfirmingDirectUpi] = useState<boolean>(false);
-
-  /* Android Soundbox & Notification Relay Bridge State */
-  const [soundboxConfirmed, setSoundboxConfirmed] = useState<boolean>(false);
-  const [autoConfirmedMessage, setAutoConfirmedMessage] = useState<string>('');
-  const [showManualUtrFallback, setShowManualUtrFallback] = useState<boolean>(false);
-  const [waitingElapsedSeconds, setWaitingElapsedSeconds] = useState<number>(0);
+  const [paymentMethod, setPaymentMethod] = useState<string>('payatcounter');
 
   const handleMobileNumberChange = (val: string) => {
     const clean = api.sanitizeIndianMobile(val);
@@ -451,152 +371,6 @@ export default function CartModal({
       setOrderTypeId(1);
     }
   }, [isTableOrder, isDynamicQr, activeTable, visible]);
-
-  useEffect(() => {
-    if (isDeliveryOrder) {
-      setPaymentMethod(activeOnlineGateway);
-    } else if (isDirectUpiAvailable) {
-      setPaymentMethod((prev) =>
-        prev === 'razorpay' || prev === 'cashfree' ? (isOnlinePaymentVisible ? activeOnlineGateway : 'direct_upi') : 'direct_upi'
-      );
-    } else {
-      setPaymentMethod((prev) =>
-        prev === 'razorpay' || prev === 'cashfree' ? (isOnlinePaymentVisible ? activeOnlineGateway : 'payatcounter') : 'payatcounter'
-      );
-    }
-  }, [visible, isDirectUpiAvailable, isOnlinePaymentVisible, activeOnlineGateway]);
-
-  // Auto-detect 12-digit UTR from clipboard when customer returns to browser tab
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible' && upiModalVisible && !enteredUtr) {
-        try {
-          if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
-            const clipboardText = await navigator.clipboard.readText();
-            if (clipboardText) {
-              const utrMatch = clipboardText.trim().match(/\b\d{12}\b/);
-              if (utrMatch && utrMatch[0]) {
-                setEnteredUtr(utrMatch[0]);
-                logger.payment('UPI_CLIPBOARD_UTR_DETECTED', `Auto-detected 12-digit UTR from clipboard: ${utrMatch[0]}`);
-              }
-            }
-          }
-        } catch {
-          // Clipboard read permission might be denied; silently ignored
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [upiModalVisible, enteredUtr]);
-
-  // Solution 4: Android Soundbox & Notification Relay Bridge (0% Fee Direct UPI)
-  // Automatically detects incoming payment when counter Soundbox speaks (Zero customer taps needed!)
-  useEffect(() => {
-    if (!upiModalVisible || !pendingUpiOrder?.orderId) {
-      setSoundboxConfirmed(false);
-      setAutoConfirmedMessage('');
-      return;
-    }
-
-    let isMounted = true;
-    const targetOrderId = pendingUpiOrder.orderId;
-
-    try {
-      startSignalRConnection();
-      joinOrderGroup(targetOrderId);
-    } catch {}
-
-    const onAutoPaymentSuccess = async (sourceTag: string) => {
-      if (!isMounted || soundboxConfirmed) return;
-      setSoundboxConfirmed(true);
-      setAutoConfirmedMessage('Payment confirmed via Restaurant Soundbox! Forwarding order to kitchen...');
-      playNotificationChime('ready');
-
-      try {
-        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-          navigator.vibrate([100, 50, 100]);
-        }
-      } catch {}
-
-      logger.payment('UPI_SOUNDBOX_AUTO_CONFIRMED', `Direct UPI Order #${targetOrderId} auto-confirmed via ${sourceTag}`);
-
-      setTimeout(async () => {
-        if (!isMounted) return;
-        setUpiModalVisible(false);
-        onClose();
-        if (typeof onClearCart === 'function') {
-          await onClearCart();
-        }
-        if (typeof onOrderConfirmed === 'function') {
-          onOrderConfirmed(targetOrderId);
-        }
-      }, 1500);
-    };
-
-    // 1. SignalR OnPaymentVerified listener
-    const unsubPayment = onPaymentVerified((data: any) => {
-      const ordId = data?.orderId || data?.OrderId || data?.id;
-      if (String(ordId) === String(targetOrderId)) {
-        onAutoPaymentSuccess('SignalR:OnPaymentVerified');
-      }
-    });
-
-    // 2. SignalR OnOrderStatusChanged listener
-    const unsubStatus = onOrderStatusChanged((data: any) => {
-      const ordId = data?.orderId || data?.OrderId || data?.id;
-      const st = String(data?.orderStatus || data?.status || '').toUpperCase();
-      const paySt = String(data?.paymentStatus || '').toUpperCase();
-      if (String(ordId) === String(targetOrderId) && (st === 'CONFIRMED' || paySt === 'PAID')) {
-        onAutoPaymentSuccess('SignalR:OnOrderStatusChanged');
-      }
-    });
-
-    // 3. Fallback Polling every 2 seconds
-    const intervalId = setInterval(async () => {
-      if (!isMounted || soundboxConfirmed) return;
-      try {
-        const fetchOrderFn = api.trackOrder || api.getOrder;
-        const tracked = await fetchOrderFn(targetOrderId);
-        if (tracked) {
-          const isPaid = String(tracked.paymentStatus || '').toUpperCase() === 'PAID' || Boolean(tracked.settledDateUtc) || tracked.isSettled === true;
-          const isConfirmed = String(tracked.orderStatus || '').toUpperCase() === 'CONFIRMED';
-          if (isPaid || isConfirmed) {
-            onAutoPaymentSuccess('Polling:TrackOrder');
-          }
-        }
-      } catch {}
-    }, 2000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-      if (typeof unsubPayment === 'function') unsubPayment();
-      if (typeof unsubStatus === 'function') unsubStatus();
-    };
-  }, [upiModalVisible, pendingUpiOrder?.orderId, soundboxConfirmed, onClose, onClearCart, onOrderConfirmed]);
-
-  // Smart fail-safe timer: if soundbox hasn't spoken after 25s, auto-surface manual & cashier options
-  useEffect(() => {
-    if (!upiModalVisible || soundboxConfirmed) {
-      setWaitingElapsedSeconds(0);
-      return;
-    }
-    const timer = setInterval(() => {
-      setWaitingElapsedSeconds((prev) => {
-        if (prev + 1 >= 25) {
-          setShowManualUtrFallback(true);
-        }
-        return prev + 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [upiModalVisible, soundboxConfirmed]);
 
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [processingPayment, setProcessingPayment] = useState<boolean>(false);
@@ -1023,6 +797,7 @@ export default function CartModal({
   const [deliveryLng, setDeliveryLng] = useState<number | null>(() => api.getLastCustomerLocation()?.lng ?? null);
   const [gpsDetecting, setGpsDetecting] = useState<boolean>(false);
   const [gpsError, setGpsError] = useState<string>('');
+  const [showDeliveryMap, setShowDeliveryMap] = useState<boolean>(true);
   const [serviceability, setServiceability] = useState<any>(null);
   const [checkingServiceability, setCheckingServiceability] = useState<boolean>(false);
   const [savingAddress, setSavingAddress] = useState<boolean>(false);
@@ -1091,9 +866,50 @@ export default function CartModal({
     if (typeof addr.latitude === 'number' && typeof addr.longitude === 'number') {
       setDeliveryLat(addr.latitude);
       setDeliveryLng(addr.longitude);
+      setShowDeliveryMap(true);
     }
     setGpsError('');
     setErrorMsg('');
+  };
+
+  const applyReverseGeocodedAddressWeb = async (lat: number, lng: number) => {
+    try {
+      const resp = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`,
+        { headers: { Accept: 'application/json' } }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        const addr = data?.address || {};
+        const city = addr.city || addr.town || addr.village || addr.state_district || '';
+        const postcode = addr.postcode || '';
+        const formatted = data?.display_name || '';
+        if (city) setDeliveryCity(city);
+        if (postcode) setDeliveryPincode(postcode);
+        if (formatted) {
+          setDeliveryAddressText((prev) =>
+            !prev.trim() || prev.startsWith('Pinned Location') ? formatted : prev
+          );
+          api.saveLastCustomerLocation({ lat, lng, label: city || 'Pinned GPS Location', city });
+          return;
+        }
+      }
+    } catch {}
+    setDeliveryAddressText((prev) =>
+      !prev.trim() || prev.startsWith('Pinned Location')
+        ? `Pinned Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`
+        : prev
+    );
+  };
+
+  const handleMapLocationChange = (lat: number, lng: number) => {
+    setSelectedAddressId('gps');
+    setDeliveryLat(lat);
+    setDeliveryLng(lng);
+    setGpsError('');
+    setErrorMsg('');
+    api.saveLastCustomerLocation({ lat, lng, label: 'Pinned Map Location' });
+    applyReverseGeocodedAddressWeb(lat, lng);
   };
 
   const handleDetectGpsLocation = () => {
@@ -1103,6 +919,7 @@ export default function CartModal({
     }
     setGpsDetecting(true);
     setGpsError('');
+    setShowDeliveryMap(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const lat = Number(pos.coords.latitude.toFixed(6));
@@ -1111,9 +928,7 @@ export default function CartModal({
         setDeliveryLat(lat);
         setDeliveryLng(lng);
         api.saveLastCustomerLocation({ lat, lng, label: 'Pinned GPS Location' });
-        if (!deliveryAddressText.trim()) {
-          setDeliveryAddressText(`Pinned Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
-        }
+        applyReverseGeocodedAddressWeb(lat, lng);
         setGpsDetecting(false);
       },
       (err) => {
@@ -1202,8 +1017,12 @@ export default function CartModal({
   const deliveryAllowsCod = false;
 
   useEffect(() => {
-    if (isDeliveryOrder && paymentMethod !== activeOnlineGateway) {
-      setPaymentMethod(activeOnlineGateway);
+    if (isDeliveryOrder) {
+      if (paymentMethod !== activeOnlineGateway) {
+        setPaymentMethod(activeOnlineGateway);
+      }
+    } else if (paymentMethod !== 'payatcounter') {
+      setPaymentMethod('payatcounter');
     }
   }, [isDeliveryOrder, paymentMethod, activeOnlineGateway]);
 
@@ -1325,50 +1144,6 @@ export default function CartModal({
       );
     } finally {
       setClearingCart(false);
-    }
-  };
-
-  const handleConfirmUpiPayment = async () => {
-    if (!pendingUpiOrder) return;
-    const utrVal = enteredUtr.trim();
-
-    if (!utrVal || utrVal.length !== 12) {
-      setUtrError('Please enter the 12-digit UPI Reference / UTR number from your payment receipt');
-      return;
-    }
-    setUtrError('');
-    setConfirmingDirectUpi(true);
-
-    try {
-      const orderId = pendingUpiOrder.orderId;
-      await api.confirmDirectUpiOrder(
-        orderId,
-        utrVal,
-        'Paid'
-      );
-
-      logger.payment('UPI_DIRECT_CONFIRMED', `Customer confirmed direct UPI payment for Order #${orderId}: UTR=${utrVal}`);
-
-      setConfirmingDirectUpi(false);
-      setUpiModalVisible(false);
-      onClose();
-      if (typeof onClearCart === 'function') {
-        await onClearCart();
-      }
-      if (typeof onOrderConfirmed === 'function') {
-        onOrderConfirmed(orderId);
-      }
-    } catch (e: any) {
-      console.warn('Confirm UPI error:', e);
-      setConfirmingDirectUpi(false);
-      setUpiModalVisible(false);
-      onClose();
-      if (typeof onClearCart === 'function') {
-        await onClearCart();
-      }
-      if (typeof onOrderConfirmed === 'function') {
-        onOrderConfirmed(pendingUpiOrder?.orderId);
-      }
     }
   };
 
@@ -1601,130 +1376,7 @@ export default function CartModal({
       totalAmount: grandTotal,
     };
 
-    // 1. Direct NPCI UPI Intent Flow
-    if (paymentMethod === 'direct_upi') {
-      if (!availableUpiId) {
-        setErrorMsg('Restaurant owner UPI ID is not configured. Please choose Pay at Counter.');
-        setPaymentMethod('payatcounter');
-        return;
-      }
-      setSubmittingOrder(true);
-      setProcessingPayment(false);
-      try {
-        const directUpiOrderPayload = {
-          ...orderPayload,
-          tableId: isThisTableOrder ? effectiveTableId : null,
-          tableNumber: isThisTableOrder ? effectiveTableName : null,
-          encryptedTableId: isThisTableOrder ? (activeTable?.encryptedTableId || effectiveTableToken || null) : null,
-          tableSessionToken: isThisTableOrder ? effectiveTableToken : null,
-          paymentMode: 'DIRECT_UPI',
-          paymentType: 'DIRECT_UPI',
-          paymentMethod: 'DIRECT_UPI',
-          paymentStatus: 'Pending',
-          orderStatus: 'Placed',
-          isOnline: true,
-          isSettled: false,
-          requiresCashierConfirmation: true,
-          source: isThisTableOrder ? 'QR_DINEIN' : 'STORE_WEB',
-          deliveryType: isThisTableOrder ? 'Dine-In' : (isDeliveryOrder ? 'Delivery' : (orderTypeId === 1 ? 'Dine-In' : 'Takeaway / Counter')),
-          orderTypeId: isThisTableOrder ? 1 : orderTypeId,
-        };
-
-        logger.checkout('CHECKOUT_DIRECT_UPI_INITIATED', `Customer initiated Direct NPCI UPI checkout for ₹${grandTotal}`, {
-          tableId: isThisTableOrder ? effectiveTableId : null,
-          tableName: isThisTableOrder ? effectiveTableName : null,
-          grandTotal,
-          itemsCount: orderItems.length,
-          paymentMode: 'DIRECT_UPI',
-        });
-
-        let placedRes: any = null;
-        if (typeof onPlaceOrder === 'function') {
-          placedRes = await onPlaceOrder(directUpiOrderPayload);
-        } else {
-          placedRes = await api.placeOrder(directUpiOrderPayload);
-        }
-
-        const placedOrderId = placedRes?.id || placedRes?.orderId || Date.now().toString().slice(-6);
-
-        // Join real-time SignalR order group
-        try {
-          joinOrderGroup(placedOrderId);
-        } catch {}
-
-        // Construct clean NPCI-compliant UPI URI
-        // NOTE: NPCI guidelines and TPAPs (Google Pay, PhonePe, Paytm) actively flag or block
-        // raw intents containing &url= or &tr= as "UPI Risk Policy" / "Security Issue" unless signed.
-        // CRITICAL: The '@' in 'pa' MUST NOT be percent-encoded (%40) as UPI apps parse 'pa=user@bank' directly!
-        const cleanPayeeUpi = (availableUpiId || '').trim();
-        const cleanPayeeName = (availablePayeeName || 'Restaurant').trim().replace(/[^a-zA-Z0-9 ]/g, '');
-        const formattedAmount = Number(grandTotal).toFixed(2);
-        const cleanTxnNote = `Order${placedOrderId}`;
-
-        // 1. Static Standee URI (Identical to physical counter Soundbox/Standee QR - 100% bank success rate)
-        const staticStandeeUri = `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&cu=INR`;
-
-        // 2. Dynamic Auto-Amount URI
-        const dynamicAmountUri = `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
-
-   // Standard Universal Clean NPCI URI (defaults to staticStandeeUri for merchant terminal VPAs)
-        const npciUpiUri = staticStandeeUri;
-
-        // Direct app launcher URIs using standard UPI protocol
-        const gpayUri = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
-          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end`
-          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
-
-        const phonepeUri = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
-          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR#Intent;scheme=upi;package=com.phonepe.app;end`
-          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
-
-        const paytmUri = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
-          ? `intent://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR#Intent;scheme=upi;package=net.one97.paytm;end`
-          : `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
-
-        const upiOrderData = {
-          orderId: placedOrderId,
-          amount: grandTotal,
-          formattedAmount,
-          payeeUpi: cleanPayeeUpi,
-          payeeName: cleanPayeeName,
-          contactNumber: availableContactNumber,
-          npciUpiUri,
-          staticStandeeUri,
-          dynamicAmountUri,
-          gpayUri,
-          phonepeUri,
-          paytmUri,
-          orderPayload: directUpiOrderPayload,
-        };
-
-        setPendingUpiOrder(upiOrderData);
-        setSubmittingOrder(false);
-        setUpiModalVisible(true);
-
-        logger.payment('UPI_DIRECT_INITIATED', `NPCI UPI intent generated for Order #${placedOrderId}: ₹${grandTotal}`, {
-          placedOrderId,
-          payeeUpi: cleanPayeeUpi,
-          npciUpiUri,
-        });
-
-        // Do not force automatic background redirect (window.location.href) as mobile browsers
-        // and Android security block unprompted external protocol redirects.
-        return;
-      } catch (placeErr: any) {
-        console.error('Direct UPI place order error:', placeErr);
-        logger.error('CHECKOUT', 'CHECKOUT_DIRECT_UPI_FAILED', placeErr, {
-          tableId: isThisTableOrder ? effectiveTableId : null,
-          amount: grandTotal,
-        });
-        setErrorMsg(placeErr?.response?.data?.message || placeErr?.message || 'Unable to place order. Please alert restaurant staff.');
-        setSubmittingOrder(false);
-        return;
-      }
-    }
-
-    // 2. Direct Counter / Cash on Delivery Order Flow
+    // Direct Counter / Pay at Counter Order Flow
     const isDirectPlaceOrder = paymentMethod !== 'cashfree' && paymentMethod !== 'razorpay';
 
     if (isDirectPlaceOrder) {
@@ -1786,9 +1438,10 @@ export default function CartModal({
       }
     }
 
-    // Double-guard: Dynamic QR and Table Orders MUST NEVER proceed to online gateway
-    if (isThisTableOrder || isDynamicQr) {
-      setErrorMsg('Dynamic QR and Table orders must be placed directly at counter.');
+    // Double-guard: Online Payment is enabled ONLY for Home Delivery orders
+    if (!isDeliveryOrder || isThisTableOrder || isDynamicQr) {
+      setErrorMsg('Online payment is available only for Home Delivery orders. Please pay at counter.');
+      setPaymentMethod('payatcounter');
       setProcessingPayment(false);
       return;
     }
@@ -2206,7 +1859,7 @@ export default function CartModal({
     }
   };
 
-  if (!visible && !upiModalVisible) return null;
+  if (!visible) return null;
 
   const isLoadingState =
     loading || submittingOrder || processingPayment;
@@ -2214,9 +1867,8 @@ export default function CartModal({
   const selectedItemsCount = activeCartItems.length;
 
   return (
-    <>
       <Modal
-        visible={visible && !upiModalVisible}
+        visible={visible}
         transparent
         animationType="slide"
         onRequestClose={onClose}
@@ -3091,6 +2743,32 @@ export default function CartModal({
                         </View>
                       )}
 
+                      {/* Embedded Live Map Preview for Delivery / Update GPS */}
+                      {deliveryLat !== null && deliveryLng !== null && (
+                        <View style={{ marginBottom: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#1e3a8a' }}>
+                              Delivery Pin Map
+                            </Text>
+                            <TouchableOpacity onPress={() => setShowDeliveryMap((prev) => !prev)}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>
+                                {showDeliveryMap ? 'Hide Map' : 'Show Map'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          {showDeliveryMap && (
+                            <DeliveryLocationMap
+                              latitude={deliveryLat}
+                              longitude={deliveryLng}
+                              restaurantLat={catalog?.latitude ?? null}
+                              restaurantLng={catalog?.longitude ?? null}
+                              restaurantName={catalog?.restaurantName || 'Restaurant'}
+                              onChangeLocation={handleMapLocationChange}
+                            />
+                          )}
+                        </View>
+                      )}
+
                       {/* Address Label Selector */}
                       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                         {(['Home', 'Work', 'Other'] as const).map((lbl) => (
@@ -3342,8 +3020,8 @@ export default function CartModal({
                     Payment Method
                   </Text>
 
-                  {/* Online Payment (Razorpay / Cashfree Gateway) for Home Delivery or Online Storefront */}
-                  {!isTableOrder && !isDynamicQr && (isOnlinePaymentVisible || isDeliveryOrder) && (
+                  {/* Online Payment (Razorpay / Cashfree Gateway) enabled ONLY for Home Delivery */}
+                  {!isTableOrder && !isDynamicQr && isDeliveryOrder && (
                     <TouchableOpacity
                       activeOpacity={0.8}
                       onPress={() => setPaymentMethod(activeOnlineGateway)}
@@ -3376,54 +3054,6 @@ export default function CartModal({
                       </View>
                     </TouchableOpacity>
                   )}
-
-                  {/* Direct NPCI UPI Intent Option (Disabled for Home Delivery to enforce verified prepaid gateway) */}
-                  {!isDeliveryOrder && isDirectUpiAvailable ? (
-                    <TouchableOpacity
-                      activeOpacity={0.8}
-                      onPress={() => setPaymentMethod('direct_upi')}
-                      style={styles.paymentMethodRow}
-                    >
-                      <View
-                        style={[
-                          styles.paymentCard,
-                          paymentMethod === 'direct_upi' && styles.paymentCardActive,
-                          paymentMethod === 'direct_upi' && { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
-                          { flex: 1 }
-                        ]}
-                      >
-                        <Smartphone size={22} color={paymentMethod === 'direct_upi' ? '#15803d' : '#64748b'} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.paymentCardTitle, paymentMethod === 'direct_upi' && { color: '#166534' }]}>
-                            Direct UPI Payment
-                          </Text>
-                          <Text style={[styles.paymentCardSub, paymentMethod === 'direct_upi' && { color: '#15803d' }]}>
-                            Google Pay • PhonePe • Paytm • BHIM
-                          </Text>
-                          <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 4 }}>
-                            ⚡ Direct to {availablePayeeName} ({availableUpiId})
-                          </Text>
-                        </View>
-                        {paymentMethod === 'direct_upi' ? (
-                          <CheckCircle2 size={18} color="#15803d" />
-                        ) : (
-                          <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#cbd5e1' }} />
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  ) : !isDeliveryOrder ? (
-                    <View style={[styles.paymentCard, { opacity: 0.65, borderColor: '#e2e8f0', backgroundColor: '#f8fafc', marginBottom: 6 }]}>
-                      <Smartphone size={22} color="#94a3b8" />
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.paymentCardTitle, { color: '#64748b' }]}>
-                          Direct UPI Payment
-                        </Text>
-                        <Text style={[styles.paymentCardSub, { color: '#94a3b8' }]}>
-                          Direct UPI not configured by restaurant • Please pay at counter
-                        </Text>
-                      </View>
-                    </View>
-                  ) : null}
 
                   {/* Pay at Counter / Cash on Delivery option */}
                   {!(isDeliveryOrder && deliveryRequiresOnline && !deliveryAllowsCod) ? (
@@ -3821,8 +3451,6 @@ export default function CartModal({
                         ? 'SESSION EXPIRED • RE-SCAN TABLE QR'
                         : ((paymentMethod === 'razorpay' || paymentMethod === 'cashfree')
                             ? `PAY & PLACE ORDER • ₹${money(grandTotal)}`
-                            : paymentMethod === 'direct_upi'
-                            ? `PAY VIA UPI • ₹${money(grandTotal)}`
                             : `PLACE ORDER • ₹${money(grandTotal)}`)}
                     </Text>
 
@@ -3838,372 +3466,6 @@ export default function CartModal({
         </View>
       </View>
     </Modal>
-
-    {/* Direct NPCI UPI Intent & UTR Confirmation Modal */}
-    <Modal
-      visible={upiModalVisible}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setUpiModalVisible(false)}
-    >
-      <View style={styles.upiModalOverlay}>
-        <View style={styles.upiModalCard}>
-          {/* Header */}
-          <View style={styles.upiModalHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Smartphone size={20} color="#15803d" />
-              <Text style={styles.upiModalTitle}>Complete UPI Payment</Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => setUpiModalVisible(false)}
-              style={styles.closeBtn}
-            >
-              <X size={18} color="#64748b" />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
-            {/* Amount & Order Card */}
-            <View style={styles.upiAmountCard}>
-              <Text style={styles.upiAmountLabel}>Total Amount to Pay</Text>
-              <Text style={styles.upiAmountValue}>₹{pendingUpiOrder ? money(pendingUpiOrder.amount) : '0'}</Text>
-              <View style={styles.upiOrderBadge}>
-                <Text style={styles.upiOrderBadgeText}>Order #{pendingUpiOrder?.orderId || ''}</Text>
-              </View>
-            </View>
-
-            {/* Auto-Detection from Restaurant Soundbox Banner */}
-            <View style={{
-              backgroundColor: soundboxConfirmed ? '#f0fdf4' : (waitingElapsedSeconds >= 25 ? '#fffbeb' : '#eff6ff'),
-              borderWidth: 1.5,
-              borderColor: soundboxConfirmed ? '#22c55e' : (waitingElapsedSeconds >= 25 ? '#f59e0b' : '#3b82f6'),
-              borderRadius: 12,
-              padding: 12,
-              marginVertical: 6,
-              alignItems: 'center',
-            }}>
-              {soundboxConfirmed ? (
-                <View style={{ alignItems: 'center', gap: 6 }}>
-                  <CheckCircle2 size={32} color="#16a34a" />
-                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#166534', textAlign: 'center' }}>
-                    Payment Detected &amp; Confirmed!
-                  </Text>
-                  <Text style={{ fontSize: 12, color: '#15803d', textAlign: 'center' }}>
-                    {autoConfirmedMessage || 'Payment received via Restaurant Soundbox. Forwarding to kitchen...'}
-                  </Text>
-                </View>
-              ) : waitingElapsedSeconds >= 25 ? (
-                <View style={{ width: '100%', alignItems: 'center', gap: 6 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Clock size={16} color="#d97706" />
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#b45309', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      ⏳ Soundbox Delayed or Silent?
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 11, color: '#92400e', textAlign: 'center', lineHeight: 15 }}>
-                    If you already paid, <Text style={{ fontWeight: '700' }}>show your payment receipt to staff</Text> (Order #{pendingUpiOrder?.orderId}) OR paste the 12-digit UTR below to confirm instantly!
-                  </Text>
-                  <View style={{ backgroundColor: '#fef3c7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, marginTop: 2, borderWidth: 1, borderColor: '#fde68a' }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#b45309' }}>
-                      Cashier can confirm with 1 tap • Or submit UTR below
-                    </Text>
-                  </View>
-                </View>
-              ) : (
-                <View style={{ width: '100%', alignItems: 'center', gap: 4 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Radio size={16} color="#2563eb" />
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      ⚡ Auto-Detecting via Soundbox
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 11, color: '#1e40af', textAlign: 'center', lineHeight: 15 }}>
-                    Pay using QR or UPI ID. Once the restaurant Soundbox speaks, your order will <Text style={{ fontWeight: '700' }}>auto-confirm within 2 seconds</Text>!
-                  </Text>
-                  <View style={{ backgroundColor: '#dbeafe', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, marginTop: 2, borderWidth: 1, borderColor: '#bfdbfe' }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#1d4ed8' }}>
-                      ✨ Zero Taps Required • No UTR Entry Needed
-                    </Text>
-                  </View>
-                </View>
-              )}
-            </View>
-
-            {/* Google Pay / PhonePe Security Policy Advisory */}
-            <View style={{ backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fef3c7', borderRadius: 10, padding: 10, marginVertical: 6, flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-              <AlertTriangle size={16} color="#d97706" style={{ marginTop: 2 }} />
-              <Text style={{ flex: 1, fontSize: 11, color: '#92400e', lineHeight: 15 }}>
-                <Text style={{ fontWeight: '700' }}>App showing "Receiver is not accepting payments" or "Declined"?</Text> Merchant terminal accounts (such as YES PAY Biz soundboxes) require QR scanning. Please scan the QR code above — it works with 100% bank success!
-              </Text>
-            </View>
-
-            {/* Payment Method Tabs */}
-            <View style={{ flexDirection: 'row', backgroundColor: '#f1f5f9', borderRadius: 10, padding: 4, marginVertical: 8, gap: 4 }}>
-              <TouchableOpacity
-                style={[{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 }, upiPaymentTab === 'qr' && { backgroundColor: '#ffffff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 }]}
-                onPress={() => setUpiPaymentTab('qr')}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <QrCode size={15} color={upiPaymentTab === 'qr' ? '#15803d' : '#64748b'} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: upiPaymentTab === 'qr' ? '#15803d' : '#64748b' }}>
-                    Scan QR Code
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 }, upiPaymentTab === 'upi_id' && { backgroundColor: '#ffffff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 }]}
-                onPress={() => setUpiPaymentTab('upi_id')}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Copy size={15} color={upiPaymentTab === 'upi_id' ? '#15803d' : '#64748b'} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: upiPaymentTab === 'upi_id' ? '#15803d' : '#64748b' }}>
-                    Copy UPI ID & Pay
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {/* Tab 1: Scan QR Code */}
-            {upiPaymentTab === 'qr' && pendingUpiOrder?.npciUpiUri && (
-              <View style={styles.upiQrBox}>
-                <View style={{ backgroundColor: '#f0fdf4', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: '#bbf7d0', marginBottom: 10, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 11, color: '#166534', fontWeight: '600' }}>Amount to enter upon scanning:</Text>
-                  <Text style={{ fontSize: 20, fontWeight: '800', color: '#15803d', marginTop: 2 }}>₹{pendingUpiOrder?.formattedAmount || money(pendingUpiOrder?.amount)}</Text>
-                </View>
-
-                <QRCodeSVG
-                  value={pendingUpiOrder.npciUpiUri}
-                  size={175}
-                  level="M"
-                />
-                <Text style={styles.upiQrHint}>Scan with Google Pay, PhonePe, Paytm, Cred, or BHIM</Text>
-                <View style={{ marginTop: 8, backgroundColor: '#f0fdf4', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#bbf7d0' }}>
-                  <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', textAlign: 'center' }}>
-                    ✓ 100% Reliable Standee QR • Zero Bank Blocks
-                  </Text>
-                </View>
-                <Text style={{ fontSize: 11, color: '#64748b', marginTop: 8, textAlign: 'center', lineHeight: 15 }}>
-                  💡 <Text style={{ fontWeight: '600' }}>At the restaurant counter?</Text> You can scan this screen QR OR scan your physical counter Soundbox QR directly!
-                </Text>
-              </View>
-            )}
-
-            {/* Tab 2: Copy UPI ID & Pay */}
-            {upiPaymentTab === 'upi_id' && (
-              <View style={{ backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 12, marginVertical: 6, gap: 10 }}>
-                {/* Payee Name & UPI ID */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' }}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={{ fontSize: 10, color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>
-                      {pendingUpiOrder?.payeeName || 'Restaurant Account'}
-                    </Text>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#0f172a', marginTop: 2 }} numberOfLines={1}>
-                      {pendingUpiOrder?.payeeUpi}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      if (pendingUpiOrder?.payeeUpi && typeof navigator !== 'undefined' && navigator.clipboard) {
-                        navigator.clipboard.writeText(pendingUpiOrder.payeeUpi);
-                        setCopiedUpiId(true);
-                        setTimeout(() => setCopiedUpiId(false), 2000);
-                      }
-                    }}
-                    style={[styles.upiCopyBtn, copiedUpiId && { backgroundColor: '#dcfce7', borderColor: '#86efac' }]}
-                  >
-                    {copiedUpiId ? <Check size={14} color="#15803d" /> : <Copy size={14} color="#0f172a" />}
-                    <Text style={[styles.upiCopyBtnText, copiedUpiId && { color: '#15803d' }]}>
-                      {copiedUpiId ? 'Copied!' : 'Copy'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Amount */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 10, color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Amount to Transfer</Text>
-                    <Text style={{ fontSize: 15, fontWeight: '800', color: '#15803d', marginTop: 2 }}>
-                      ₹{pendingUpiOrder?.formattedAmount || money(pendingUpiOrder?.amount)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      const amt = pendingUpiOrder?.formattedAmount || String(pendingUpiOrder?.amount);
-                      if (amt && typeof navigator !== 'undefined' && navigator.clipboard) {
-                        navigator.clipboard.writeText(amt);
-                        setCopiedAmount(true);
-                        setTimeout(() => setCopiedAmount(false), 2000);
-                      }
-                    }}
-                    style={[styles.upiCopyBtn, copiedAmount && { backgroundColor: '#dcfce7', borderColor: '#86efac' }]}
-                  >
-                    {copiedAmount ? <Check size={14} color="#15803d" /> : <Copy size={14} color="#0f172a" />}
-                    <Text style={[styles.upiCopyBtnText, copiedAmount && { color: '#15803d' }]}>
-                      {copiedAmount ? 'Copied!' : 'Copy'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Mobile Number (if available) */}
-                {pendingUpiOrder?.contactNumber && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 10, color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Or Pay to Phone Number</Text>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#0f172a', marginTop: 2 }}>
-                        {pendingUpiOrder.contactNumber}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => {
-                        if (typeof navigator !== 'undefined' && navigator.clipboard) {
-                          navigator.clipboard.writeText(pendingUpiOrder.contactNumber);
-                          setCopiedPhone(true);
-                          setTimeout(() => setCopiedPhone(false), 2000);
-                        }
-                      }}
-                      style={[styles.upiCopyBtn, copiedPhone && { backgroundColor: '#dcfce7', borderColor: '#86efac' }]}
-                    >
-                      {copiedPhone ? <Check size={14} color="#15803d" /> : <Copy size={14} color="#0f172a" />}
-                      <Text style={[styles.upiCopyBtnText, copiedPhone && { color: '#15803d' }]}>
-                        {copiedPhone ? 'Copied!' : 'Copy'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* Easy Steps */}
-                <View style={{ backgroundColor: '#f0fdf4', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#bbf7d0', gap: 6 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#166534' }}>How to pay in your UPI app:</Text>
-                  <Text style={{ fontSize: 11, color: '#15803d', lineHeight: 16 }}>
-                    1. Tap <Text style={{ fontWeight: '700' }}>Copy</Text> next to UPI ID above{'\n'}
-                    2. Open your UPI app (Google Pay / PhonePe / Paytm){'\n'}
-                    3. Tap <Text style={{ fontWeight: '700' }}>"Pay UPI ID"</Text> or <Text style={{ fontWeight: '700' }}>"To UPI ID"</Text> and paste{'\n'}
-                    4. Enter ₹{pendingUpiOrder?.formattedAmount || money(pendingUpiOrder?.amount)} and pay{'\n'}
-                    5. Once paid, the Soundbox will speak and your order will auto-confirm!
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Optional Manual UTR Fallback Toggle */}
-            <TouchableOpacity
-              onPress={() => setShowManualUtrFallback(!showManualUtrFallback)}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                paddingVertical: 10,
-                marginTop: 8,
-                backgroundColor: '#f8fafc',
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: '#e2e8f0',
-              }}
-            >
-              <HelpCircle size={14} color="#64748b" />
-              <Text style={{ fontSize: 11, color: '#475569', fontWeight: '600' }}>
-                {showManualUtrFallback ? '▲ Hide manual UTR entry' : '▼ Soundbox delayed? Enter 12-digit UTR manually (Optional)'}
-              </Text>
-            </TouchableOpacity>
-
-            {showManualUtrFallback && (
-              <View style={styles.upiUtrCard}>
-                <Text style={styles.upiUtrTitle}>Enter 12-digit UPI Ref / UTR to Confirm:</Text>
-                <View style={styles.upiUtrInputRow}>
-                  <TextInput
-                    style={[styles.upiUtrInput as any, Boolean(utrError) && { borderColor: '#ef4444' }]}
-                    placeholder="e.g. 432589012345"
-                    placeholderTextColor="#94a3b8"
-                    keyboardType="numeric"
-                    maxLength={12}
-                    value={enteredUtr}
-                    onChangeText={(val) => {
-                      const clean = val.replace(/\D/g, '');
-                      setEnteredUtr(clean);
-                      if (utrError) setUtrError('');
-                    }}
-                  />
-                  <TouchableOpacity
-                    style={styles.upiPasteBtn}
-                    onPress={async () => {
-                      if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
-                        try {
-                          const txt = await navigator.clipboard.readText();
-                          const match = txt.trim().match(/\b\d{12}\b/);
-                          if (match && match[0]) {
-                            setEnteredUtr(match[0]);
-                            if (utrError) setUtrError('');
-                          } else if (txt.trim().length <= 12) {
-                            setEnteredUtr(txt.replace(/\D/g, ''));
-                          }
-                        } catch {}
-                      }
-                    }}
-                  >
-                    <Text style={styles.upiPasteBtnText}>Paste</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {utrError ? <Text style={styles.upiUtrError}>{utrError}</Text> : null}
-
-                <TouchableOpacity
-                  onPress={() => setShowUtrHelp(!showUtrHelp)}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}
-                >
-                  <HelpCircle size={13} color="#64748b" />
-                  <Text style={{ fontSize: 11, color: '#64748b', textDecorationLine: 'underline' }}>
-                    {showUtrHelp ? 'Hide guide' : 'Where do I find my 12-digit UTR?'}
-                  </Text>
-                </TouchableOpacity>
-
-                {showUtrHelp && (
-                  <View style={styles.upiUtrHelpBox}>
-                    <Text style={styles.upiUtrHelpItem}>• <Text style={{ fontWeight: '700' }}>Google Pay:</Text> Tap transaction ➔ Scroll down ➔ "UPI transaction ID"</Text>
-                    <Text style={styles.upiUtrHelpItem}>• <Text style={{ fontWeight: '700' }}>PhonePe:</Text> Tap History ➔ View details ➔ "UTR"</Text>
-                    <Text style={styles.upiUtrHelpItem}>• <Text style={{ fontWeight: '700' }}>Paytm:</Text> Passbook ➔ Tap payment ➔ "UPI Ref No"</Text>
-                  </View>
-                )}
-
-                <TouchableOpacity
-                  style={[
-                    styles.upiSubmitUtrBtn,
-                    (confirmingDirectUpi || enteredUtr.trim().length !== 12) && { opacity: 0.5, backgroundColor: '#94a3b8' },
-                    { marginTop: 10 }
-                  ]}
-                  onPress={() => handleConfirmUpiPayment()}
-                  disabled={confirmingDirectUpi || enteredUtr.trim().length !== 12}
-                  activeOpacity={0.85}
-                >
-                  {confirmingDirectUpi ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.upiSubmitUtrBtnText}>
-                      {enteredUtr.trim().length === 12 ? '✅ Submit 12-Digit UTR to Confirm' : 'Enter 12-Digit UTR to Confirm'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-          </ScrollView>
-
-          {/* Modal Actions */}
-          <View style={styles.upiModalFooter}>
-            <TouchableOpacity
-              style={styles.upiCancelBtn}
-              onPress={() => {
-                setUpiModalVisible(false);
-              }}
-              disabled={confirmingDirectUpi || soundboxConfirmed}
-            >
-              <Text style={styles.upiCancelBtnText}>Cancel / Change Payment Method</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  </>
   );
 }
 
