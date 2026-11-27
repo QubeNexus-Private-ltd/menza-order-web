@@ -1667,7 +1667,7 @@ export default function CartModal({
         // 2. Dynamic Auto-Amount URI
         const dynamicAmountUri = `upi://pay?pa=${cleanPayeeUpi}&pn=${encodeURIComponent(cleanPayeeName)}&am=${formattedAmount}&cu=INR`;
 
-Implement delivery         // Standard Universal Clean NPCI URI (defaults to staticStandeeUri for merchant terminal VPAs)
+   // Standard Universal Clean NPCI URI (defaults to staticStandeeUri for merchant terminal VPAs)
         const npciUpiUri = staticStandeeUri;
 
         // Direct app launcher URIs using standard UPI protocol
